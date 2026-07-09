@@ -746,6 +746,24 @@ function tencentMeetingAudioSyncEnabled() {
 app.use(cors());
 app.use(express.json({ limit: "12mb" }));
 
+// 加全局请求日志
+app.use((request, response, next) => {
+  const startedAt = Date.now();
+  console.log("进入全局请求日志: ", request.method, request.originalUrl || request.url);
+  response.on("finish", () => {
+    logger.info("http_request", {
+      method: request.method,
+      path: request.originalUrl || request.url,
+      status: response.statusCode,
+      durationMs: Date.now() - startedAt,
+      ip: request.ip,
+      userAgent: request.get("user-agent") || "",
+      contentLength: response.get("content-length") || "",
+    });
+  });
+  next();
+});
+
 app.get("/ping", (req, res) => res.json({ ping: `pong ${Date.now()}` }));
 
 function firstEnv(...keys) {
