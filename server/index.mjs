@@ -746,7 +746,7 @@ function tencentMeetingAudioSyncEnabled() {
 app.use(cors());
 app.use(express.json({ limit: "12mb" }));
 
-app.get("/ping", (req, res) => res.json({ ping: $`pong ${Date.now()}` }));
+app.get("/ping", (req, res) => res.json({ ping: `pong ${Date.now()}` }));
 
 function firstEnv(...keys) {
   for (const key of keys) {
