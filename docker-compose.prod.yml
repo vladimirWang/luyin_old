@@ -18,6 +18,7 @@ services:
         condition: service_healthy
     volumes:
       - app-logs:/app/logs
+      - app-storage:/app/server/storage
     restart: unless-stopped
     healthcheck:
       test: ["CMD-SHELL", "curl -f http://localhost:7000/api/health || exit 1"]
@@ -48,3 +49,4 @@ services:
 volumes:
   mysql-data:
   app-logs:
+  app-storage:

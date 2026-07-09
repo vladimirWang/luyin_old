@@ -1,28 +1,27 @@
-FROM node:22-alpine AS builder
+FROM node:22-bookworm
 
 WORKDIR /app
 
-COPY package*.json ./
+RUN sed -i \
+    -e 's|http://deb.debian.org/debian|https://mirrors.aliyun.com/debian|g' \
+    -e 's|http://deb.debian.org/debian-security|https://mirrors.aliyun.com/debian-security|g' \
+    -e 's|http://security.debian.org/debian-security|https://mirrors.aliyun.com/debian-security|g' \
+    /etc/apt/sources.list.d/debian.sources \
+  && apt-get update \
+  && apt-get install -y --no-install-recommends ffmpeg \
+  && rm -rf /var/lib/apt/lists/*
 
-RUN npm ci --only=production
+COPY package*.json ./
+RUN corepack enable && corepack prepare pnpm@9.15.9 --activate && pnpm install --prod
 
 COPY . .
 
-RUN npm run build
+RUN pnpm run build
 
-FROM node:22-alpine
-
-WORKDIR /app
-
-COPY --from=builder /app/package*.json ./
-COPY --from=builder /app/node_modules ./node_modules
-COPY --from=builder /app/dist ./dist
-COPY --from=builder /app/server ./server
-
-RUN mkdir -p /app/logs && chown -R node:node /app/logs
+RUN mkdir -p /app/logs /app/server/storage && chown -R node:node /app/logs /app/server/storage
 
 USER node
 
-EXPOSE 8787
+EXPOSE 7000
 
-CMD ["npm", "run", "start"]
+CMD ["pnpm", "run", "start:prod"]
