@@ -1,13 +1,13 @@
 services:
   app:
-    image: node:20-alpine
+    image: node:22-alpine
     working_dir: /app
     command: sh -c "npm install && npm run dev"
     ports:
       - "5173:5173"
-      - "8787:8787"
+      - "7000:7000"
     environment:
-      PORT: 8787
+      PORT: 7000
       HOST: 0.0.0.0
       HTTPS_PORT: 0
       MYSQL_HOST: mysql
