@@ -11,6 +11,7 @@ import { fileURLToPath } from "node:url";
 import multer from "multer";
 import PDFDocument from "pdfkit";
 import logger from "./utils/log.js";
+import { parseJsonObject, firstEnv, splitEnvList } from "./utils/common.mjs";
 import {
   answerRecordingsQuestion,
   answerRecordingQuestion,
@@ -766,21 +767,6 @@ app.use((request, response, next) => {
 
 app.get("/ping", (req, res) => res.json({ ping: `pong ${Date.now()}` }));
 
-function firstEnv(...keys) {
-  for (const key of keys) {
-    const value = String(process.env[key] || "").trim();
-    if (value) return value;
-  }
-  return "";
-}
-
-function splitEnvList(value = "") {
-  return String(value || "")
-    .split(/[,;\s]+/)
-    .map((item) => item.trim())
-    .filter(Boolean);
-}
-
 function decodedTencentMeetingAesKeyLength(encodingAesKey) {
   try {
     return Buffer.from(`${encodingAesKey}=`, "base64").length;
@@ -922,15 +908,6 @@ function tencentMeetingVerifiedPlaintext(request, encryptedData) {
   error.statusCode = 400;
   error.cause = decryptErrors[0] || "";
   throw error;
-}
-
-function parseJsonObject(text) {
-  try {
-    const parsed = JSON.parse(text);
-    return parsed && typeof parsed === "object" ? parsed : null;
-  } catch {
-    return null;
-  }
 }
 
 async function appendTencentMeetingWebhookEvent(entry) {
