@@ -24,4 +24,4 @@ USER node
 
 EXPOSE 7000
 
-CMD ["pnpm", "run", "start:prod"]
+CMD ["npm", "run", "start:prod"]
