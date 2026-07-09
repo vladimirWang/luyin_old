@@ -5,7 +5,7 @@ import path from "node:path";
 const isProduction = process.env.NODE_ENV === "prod";
 const logDir = path.resolve(process.cwd(), process.env.LOG_DIR || "logs");
 
-console.log(`--------------server -------------- isProd: ${isProduction}, logDir: ${logDir}, process.env.LOG_DIR: ${process.env.LOG_DIR}`)
+console.log(`--------------server -------------- node_env: ${process.env.NODE_ENV} isProd: ${isProduction}, logDir: ${logDir}, process.env.LOG_DIR: ${process.env.LOG_DIR}`)
 if (true) {
     fs.mkdirSync(logDir, { recursive: true });
 }
