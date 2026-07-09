@@ -73,7 +73,7 @@ async function loadEnvFile(filePath) {
 
 await loadEnvFile(path.join(projectRoot, ".env"));
 
-const port = Number(process.env.PORT || 8787);
+const port = Number(process.env.PORT);
 const host = process.env.HOST || "0.0.0.0";
 const httpsPort = Number(process.env.HTTPS_PORT || 0);
 

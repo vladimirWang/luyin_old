@@ -11,8 +11,8 @@ RUN sed -i \
   && apt-get install -y --no-install-recommends ffmpeg \
   && rm -rf /var/lib/apt/lists/*
 
-COPY package*.json ./
-RUN corepack enable && corepack prepare pnpm@9.15.9 --activate && pnpm install --prod
+COPY package.json pnpm-lock.yaml .npmrc ./
+RUN corepack enable && corepack prepare pnpm@9.15.9 --activate && pnpm install --prod --frozen-lockfile
 
 COPY . .
 
