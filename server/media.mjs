@@ -2,7 +2,13 @@ import { spawn } from "node:child_process";
 import { createReadStream, createWriteStream, existsSync } from "node:fs";
 import { mkdir, readFile, rm, stat, writeFile } from "node:fs/promises";
 import path from "node:path";
-import ffmpegStaticPath from "ffmpeg-static";
+
+let ffmpegStaticPath;
+try {
+  ffmpegStaticPath = await import("ffmpeg-static");
+} catch {
+  ffmpegStaticPath = null;
+}
 
 function env(name, fallback = "") {
   return String(process.env[name] || fallback).trim();
@@ -17,7 +23,7 @@ function ffmpegCommand() {
   const configured = env("FFMPEG_PATH", env("FFMPEG_BIN", ""));
   if (configured) return configured;
   if (process.platform !== "win32" && existsSync("/usr/bin/ffmpeg")) return "/usr/bin/ffmpeg";
-  return ffmpegStaticPath || "ffmpeg";
+  return ffmpegStaticPath?.default || "ffmpeg";
 }
 
 function ffprobeCommand() {

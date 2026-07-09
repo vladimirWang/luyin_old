@@ -3,7 +3,13 @@ import { spawn } from "node:child_process";
 import { mkdtemp, readFile, rm, stat } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
-import ffmpegStaticPath from "ffmpeg-static";
+
+let ffmpegStaticPath;
+try {
+  ffmpegStaticPath = await import("ffmpeg-static");
+} catch {
+  ffmpegStaticPath = null;
+}
 
 function env(name, fallback = "") {
   return String(process.env[name] || fallback).trim();
