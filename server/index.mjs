@@ -10,6 +10,7 @@ import { pipeline } from "node:stream/promises";
 import { fileURLToPath } from "node:url";
 import multer from "multer";
 import PDFDocument from "pdfkit";
+import logger from "./utils/log.js";
 import {
   answerRecordingsQuestion,
   answerRecordingQuestion,
@@ -77,6 +78,14 @@ const host = process.env.HOST || "0.0.0.0";
 const httpsPort = Number(process.env.HTTPS_PORT || 0);
 
 const app = express();
+
+function logError(event, error, extra = {}) {
+  logger.error({
+    event,
+    error: error instanceof Error ? { message: error.message, stack: error.stack } : error,
+    ...extra,
+  });
+}
 
 let wecomTokenCache = { value: "", expiresAt: 0 };
 
@@ -4702,6 +4711,7 @@ async function generateAndStoreMeetingOutline(recordingId, segments = [], option
 async function runTranscriptionJob(recordingId) {
   const db = await loadDb();
   const recording = findRecording(db, recordingId);
+  logger.info({ event: "transcription.job.start", recordingId, source: recording?.source || "unknown" });
   if (!recording) return;
   if (!isLocalApiTranscriptionRecording(recording)) {
     if (isTencentMeetingRecording(recording)) {
@@ -4773,8 +4783,9 @@ async function runTranscriptionJob(recordingId) {
     });
     await generateAndStoreMeetingOutline(recordingId, segments, { updateTag: true });
     await markDailyBriefDirtyForRecording(recordingId);
+    logger.info({ event: "transcription.job.success", recordingId, segmentCount: segments.length, transcriptSource: recording?.source || "unknown" });
   } catch (error) {
-    console.warn("[Transcription] job failed:", error instanceof Error ? error.message : error);
+    logger.error({ event: "transcription.job.failed", recordingId, error: error instanceof Error ? { message: error.message, stack: error.stack } : error });
     await updateDb((nextDb) => {
       const target = findRecording(nextDb, recordingId);
       if (target) {
@@ -4861,7 +4872,7 @@ async function queuePendingLocalTranscriptionJobs(reason = "sweep") {
   for (const recording of candidates) {
     if (queueTranscriptionJob(recording.id, recording)) queued += 1;
   }
-  if (queued) console.log(`[Transcription] recovered ${queued} pending local upload job(s) from ${reason}`);
+  if (queued) logger.info({ event: "transcription.recovered", reason, queued });
   return queued;
 }
 
@@ -4883,14 +4894,17 @@ app.get("/api/tencent-meeting/webhook/status", (_request, response) => {
 
 app.post("/api/tencent-meeting/cloud-recordings/sync", async (request, response, next) => {
   try {
+    logger.info({ event: "tencent_meeting.sync.request", wait: String(request.query?.wait || "") === "1", ip: request.ip });
     if (String(request.query?.wait || "") !== "1") {
       const queued = queueTencentMeetingCloudDiscovery();
       response.json({ ok: true, queued });
       return;
     }
     const imported = await importTencentMeetingCloudRecordingsFromApi();
+    logger.info({ event: "tencent_meeting.sync.completed", imported });
     response.json({ ok: true, imported });
   } catch (error) {
+    logError("tencent_meeting.sync.failed", error, { ip: request.ip });
     next(error);
   }
 });
@@ -5191,9 +5205,11 @@ app.post("/api/auth/enter", async (request, response) => {
   });
 
   if (!account) {
+    logger.warn({ event: "auth.enter.failed", username, passwordWrong, sourceClientId, created });
     response.status(passwordWrong ? 401 : 400).json({ error: passwordWrong ? "密码不正确" : "账号进入失败" });
     return;
   }
+  logger.info({ event: "auth.enter.success", username, sourceClientId, created, accountId: account.id });
   response.status(created ? 201 : 200).json({ ...accountAuthResponse(account), created });
 });
 
@@ -5232,9 +5248,11 @@ app.post("/api/auth/register", async (request, response) => {
   });
 
   if (!account) {
+    logger.warn({ event: "auth.register.conflict", username, sourceClientId });
     response.status(409).json({ error: "账号已存在，请使用该注册名和密码进入" });
     return;
   }
+  logger.info({ event: "auth.register.success", username, sourceClientId, accountId: account.id });
   response.status(201).json(accountAuthResponse(account));
 });
 
@@ -5252,9 +5270,11 @@ app.post("/api/auth/login", async (request, response) => {
   });
 
   if (!account) {
+    logger.warn({ event: "auth.login.failed", username, sourceClientId });
     response.status(401).json({ error: "账号或密码不正确" });
     return;
   }
+  logger.info({ event: "auth.login.success", username, sourceClientId, accountId: account.id });
   response.json(accountAuthResponse(account));
 });
 
@@ -5485,6 +5505,7 @@ app.post("/api/recordings", upload.single("audio"), async (request, response, ne
     const queued = queueTranscriptionJob(id, recording);
     const responseRecording = queued ? { ...recording, status: "transcribing", errorMessage: "" } : recording;
 
+    logger.info({ event: "recording.uploaded", recordingId: id, ownerClientId, ownerName, queued, durationMs, fileName });
     response.status(201).json({ recording: publicRecording(responseRecording, [], ownerClientId, ownerName) });
   } catch (error) {
     next(error);
@@ -5636,6 +5657,7 @@ app.post("/api/recording-upload-sessions/:sessionId/finalize", async (request, r
     const queued = queueTranscriptionJob(id, recording);
     const responseRecording = queued ? { ...recording, status: "transcribing", errorMessage: "" } : recording;
     await rm(dir, { recursive: true, force: true }).catch(() => {});
+    logger.info({ event: "recording.session.finalized", recordingId: id, sessionId, ownerClientId: meta.ownerClientId, queued, partCount: partFiles.length, fileName });
     response.status(201).json({ recording: publicRecording(responseRecording, [], meta.ownerClientId, meta.ownerName) });
   } catch (error) {
     next(error);
@@ -5703,6 +5725,7 @@ app.post("/api/recordings/segments", upload.array("audio", 480), async (request,
     const queued = queueTranscriptionJob(id, recording);
     const responseRecording = queued ? { ...recording, status: "transcribing", errorMessage: "" } : recording;
 
+    logger.info({ event: "recording.segments.uploaded", recordingId: id, ownerClientId, ownerName, queued, partCount: files.length, fileName });
     response.status(201).json({ recording: publicRecording(responseRecording, [], ownerClientId, ownerName) });
   } catch (error) {
     await Promise.all(files.map((file) => removeFileIfExists(file.path)));
@@ -6525,8 +6548,8 @@ if (existsSync(distDir)) {
   });
 }
 
-app.use((error, _request, response, _next) => {
-  console.error(error);
+app.use((error, request, response, _next) => {
+  logError("server.unhandled_error", error, { method: request?.method, path: request?.path || request?.originalUrl });
   if (response.headersSent) return;
   const isPayloadTooLarge =
     error?.type === "entity.too.large" ||
@@ -6539,6 +6562,7 @@ app.use((error, _request, response, _next) => {
 });
 
 app.listen(port, host, () => {
+  logger.info({ event: "server.started", host, port, httpsPort, nodeEnv: process.env.NODE_ENV || "development" });
   console.log(`Recorder API listening on http://${host}:${port}`);
 });
 
