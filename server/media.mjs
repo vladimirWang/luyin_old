@@ -2,6 +2,7 @@ import { spawn } from "node:child_process";
 import { createReadStream, createWriteStream, existsSync } from "node:fs";
 import { mkdir, readFile, rm, stat, writeFile } from "node:fs/promises";
 import path from "node:path";
+import logger from "./utils/log.js";
 
 let ffmpegStaticPath;
 try {
@@ -144,43 +145,55 @@ function enoughDuration(actualMs, expectedMs) {
 }
 
 export async function convertAudioFileToMp3(sourcePath, targetPath) {
+  logger.info("[CALL] convertAudioFileToMp3 ", {message: `sourcePath: ${sourcePath}, targetPath: ${targetPath}`})
   await mkdir(path.dirname(targetPath), { recursive: true });
   const bitrate = env("STORAGE_MP3_BITRATE", "96k");
   const sampleRate = env("STORAGE_MP3_SAMPLE_RATE", "16000");
   const inputArgs = /^https?:\/\//i.test(String(sourcePath || ""))
     ? ["-reconnect", "1", "-reconnect_streamed", "1", "-reconnect_at_eof", "1", "-reconnect_delay_max", "5"]
     : [];
-  await runProcess(
-    ffmpegCommand(),
-    [
-      "-y",
-      ...ffmpegBaseArgs(),
-      "-fflags",
-      "+genpts",
-      ...inputArgs,
-      "-i",
-      sourcePath,
-      "-vn",
-      "-ar",
-      sampleRate,
-      "-ac",
-      "1",
-      "-codec:a",
-      "libmp3lame",
-      "-b:a",
-      bitrate,
-      targetPath,
-    ],
-    ffmpegTimeoutMs(),
-  );
-  await assertAudioFile(targetPath);
+  try {
+    await runProcess(
+      ffmpegCommand(),
+      [
+        "-y",
+        ...ffmpegBaseArgs(),
+        "-fflags",
+        "+genpts",
+        ...inputArgs,
+        "-i",
+        sourcePath,
+        "-vn",
+        "-ar",
+        sampleRate,
+        "-ac",
+        "1",
+        "-codec:a",
+        "libmp3lame",
+        "-b:a",
+        bitrate,
+        targetPath,
+      ],
+      ffmpegTimeoutMs(),
+    );
+    await assertAudioFile(targetPath);
+    logger.info("[CALL] convertAudioFileToMp3 ", {message: "success"})
+  } catch (error) {
+    logger.error("[CALL] convertAudioFileToMp3 ", {message: `error: ${error.message}`})
+    throw error;
+  }
 }
 
 export async function mergeAudioFilesToMp3(sourcePaths, targetPath) {
+  logger.info("[CALL] mergeAudioFilesToMp3 ", {message: `sourcePaths: ${sourcePaths.length} files, targetPath: ${targetPath}`})
   const validPaths = sourcePaths.filter(Boolean);
-  if (validPaths.length === 0) throw new Error("missing audio segments");
+  if (validPaths.length === 0) {
+    logger.error("[CALL] mergeAudioFilesToMp3 ", {message: "missing audio segments"})
+    throw new Error("missing audio segments");
+  }
   if (validPaths.length === 1) {
     await convertAudioFileToMp3(validPaths[0], targetPath);
+    logger.info("[CALL] mergeAudioFilesToMp3 ", {message: "single file, converted directly"})
     return;
   }
 
@@ -200,8 +213,10 @@ export async function mergeAudioFilesToMp3(sourcePaths, targetPath) {
       if (hasMultipleStandaloneSegments && !enoughDuration(joinedDurationMs, standaloneDurationSum)) {
         throw new Error("raw concatenation only preserved part of the standalone audio files");
       }
+      logger.info("[CALL] mergeAudioFilesToMp3 ", {message: "success with raw concatenation"})
       return;
     } catch {
+      logger.warn("[CALL] mergeAudioFilesToMp3 ", {message: "raw concatenation failed, falling back to mp3 concat"})
       await rm(targetPath, { force: true }).catch(() => {});
     }
 
@@ -220,6 +235,10 @@ export async function mergeAudioFilesToMp3(sourcePaths, targetPath) {
       ffmpegTimeoutMs(),
     );
     await assertAudioFile(targetPath);
+    logger.info("[CALL] mergeAudioFilesToMp3 ", {message: "success with mp3 concat"})
+  } catch (error) {
+    logger.error("[CALL] mergeAudioFilesToMp3 ", {message: `error: ${error.message}`})
+    throw error;
   } finally {
     await rm(tempDir, { recursive: true, force: true }).catch(() => {});
   }

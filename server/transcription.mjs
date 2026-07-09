@@ -3,6 +3,7 @@ import { spawn } from "node:child_process";
 import { mkdtemp, readFile, rm, stat } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
+import logger from "./utils/log.js";
 
 let ffmpegStaticPath;
 try {
@@ -1393,27 +1394,35 @@ export function getTranscriptionDiagnostics() {
 }
 
 export async function transcribeRecording(recording) {
+  logger.info("[CALL] transcribeRecording ", {message: `recordingId: ${recording.id}, provider: ${getTranscriptionMode()}`})
   const provider = getTranscriptionMode();
   let payload;
 
-  if (provider === "openai") {
-    payload = await transcribeWithOpenAI(recording);
-  } else if (tencentAsrProviders.has(provider)) {
-    payload = await transcribeWithTencentAsr(recording);
-  } else if (provider === "custom") {
-    payload = await transcribeWithCustomApi(recording);
-  } else if (provider === "mimo" || provider === "mimo_api" || provider === "mimo-api") {
-    throw new Error("小米 MiMo 转写已弃用，请使用 ASR_PROVIDER=tencent_asr 配置腾讯云 ASR。");
-  } else {
-    return fallbackSegments(recording);
-  }
+  try {
+    if (provider === "openai") {
+      payload = await transcribeWithOpenAI(recording);
+    } else if (tencentAsrProviders.has(provider)) {
+      payload = await transcribeWithTencentAsr(recording);
+    } else if (provider === "custom") {
+      payload = await transcribeWithCustomApi(recording);
+    } else if (provider === "mimo" || provider === "mimo_api" || provider === "mimo-api") {
+      throw new Error("小米 MiMo 转写已弃用，请使用 ASR_PROVIDER=tencent_asr 配置腾讯云 ASR。");
+    } else {
+      logger.warn("[CALL] transcribeRecording ", {message: "no provider configured, returning fallback segments"})
+      return fallbackSegments(recording);
+    }
 
-  const segments = normalizeSegments(payload, recording.durationMs || 0);
-  const finalSegments = segments.length > 0 ? segments : fallbackSegments(recording);
-  finalSegments.rawText = payload?.rawText || finalSegments.map((segment) => segment.rawText || segment.text || "").join("\n");
-  finalSegments.correctedText = payload?.correctedText || finalSegments.map((segment) => segment.correctedText || segment.text || "").join("\n");
-  finalSegments.transcriptionMeta = payload?.transcriptionMeta || null;
-  return finalSegments;
+    const segments = normalizeSegments(payload, recording.durationMs || 0);
+    const finalSegments = segments.length > 0 ? segments : fallbackSegments(recording);
+    finalSegments.rawText = payload?.rawText || finalSegments.map((segment) => segment.rawText || segment.text || "").join("\n");
+    finalSegments.correctedText = payload?.correctedText || finalSegments.map((segment) => segment.correctedText || segment.text || "").join("\n");
+    finalSegments.transcriptionMeta = payload?.transcriptionMeta || null;
+    logger.info("[CALL] transcribeRecording ", {message: `success, segments: ${finalSegments.length}`})
+    return finalSegments;
+  } catch (error) {
+    logger.error("[CALL] transcribeRecording ", {message: `error: ${error.message}`})
+    throw error;
+  }
 }
 
 export async function transcribeVoiceInputRecording(recording) {

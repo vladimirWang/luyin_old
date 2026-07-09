@@ -1,6 +1,7 @@
 import { copyFile, mkdir, readFile, rename, rm, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+import logger from "./utils/log.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
@@ -367,10 +368,16 @@ export async function ensureStorage() {
 }
 
 export async function loadDb() {
-  if (mysqlEnabled()) return loadMysqlDb();
+  logger.info("[CALL] loadDb: ");
+  if (mysqlEnabled()) {
+    logger.info("[CALL] loadDb: mysqlEnabled() is true, loading from MySQL database");
+    return loadMysqlDb();
+  }
 
+  logger.info("[CALL] loadDb: mysqlEnabled() is false, loading from local file");
   await ensureStorage();
   const raw = await readFile(dbFile, "utf8");
+  logger.info("[CALL] loadDb: ${raw.slice(0, 100)}...");
   const parsed = JSON.parse(raw);
 
   return {

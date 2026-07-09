@@ -927,24 +927,31 @@ function isTencentMeetingStsTokenFresh(token) {
 }
 
 async function loadTencentMeetingStsToken() {
+  logger.info("[CALL] loadTencentMeetingStsToken ", {message: ""});
   const envToken = firstEnv("TENCENT_MEETING_STS_TOKEN", "WEMEET_STS_TOKEN");
   if (envToken) {
+    logger.info("[CALL] loadTencentMeetingStsToken ", {message: `envToken: ${envToken.slice(0, 20)}...`});
     const envExpiresAt = tencentMeetingStsExpireMs(firstEnv("TENCENT_MEETING_STS_EXPIRE_TS", "WEMEET_STS_EXPIRE_TS")) || Date.now() + 1000 * 60 * 30;
     return isTencentMeetingStsTokenFresh({ value: envToken, expiresAt: envExpiresAt }) ? envToken : "";
   }
+  logger.info("[CALL] loadTencentMeetingStsToken ", {message: "未在环境变量中找到腾讯会议STS token"});
 
   if (tencentMeetingStsTokenCache.loaded) {
+    logger.info("[CALL] loadTencentMeetingStsToken ", {message: "tencentMeetingStsTokenCache.loaded is true"});
     return isTencentMeetingStsTokenFresh(tencentMeetingStsTokenCache) ? tencentMeetingStsTokenCache.value : "";
   }
 
+  logger.info("[CALL] loadTencentMeetingStsToken ", {message: "tencentMeetingStsTokenCache.loaded is false"});
   tencentMeetingStsTokenCache.loaded = true;
   try {
     const raw = await readFile(tencentMeetingStsTokenPath, "utf8");
+    logger.info("[CALL] loadTencentMeetingStsToken ", {message: `读取到的STS token文件内容: ${raw.slice(0, 100)}`});
     const parsed = parseJsonObject(raw) || {};
     tencentMeetingStsTokenCache.value = String(parsed.value || parsed.sts_token || "");
     tencentMeetingStsTokenCache.expiresAt = tencentMeetingStsExpireMs(parsed.expiresAt || parsed.expire_ts);
     tencentMeetingStsTokenCache.reqId = String(parsed.reqId || parsed.req_id || "");
   } catch {
+    logger.warn("[CALL] loadTencentMeetingStsToken ", {message: "读取STS token文件失败"});
     tencentMeetingStsTokenCache.value = "";
     tencentMeetingStsTokenCache.expiresAt = 0;
     tencentMeetingStsTokenCache.reqId = "";
