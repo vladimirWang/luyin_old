@@ -19,7 +19,7 @@ server/**/*.log
 *.orig
 logs/
 coverage/
-.vscode/
+.vscode/settings.json
 .DS_Store
 docker-compose.override.yml
 dist.*
