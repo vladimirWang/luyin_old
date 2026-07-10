@@ -4,11 +4,11 @@ services:
       context: .
       dockerfile: Dockerfile
     ports:
-      - "7000:7000"
+      - "7000:8787"
     env_file:
       - .env
     environment:
-      PORT: 7000
+      PORT: 8787
       HOST: 0.0.0.0
       HTTPS_PORT: 0
       MYSQL_HOST: mysql

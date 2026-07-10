@@ -22,6 +22,6 @@ RUN mkdir -p /app/logs /app/server/storage && chown -R node:node /app/logs /app/
 
 USER node
 
-EXPOSE 7000
+EXPOSE 8787
 
 CMD ["npm", "run", "start:prod"]

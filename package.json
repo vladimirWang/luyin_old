@@ -6,8 +6,10 @@
   "type": "module",
   "scripts": {
     "dev": "concurrently \"vite --host 0.0.0.0 --port 5173\" \"nodemon server/index.mjs\"",
+    "dev2": "concurrently \"vite\" \"nodemon server/index.mjs\"",
     "dev:mobile": "concurrently \"vite --host 0.0.0.0 --port 5173\" \"node server/index.mjs\"",
     "dev:web": "vite --host 0.0.0.0 --port 5173",
+    "dev:web2": "vite",
     "dev:api": "nodemon server/index.mjs",
     "build": "vite build",
     "package:release": "node scripts/package-release.mjs",
