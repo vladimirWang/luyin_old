@@ -10,7 +10,7 @@
     "dev:mobile": "concurrently \"vite --host 0.0.0.0 --port 5173\" \"node server/index.mjs\"",
     "dev:web": "vite --host 0.0.0.0 --port 5173",
     "dev:web2": "vite",
-    "dev:api": "nodemon server/index.mjs",
+    "dev:api": "dotenv -e .env.dev nodemon server/index.mjs",
     "build": "vite build",
     "package:release": "node scripts/package-release.mjs",
     "start": "node server/index.mjs",
@@ -26,13 +26,14 @@
     "multer": "^2.2.0",
     "mysql2": "^3.22.5",
     "pdfkit": "^0.19.1",
+    "pm2": "^5.4.0",
     "react": "19.2.0",
     "react-dom": "19.2.0",
     "vite": "6.4.2",
-    "winston": "^3.19.0",
-    "pm2": "^5.4.0"
+    "winston": "^3.19.0"
   },
   "devDependencies": {
+    "dotenv-cli": "^11.0.0",
     "nodemon": "^3.1.14"
   }
 }
