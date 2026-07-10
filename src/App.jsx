@@ -999,18 +999,27 @@ function removeRecordingRecoveryManifest(sessionId) {
   writeRecordingRecoveryQueue(readRecordingRecoveryQueue().filter((manifest) => manifest.id !== sessionId));
 }
 
+// 读取可恢复的录音清单
 function readRecoverableRecordingManifests() {
+  console.log("start readRecoverableRecordingManifests step0");
   const queue = readRecordingRecoveryQueue();
+  console.log("start readRecoverableRecordingManifests step1");
   const active = (() => {
     try {
       const raw = window.localStorage.getItem(RECORDING_SESSION_STORAGE_KEY);
-      return raw ? normalizeRecordingSessionManifest(JSON.parse(raw)) : null;
-    } catch {
+      console.log("start readRecoverableRecordingManifests step2 ", raw);
+      const normalizedData = normalizeRecordingSessionManifest(JSON.parse(raw))
+      console.log("start readRecoverableRecordingManifests step3 ", normalizedData);
+      return raw ? normalizedData : null;
+    } catch (e) {
+      console.error("fail readRecoverableRecordingManifests: ", e.message);
       return null;
     }
   })();
   const byId = new Map(queue.map((manifest) => [manifest.id, manifest]));
   if (active?.id && !byId.has(active.id)) byId.set(active.id, active);
+
+  // 按照创建时间排序
   return [...byId.values()]
     .filter((manifest) => (manifest.segments || []).length > 0)
     .sort((a, b) => String(a.createdAt || "").localeCompare(String(b.createdAt || "")));
@@ -1059,10 +1068,16 @@ async function clearRecordingRecoveryManifest(manifest) {
   clearRecordingSessionManifest(manifest?.id);
 }
 
+// 请求浏览器将站点存储标记为持久化
 async function requestPersistentRecordingStorage() {
   try {
-    if (navigator.storage?.persist) await navigator.storage.persist();
-  } catch {
+    if (navigator.storage?.persist) {
+      await navigator.storage.persist();
+    } else {
+      console.warn("Browser does not support persistent storage.");
+    }
+  } catch (e) {
+    console.error("Browser fail to support persistent storage: ", e.message);
     // Long recording still works without persistent storage; this only reduces mobile cleanup risk.
   }
 }
@@ -7164,6 +7179,7 @@ export function App() {
     }
   }
 
+  // 恢复中断的录音
   async function recoverInterruptedRecordingSession(manifestSnapshot = null) {
     if (recoveryUploadInFlightRef.current) return false;
     const manifests = manifestSnapshot ? [manifestSnapshot] : readRecoverableRecordingManifests();
