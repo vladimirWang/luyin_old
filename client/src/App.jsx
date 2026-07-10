@@ -829,7 +829,8 @@ async function requestMicrophoneStream() {
     },
     { audio: true },
   ];
-
+  alert("mediaDevices: " + typeof navigator.mediaDevices)
+  // console.log("getUserMedia: ", typeof navigator.mediaDevices.getUserMedia)
   let lastError;
   for (const constraints of attempts) {
     try {
@@ -838,7 +839,7 @@ async function requestMicrophoneStream() {
       lastError = error;
     }
   }
-
+  // alert("都失败了")
   throw lastError;
 }
 
@@ -7542,15 +7543,15 @@ export function App() {
     if (!resume) manualStopRequestedRef.current = false;
     setRecordingError("");
 
-    if (!canRequestMicrophone()) {
-      setRecordingError("手机端录音必须通过 HTTPS 打开。请部署到 HTTPS 域名后，再从企业微信应用入口访问。");
-      return;
-    }
+    // if (!canRequestMicrophone()) {
+    //   setRecordingError("手机端录音必须通过 HTTPS 打开。请部署到 HTTPS 域名后，再从企业微信应用入口访问。");
+    //   return;
+    // }
 
-    if (!navigator.mediaDevices?.getUserMedia || !window.MediaRecorder) {
-      setRecordingError("当前环境不支持网页录音，请升级企业微信或使用系统浏览器打开。");
-      return;
-    }
+    // if (!navigator.mediaDevices?.getUserMedia || !window.MediaRecorder) {
+    //   setRecordingError("当前环境不支持网页录音，请升级企业微信或使用系统浏览器打开。");
+    //   return;
+    // }
 
     try {
       if (!resume) {
@@ -7663,6 +7664,7 @@ export function App() {
         setElapsedMs(totalElapsedBeforeSegmentRef.current + Date.now() - startedAtRef.current);
       }, 80);
     } catch (error) {
+      alert("录音失败，请检查麦克风权限或网络连接: ", error.message);
       setRecordingError(microphoneErrorMessage(error));
       cleanupCapture();
       if (resume || sessionSegmentsRef.current.length > 0) {
@@ -7727,6 +7729,7 @@ export function App() {
   }
 
   function toggleRecording() {
+    console.log("toggleRecording");
     const recorder = mediaRecorderRef.current;
     if (isRecordingRef.current || recorder?.state === "recording") stopRecording();
     else beginRecording();

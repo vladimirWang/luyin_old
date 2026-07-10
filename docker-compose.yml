@@ -1,10 +1,9 @@
 services:
   app:
-    image: node:22-alpine
-    working_dir: /app
-    command: sh -c "npm install && npm run dev"
+    build:
+      context: .
+      dockerfile: Dockerfile
     ports:
-      - "5173:5173"
       - "7000:7000"
     env_file:
       - .env.dev
@@ -13,13 +12,25 @@ services:
       HOST: 0.0.0.0
       HTTPS_PORT: 0
       MYSQL_HOST: host.docker.internal
+      FFMPEG_PATH: /usr/bin/ffmpeg
+      FFPROBE_PATH: /usr/bin/ffprobe
     volumes:
-      - .:/app
-      - /app/node_modules
       - app-logs:/app/logs
+      - app-storage:/app/server/storage
     restart: unless-stopped
     extra_hosts:
       - "host.docker.internal:host-gateway"
 
+  nginx:
+    build:
+      context: ./client
+      dockerfile: Dockerfile
+    ports:
+      - "5173:80"
+    depends_on:
+      - app
+    restart: unless-stopped
+
 volumes:
   app-logs:
+  app-storage:

@@ -7,7 +7,7 @@ module.exports = {
       'server',
       'dist'
     ],
-    watch_ignore: [
+    ignore_watch: [
       'server/storage',
       'server/storage/**/*'
     ],

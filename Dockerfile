@@ -16,8 +16,6 @@ RUN corepack enable && corepack prepare pnpm@9.15.9 --activate && pnpm install -
 
 COPY . .
 
-RUN pnpm run build
-
 RUN mkdir -p /app/logs /app/server/storage && chown -R node:node /app/logs /app/server/storage
 
 USER node
