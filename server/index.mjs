@@ -27,8 +27,9 @@ import {
   transcribeRecording,
   transcribeVoiceInputRecording,
 } from "./transcription.mjs";
-import { attachmentDir, audioDir, ensureStorage, loadDb, tempDir, transcriptDir, ttsDir, updateDb } from "./db.mjs";
+import { attachmentDir, audioDir, loadDb, tempDir, transcriptDir, ttsDir, updateDb } from "./db.mjs";
 import { convertAudioFileToMp3, fileInfo, mergeAudioFilesToMp3, probeAudioDurationMs, removeFileIfExists, writeTranscriptTextFile } from "./media.mjs";
+import {init} from "./init.mjs";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const projectRoot = path.resolve(__dirname, "..");
@@ -72,7 +73,9 @@ async function loadEnvFile(filePath) {
   }
 }
 
-await loadEnvFile(path.join(projectRoot, ".env"));
+await init();
+console.log("process.env.PORT:", process.env.PORT);
+// await loadEnvFile(path.join(projectRoot, ".env"));
 
 const port = Number(process.env.PORT);
 const host = process.env.HOST || "0.0.0.0";
@@ -707,9 +710,6 @@ function canDeleteRecording(recording, clientId) {
   return canManageRecording(recording, clientId) || canReadRecording(recording, clientId);
 }
 
-await ensureStorage();
-await mkdir(tempDir, { recursive: true });
-
 const uploadSessionRoot = path.join(tempDir, "recording-upload-sessions");
 await mkdir(uploadSessionRoot, { recursive: true });
 
@@ -765,7 +765,9 @@ app.use((request, response, next) => {
   next();
 });
 
-app.get("/ping", (req, res) => res.json({ ping: `pong ${Date.now()}` }));
+app.get("/api/ping", (req, res) => {
+  res.json({ ping: `pong ${Date.now()}` })
+});
 
 function decodedTencentMeetingAesKeyLength(encodingAesKey) {
   try {
@@ -2591,7 +2593,9 @@ async function inspectTencentMeetingDownloadedFile(targetPath, downloadInfo = {}
 }
 
 async function syncTencentMeetingRecordingAudio(recordingId, info = {}) {
+  console.info(`[CALL] syncTencentMeetingRecordingAudio: recordingId: ${recordingId}`);
   const target = await findTencentMeetingDownloadTarget(info);
+  console.info(`[CALL] syncTencentMeetingRecordingAudio`);
   if (!target?.downloadUrl) {
     const needsIdentity = !tencentMeetingCandidateDownloadIdentityParams(info).length;
     const hasStsToken = Boolean(await loadTencentMeetingStsToken());

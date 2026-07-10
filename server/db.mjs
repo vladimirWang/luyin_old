@@ -350,86 +350,91 @@ async function getMysqlPool() {
 }
 
 export async function ensureStorage() {
-  await mkdir(dataDir, { recursive: true });
-  await mkdir(accountDir, { recursive: true });
-  await mkdir(audioDir, { recursive: true });
-  await mkdir(attachmentDir, { recursive: true });
-  await mkdir(transcriptDir, { recursive: true });
-  await mkdir(ttsDir, { recursive: true });
-  await mkdir(tempDir, { recursive: true });
+  const task1 = mkdir(dataDir, { recursive: true });
+  const task2 = mkdir(accountDir, { recursive: true });
+  const task3 = mkdir(audioDir, { recursive: true });
+  const task4 = mkdir(attachmentDir, { recursive: true });
+  const task5 = mkdir(transcriptDir, { recursive: true });
+  const task6 = mkdir(ttsDir, { recursive: true });
+  const task7 = mkdir(tempDir, { recursive: true });
+  return Promise.all([task1, task2, task3, task4, task5, task6, task7]);
+  
+  // TODO 待删除 多余判断
+  // if (mysqlEnabled()) return;
 
-  if (mysqlEnabled()) return;
-
-  try {
-    await readFile(dbFile, "utf8");
-  } catch {
-    await saveDb(defaultDb);
-  }
+  // try {
+  //   await readFile(dbFile, "utf8");
+  // } catch {
+  //   await saveDb(defaultDb);
+  // }
 }
 
 export async function loadDb() {
   logger.info("[CALL] loadDb: ");
-  if (mysqlEnabled()) {
-    logger.info("[CALL] loadDb: mysqlEnabled() is true, loading from MySQL database");
-    return loadMysqlDb();
-  }
+  // TODO 待删除 多余判断, 因为肯定会有mysql
+  // if (mysqlEnabled()) {
+  //   logger.info("[CALL] loadDb: mysqlEnabled() is true, loading from MySQL database");
+  //   return loadMysqlDb();
+  // }
+  return loadMysqlDb();
 
-  logger.info("[CALL] loadDb: mysqlEnabled() is false, loading from local file");
-  await ensureStorage();
-  const raw = await readFile(dbFile, "utf8");
-  logger.info("[CALL] loadDb: ${raw.slice(0, 100)}...");
-  const parsed = JSON.parse(raw);
+  // TODO 待删除 多余判断, 因为肯定会有mysql
+  // logger.info("[CALL] loadDb: mysqlEnabled() is false, loading from local file");
+  // // await ensureStorage();
+  // const raw = await readFile(dbFile, "utf8");
+  // logger.info("[CALL] loadDb: ${raw.slice(0, 100)}...");
+  // const parsed = JSON.parse(raw);
 
-  return {
-    ...defaultDb,
-    ...parsed,
-    counters: {
-      ...defaultDb.counters,
-      ...(parsed.counters || {}),
-    },
-    profile: {
-      ...defaultDb.profile,
-      ...(parsed.profile || {}),
-    },
-    recordings: (parsed.recordings || []).map((recording) => ({
-      speakerName: "说话人 1",
-      speakerMap: {},
-      ownerClientId: "",
-      ownerName: "",
-      shared: true,
-      sharedAt: "",
-      detectedLanguage: "",
-      translationText: "",
-      tag: "",
-      deletedAt: null,
-      transcriptProvider: "",
-      transcriptSource: "",
-      transcribedAt: "",
-      transcriptPath: "",
-      transcriptRawPath: "",
-      transcriptCorrectedPath: "",
-      transcriptionMetaPath: "",
-      meetingOutline: null,
-      meetingOutlineStatus: "",
-      meetingOutlineError: "",
-      meetingOutlinedAt: "",
-      ...recording,
-    })),
-    folders: (parsed.folders || []).map((folder) => ({
-      ownerClientId: "",
-      ...folder,
-    })),
-    transcriptSegments: parsed.transcriptSegments || [], // 录音的转写片段（字幕）数组
-    qaMessages: parsed.qaMessages || [],
-    dailyMeetingBriefs: Array.isArray(parsed.dailyMeetingBriefs)
-      ? parsed.dailyMeetingBriefs.map((brief) => ({ clientId: "", ...brief }))
-      : [],
-    accounts: Array.isArray(parsed.accounts) ? parsed.accounts : [],
-    clientProfiles:
-      parsed.clientProfiles && typeof parsed.clientProfiles === "object" && !Array.isArray(parsed.clientProfiles)
-        ? parsed.clientProfiles
-        : {},
-  };
+  // return {
+  //   ...defaultDb,
+  //   ...parsed,
+  //   counters: {
+  //     ...defaultDb.counters,
+  //     ...(parsed.counters || {}),
+  //   },
+  //   profile: {
+  //     ...defaultDb.profile,
+  //     ...(parsed.profile || {}),
+  //   },
+  //   recordings: (parsed.recordings || []).map((recording) => ({
+  //     speakerName: "说话人 1",
+  //     speakerMap: {},
+  //     ownerClientId: "",
+  //     ownerName: "",
+  //     shared: true,
+  //     sharedAt: "",
+  //     detectedLanguage: "",
+  //     translationText: "",
+  //     tag: "",
+  //     deletedAt: null,
+  //     transcriptProvider: "",
+  //     transcriptSource: "",
+  //     transcribedAt: "",
+  //     transcriptPath: "",
+  //     transcriptRawPath: "",
+  //     transcriptCorrectedPath: "",
+  //     transcriptionMetaPath: "",
+  //     meetingOutline: null,
+  //     meetingOutlineStatus: "",
+  //     meetingOutlineError: "",
+  //     meetingOutlinedAt: "",
+  //     ...recording,
+  //   })),
+  //   folders: (parsed.folders || []).map((folder) => ({
+  //     ownerClientId: "",
+  //     ...folder,
+  //   })),
+  //   transcriptSegments: parsed.transcriptSegments || [], // 录音的转写片段（字幕）数组
+  //   qaMessages: parsed.qaMessages || [],
+  //   dailyMeetingBriefs: Array.isArray(parsed.dailyMeetingBriefs)
+  //     ? parsed.dailyMeetingBriefs.map((brief) => ({ clientId: "", ...brief }))
+  //     : [],
+  //   accounts: Array.isArray(parsed.accounts) ? parsed.accounts : [],
+  //   clientProfiles:
+  //     parsed.clientProfiles && typeof parsed.clientProfiles === "object" && !Array.isArray(parsed.clientProfiles)
+  //       ? parsed.clientProfiles
+  //       : {},
+  // };
 }
 
 export async function saveDb(db) {
@@ -459,7 +464,7 @@ export async function saveDb(db) {
 }
 
 async function loadMysqlDb() {
-  await ensureStorage();
+  // await ensureStorage();
   const pool = await getMysqlPool();
   await ensureMysqlSchema(pool);
   const [[profileRow]] = await pool.query("SELECT * FROM app_users ORDER BY created_at ASC LIMIT 1");
