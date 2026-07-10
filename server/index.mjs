@@ -1461,6 +1461,7 @@ function tencentMeetingCandidateDownloadIdentityParams(info = {}) {
   });
 }
 
+// 构建调用腾讯会议转写 API 时的候选操作符参数列表
 function tencentMeetingCandidateTranscriptOperatorParams(info = {}) {
   const eventUserIds = [
     info.creatorUserid,
@@ -2000,8 +2001,10 @@ async function fetchTencentMeetingSummaryText(downloadUrl) {
 }
 
 function tencentMeetingSummaryFallbackEnabled(info = {}) {
-  const configured = firstEnv("TENCENT_MEETING_SUMMARY_FALLBACK_ENABLED", "WEMEET_SUMMARY_FALLBACK_ENABLED");
-  if (configured !== "") return envFlag(configured, false);
+  // TODO 多余环境变量 configured始终为空字符串
+  // const configured = firstEnv("TENCENT_MEETING_SUMMARY_FALLBACK_ENABLED", "WEMEET_SUMMARY_FALLBACK_ENABLED");
+  // const configured = ""
+  // if (configured !== "") return envFlag(configured, false);
   return false;
 }
 
@@ -2356,24 +2359,32 @@ async function findTencentMeetingDownloadTarget(info) {
   return null;
 }
 
+// 从腾讯会议 API 获取录音的内置转写内容
 async function fetchTencentMeetingBuiltInTranscript(info = {}, durationMs = 0) {
   const recordFileId = String(info.recordFileId || info.record_file_id || "").trim();
   if (!recordFileId || !tencentMeetingApiConfigured()) return null;
 
+  // 获取 STS Token（确保 API 调用权限）
   await requestTencentMeetingStsTokenIfPossible();
+  logger.info(`[CALL] fetchTencentMeetingBuiltInTranscript: `, {message: `获取到 STS Token`});
   const failureKinds = [];
 
   const operatorParamsList = tencentMeetingCandidateTranscriptOperatorParams(info);
+  logger.info(`[CALL] fetchTencentMeetingBuiltInTranscript: `, {message: `operatorParamsList: ${JSON.stringify(operatorParamsList)}`});
   for (const operatorParams of operatorParamsList) {
+    // 方式a 标准转写详情接口
     const uri = tencentMeetingQuery("/v1/records/transcripts/details", {
       record_file_id: recordFileId,
       meeting_id: info.meetingId || info.meeting_id || "",
       transcripts_type: Number(process.env.TENCENT_MEETING_TRANSCRIPTS_TYPE || 1),
       ...operatorParams,
     });
+    logger.info(`[CALL] fetchTencentMeetingBuiltInTranscript: `, {message: `uri: ${uri}`});
     try {
       const payload = await tencentMeetingApiRequest("GET", uri);
+      logger.info(`[CALL] fetchTencentMeetingBuiltInTranscript: `, {message: `腾讯会议API标准转写结果原始响应数据 payload: ${JSON.stringify(payload)}`});
       const result = tencentMeetingTranscriptSegmentsFromPayload(payload, durationMs);
+      logger.info(`[CALL] fetchTencentMeetingBuiltInTranscript: `, {message: `腾讯会议API标准转写结果解析后的数据 result: ${JSON.stringify(result).slice(0,200)}`});
       if (result.segments.length > 0) {
         return {
           ...result,
@@ -2388,7 +2399,10 @@ async function fetchTencentMeetingBuiltInTranscript(info = {}, durationMs = 0) {
     }
 
     try {
+      // 方式b 段落式转写接口
+      logger.info(`[CALL] fetchTencentMeetingBuiltInTranscript: `, {message: `operatorParams: ${JSON.stringify(operatorParams)}`});
       const result = await fetchTencentMeetingTranscriptByParagraphs(recordFileId, info, operatorParams, durationMs);
+      logger.info(`[CALL] fetchTencentMeetingBuiltInTranscript: `, {message: `腾讯会议API返回的段落式转写结果 segments?.length: ${result?.segments?.length}`});
       if (result?.segments?.length > 0) {
         return {
           ...result,
@@ -2403,11 +2417,12 @@ async function fetchTencentMeetingBuiltInTranscript(info = {}, durationMs = 0) {
     }
   }
 
+  // TODO 这里的if永不会成立，tencentMeetingSummaryFallbackEnabled始终返回false，因为configured始终为空字符串
   if (tencentMeetingSummaryFallbackEnabled(info)) {
     const summaryResult = await fetchTencentMeetingSummaryTranscript(info, durationMs, failureKinds);
     if (summaryResult?.segments?.length > 0) return summaryResult;
   }
-
+  logger.info(`[CALL] fetchTencentMeetingBuiltInTranscript: `, {message: `未获取到转写内容`});
   return {
     segments: [],
     unavailable: true,
@@ -2490,11 +2505,17 @@ async function storeTencentMeetingBuiltInTranscript(recordingId, transcriptResul
 }
 
 async function syncTencentMeetingBuiltInTranscript(recordingId, info = {}) {
+  logger.info(`[CALL] syncTencentMeetingBuiltInTranscript: recordingId: ${recordingId}, info: ${JSON.stringify(info)}`);
   const db = await loadDb();
   const recording = findRecording(db, recordingId);
   if (!recording || recording.deletedAt) return false;
   const existingSegments = findSegments(db, recordingId);
-  if (existingSegments.length > 0 && recording.transcriptSource === "tencent-meeting") return true;
+    logger.info(`[CALL] syncTencentMeetingBuiltInTranscript: `, {message: `transcriptSource: ${recording.transcriptSource}, existingSegments.length: ${existingSegments.length}`});
+  if (existingSegments.length > 0 && recording.transcriptSource === "tencent-meeting") {
+    logger.info(`[CALL] syncTencentMeetingBuiltInTranscript: `, {message: `已有撰写片段，且转写来源是腾讯会议，无需同步转写`});
+    return true;
+  }
+  logger.info(`[CALL] syncTencentMeetingBuiltInTranscript: `, {message: `开始同步转写`});
   const transcriptResult = await fetchTencentMeetingBuiltInTranscript(info, recording.durationMs || info.durationMs || 0);
   if (!transcriptResult?.segments?.length) {
     const checkedAt = new Date().toISOString();
@@ -6063,6 +6084,7 @@ app.get("/api/recordings/:id/meeting-outline.pdf", async (request, response, nex
 });
 
 app.post("/api/recordings/:id/transcribe", async (request, response) => {
+  logger.info(`[CALL] /api/recordings/:id/transcribe: request.params.id: ${request.params.id}`);
   const db = await loadDb();
   const clientId = requestClientId(request);
   const clientName = requestClientName(request);
@@ -6086,7 +6108,9 @@ app.post("/api/recordings/:id/transcribe", async (request, response) => {
     response.status(409).json({ error: "该录音来源不使用 API 转写，请使用来源自带的转写同步。" });
     return;
   }
-
+  // 如果未开启录音API转写
+  // 是腾讯会议录音--> 自带转写
+  // 否则--> 409
   if (!isRecordingApiTranscriptionEnabled()) {
     if (String(recording.source || "").startsWith(TENCENT_MEETING_SOURCE_PREFIX)) {
       const synced = await syncTencentMeetingBuiltInTranscript(recording.id, tencentMeetingSyncInfoFromRecording(recording));

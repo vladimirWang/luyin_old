@@ -419,7 +419,7 @@ export async function loadDb() {
       ownerClientId: "",
       ...folder,
     })),
-    transcriptSegments: parsed.transcriptSegments || [],
+    transcriptSegments: parsed.transcriptSegments || [], // 录音的转写片段（字幕）数组
     qaMessages: parsed.qaMessages || [],
     dailyMeetingBriefs: Array.isArray(parsed.dailyMeetingBriefs)
       ? parsed.dailyMeetingBriefs.map((brief) => ({ clientId: "", ...brief }))

@@ -67,8 +67,11 @@ function envFlag(name, fallback = "1") {
   return !["0", "false", "no", "off"].includes(value);
 }
 
+// 是否启动录音API转写
 export function isRecordingApiTranscriptionEnabled() {
-  return envFlag("ASR_API_TRANSCRIPTION_ENABLED", "0");
+  // TODO 待删除 多余配置
+  // return envFlag("ASR_API_TRANSCRIPTION_ENABLED", "0");
+  return true
 }
 
 const defaultTencentHotwords = [
@@ -1314,6 +1317,7 @@ const supportedAsrProviders = new Set(["local-fallback", "openai", "custom", "mi
 
 export function getTranscriptionDiagnostics() {
   const mode = getTranscriptionMode();
+  logger.info(`[CALL] getTranscriptionDiagnostics:  Transcription mode: ${mode}`);
   const recordingApiEnabled = isRecordingApiTranscriptionEnabled();
   const checks = {
     openaiKey: Boolean(env("OPENAI_API_KEY")),
