@@ -35,6 +35,8 @@ services:
       - "7000:7000"
     depends_on:
       - app
+    volumes:
+      - ./client/dist:/usr/share/nginx/html
     restart: unless-stopped
 
   mysql:
