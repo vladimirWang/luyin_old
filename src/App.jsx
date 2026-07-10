@@ -3304,16 +3304,19 @@ function ChatDetailView({ recording, recordings = [], onBack, onToast, language,
   }, [lockedRecordingId]);
 
   useEffect(() => {
+    console.log("fetching recordings list");
     let ignored = false;
     setListLoading(true);
     api("/api/recordings?folderId=all&q=")
       .then((payload) => {
+        console.log("recordings payload", payload);
         if (!ignored) {
           setAvailableRecordings((payload.recordings || []).filter((item) => !item.deletedAt));
           setListError("");
         }
       })
-      .catch(() => {
+      .catch((e) => {
+        console.error("Failed to fetch recordings list: ", e.message);
         if (!ignored) setListError("录音列表暂时无法刷新");
       })
       .finally(() => {
@@ -6641,34 +6644,36 @@ export function App() {
       document.removeEventListener("focusout", queueKeyboardUpdate);
     };
   }, []);
+  console.log(`刷新recordings参数 folderId: ${query}, selectedFolderId: ${selectedFolderId}`);
 
-  useEffect(() => {
-    const timeout = window.setTimeout(() => {
-      refreshRecordings(query, selectedFolderId).catch(() => {});
-    }, 180);
-    return () => window.clearTimeout(timeout);
-  }, [query, selectedFolderId]);
+  // TODO 验证时否需要定时刷新录音列表，暂时注释掉
+  // useEffect(() => {
+  //   const timeout = window.setTimeout(() => {
+  //     refreshRecordings(query, selectedFolderId).catch(() => {});
+  //   }, 180);
+  //   return () => window.clearTimeout(timeout);
+  // }, [query, selectedFolderId]);
 
-  useEffect(() => {
-    const interval = window.setInterval(() => {
-      if (document.visibilityState === "hidden") return;
-      refreshRecordings(query, selectedFolderId, { silent: true }).catch(() => {});
-    }, 6000);
-    return () => window.clearInterval(interval);
-  }, [query, selectedFolderId]);
+  // useEffect(() => {
+  //   const interval = window.setInterval(() => {
+  //     if (document.visibilityState === "hidden") return;
+  //     refreshRecordings(query, selectedFolderId, { silent: true }).catch(() => {});
+  //   }, 6000);
+  //   return () => window.clearInterval(interval);
+  // }, [query, selectedFolderId]);
 
-  useEffect(() => {
-    const hasProcessing = recordings.some(
-      (recording) =>
-        (recording.status !== "ready" && recording.status !== "failed") ||
-        recording.meetingOutlineStatus === "generating",
-    );
-    if (!hasProcessing) return undefined;
-    const interval = window.setInterval(() => {
-      refreshRecordings(query, selectedFolderId, { silent: true }).catch(() => {});
-    }, 1800);
-    return () => window.clearInterval(interval);
-  }, [recordings, query, selectedFolderId]);
+  // useEffect(() => {
+  //   const hasProcessing = recordings.some(
+  //     (recording) =>
+  //       (recording.status !== "ready" && recording.status !== "failed") ||
+  //       recording.meetingOutlineStatus === "generating",
+  //   );
+  //   if (!hasProcessing) return undefined;
+  //   const interval = window.setInterval(() => {
+  //     refreshRecordings(query, selectedFolderId, { silent: true }).catch(() => {});
+  //   }, 1800);
+  //   return () => window.clearInterval(interval);
+  // }, [recordings, query, selectedFolderId]);
 
   useEffect(() => {
     if (!toast) return undefined;
@@ -8471,7 +8476,11 @@ export function App() {
               onToast={setToast}
               language={profile.language}
               onSelectRecording={(id) => setSelectedId(id)}
-              onRefreshRecording={(id) => window.setTimeout(() => refreshRecording(id).catch(() => {}), 1200)}
+              onRefreshRecording={(id) => {
+                console.log("DetailView onRefreshRecording", id);
+                // TODO 暂时注释掉，避免频繁刷新导致的闪烁
+                // window.setTimeout(() => refreshRecording(id).catch(() => {}), 1200)
+              }}
             />
           ) : null}
         </div>
