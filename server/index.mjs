@@ -78,8 +78,8 @@ console.log("process.env.PORT:", process.env.PORT);
 // await loadEnvFile(path.join(projectRoot, ".env"));
 
 const port = Number(process.env.PORT);
-// const host = process.env.HOST || "0.0.0.0";
-const host = '192.168.1.156'
+const host = process.env.HOST || "0.0.0.0";
+// const host = '192.168.1.156'
 const httpsPort = Number(process.env.HTTPS_PORT || 0);
 
 const app = express();

@@ -3,8 +3,6 @@ services:
     build:
       context: .
       dockerfile: Dockerfile
-    ports:
-      - "7000:8787"
     env_file:
       - .env
     environment:
