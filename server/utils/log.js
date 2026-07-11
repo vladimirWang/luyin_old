@@ -1,6 +1,7 @@
 import winston from 'winston'
 import fs from "node:fs";
 import path from "node:path";
+import "winston-daily-rotate-file";
 
 const isProduction = process.env.NODE_ENV === "prod";
 const logDir = path.resolve(process.cwd(), process.env.LOG_DIR || "logs");
@@ -20,16 +21,18 @@ const logger = winston.createLogger({
     defaultMeta: { service: 'wecom-recorder-server' },
     transports: isProduction
         ? [
-            new winston.transports.File({
-                filename: path.join(logDir, "error.log"),
+            new winston.transports.DailyRotateFile({
+                filename: path.join(logDir, "error-%DATE%.log"),
+                datePattern: "YYYY-MM-DD",
                 level: "error",
-                maxsize: 10 * 1024 * 1024,
-                maxFiles: 10,
+                maxFiles: "30d",
+                maxSize: "20m",
             }),
-            new winston.transports.File({
-                filename: path.join(logDir, "combined.log"),
-                maxsize: 20 * 1024 * 1024,
-                maxFiles: 10,
+            new winston.transports.DailyRotateFile({
+                filename: path.join(logDir, "combined-%DATE%.log"),
+                datePattern: "YYYY-MM-DD",
+                maxFiles: "30d",
+                maxSize: "50m",
             }),
         ]
         : [
