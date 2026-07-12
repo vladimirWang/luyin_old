@@ -9,7 +9,6 @@ export async function requestMicrophoneStream() {
     },
     { audio: true },
   ];
-  alert("mediaDevices: " + typeof navigator.mediaDevices)
   // console.log("getUserMedia: ", typeof navigator.mediaDevices.getUserMedia)
   let lastError;
   for (const constraints of attempts) {
