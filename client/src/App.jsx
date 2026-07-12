@@ -118,7 +118,13 @@ import {
   getAccountDisplayName,
   getDetectedWecomName,
   showToast,
+  dailyBriefMeetingCount,
+  api,
+  fetchWithClient,
+  dailyBriefDisplayDate
 } from './utils/index.js'
+import {requestMicrophoneStream, getAudioFileDuration} from './utils/audio.js'
+import {loadImageSource, compressAvatarImage} from './utils/image.js'
 
 const cardColors = ["coral", "indigo", "violet", "teal", "clay", "ink"];
 const RECORDING_DATA_SLICE_MS = 60 * 1000;
@@ -139,126 +145,6 @@ const AVATAR_MAX_SOURCE_BYTES = 60 * 1024 * 1024;
 const AVATAR_TARGET_BYTES = 360 * 1024;
 const AVATAR_HARD_LIMIT_BYTES = 720 * 1024;
 const AVATAR_MAX_DIMENSION = 512;
-
-function recordVisualIcon(visualClass = "") {
-  if (visualClass.includes("visual-tencent-recorder")) {
-    return <i className="record-visual-dots record-visual-dots-recorder" />;
-  }
-  return <img className="record-visual-logo" src="/assets/record-dot-logo.png" alt="" draggable="false" />;
-}
-
-async function loadImageSource(file) {
-  if (window.createImageBitmap) {
-    try {
-      const bitmap = await window.createImageBitmap(file, { imageOrientation: "from-image" });
-      return {
-        source: bitmap,
-        width: bitmap.width,
-        height: bitmap.height,
-        close: () => bitmap.close?.(),
-      };
-    } catch {
-      try {
-        const bitmap = await window.createImageBitmap(file);
-        return {
-          source: bitmap,
-          width: bitmap.width,
-          height: bitmap.height,
-          close: () => bitmap.close?.(),
-        };
-      } catch {
-        // Fall back to an HTMLImageElement below.
-      }
-    }
-  }
-
-  const url = URL.createObjectURL(file);
-  try {
-    const image = await new Promise((resolve, reject) => {
-      const img = new Image();
-      img.onload = () => resolve(img);
-      img.onerror = () => reject(new Error("图片无法读取"));
-      img.src = url;
-    });
-    return {
-      source: image,
-      width: image.naturalWidth || image.width,
-      height: image.naturalHeight || image.height,
-      close: () => URL.revokeObjectURL(url),
-    };
-  } catch (error) {
-    URL.revokeObjectURL(url);
-    throw error;
-  }
-}
-
-async function compressAvatarImage(file) {
-  if (!isImageFile(file)) throw new Error("请选择图片文件");
-  if (file.size > AVATAR_MAX_SOURCE_BYTES) throw new Error("图片太大，请重新上传。");
-
-  const image = await loadImageSource(file);
-  try {
-    const width = Number(image.width || 0);
-    const height = Number(image.height || 0);
-    if (!width || !height) throw new Error("图片无法读取，请重新上传。");
-
-    const cropSize = Math.min(width, height);
-    const sourceX = Math.max(0, Math.floor((width - cropSize) / 2));
-    const sourceY = Math.max(0, Math.floor((height - cropSize) / 2));
-    const outputSizes = [...new Set([Math.min(AVATAR_MAX_DIMENSION, cropSize), 384, 320, 256].filter((size) => size > 0 && size <= cropSize))];
-    const qualities = [0.88, 0.8, 0.72, 0.64, 0.56, 0.48, 0.4];
-    const canvas = document.createElement("canvas");
-    const context = canvas.getContext("2d", { alpha: false });
-    if (!context) throw new Error("当前浏览器无法压缩图片，请重新上传更小的图片。");
-
-    let bestBlob = null;
-    for (const size of outputSizes) {
-      canvas.width = size;
-      canvas.height = size;
-      context.clearRect(0, 0, size, size);
-      context.fillStyle = "#ffffff";
-      context.fillRect(0, 0, size, size);
-      context.drawImage(image.source, sourceX, sourceY, cropSize, cropSize, 0, 0, size, size);
-
-      for (const quality of qualities) {
-        const blob = await canvasToBlob(canvas, "image/jpeg", quality);
-        if (!blob) continue;
-        if (!bestBlob || blob.size < bestBlob.size) bestBlob = blob;
-        if (blob.size <= AVATAR_TARGET_BYTES) return blobToDataUrl(blob);
-      }
-    }
-
-    if (bestBlob && bestBlob.size <= AVATAR_HARD_LIMIT_BYTES) return blobToDataUrl(bestBlob);
-    throw new Error("图片太大，请重新上传。");
-  } finally {
-    image.close?.();
-  }
-}
-
-async function requestMicrophoneStream() {
-  const attempts = [
-    {
-      audio: {
-        echoCancellation: true,
-        noiseSuppression: true,
-        autoGainControl: true,
-      },
-    },
-    { audio: true },
-  ];
-  alert("mediaDevices: " + typeof navigator.mediaDevices)
-  // console.log("getUserMedia: ", typeof navigator.mediaDevices.getUserMedia)
-  let lastError;
-  for (const constraints of attempts) {
-    try {
-      return await navigator.mediaDevices.getUserMedia(constraints);
-    } catch (error) {
-      lastError = error;
-    }
-  }
-  // alert("都失败了")
-  throw lastError;
-}
 
 async function putRecordingRecoverySegment(row) {
   const db = await openRecordingRecoveryDb();
@@ -367,13 +253,6 @@ function mediaRequestUrl(url, version = "") {
   return appendUrlParam(appendUrlParam(appendUrlParam(url, "clientId", getClientId()), "authToken", auth?.token || ""), "v", version);
 }
 
-function fetchWithClient(url, options = {}) {
-  return fetch(url, {
-    ...options,
-    headers: mergeRequestHeaders(options.headers),
-  });
-}
-
 function isWecomWebView() {
   return /wxwork|wecom|micromessenger/i.test(navigator.userAgent);
 }
@@ -394,147 +273,6 @@ function readWecomNameHintFromUrl() {
   ]
     .map((value) => String(value || "").trim())
     .find(Boolean);
-}
-
-async function api(path, options = {}) {
-  const response = await fetch(path, {
-    ...options,
-    headers: mergeRequestHeaders(options.headers),
-  });
-  const contentType = response.headers.get("content-type") || "";
-  const payload = contentType.includes("application/json") ? await response.json() : await response.text();
-
-  if (path.startsWith("/api") && typeof payload === "string" && /<!doctype html|<html|cannot\s+(get|post)/i.test(payload)) {
-    throw new Error("接口服务未连接或版本未更新，请刷新页面并确认后端服务已重启。");
-  }
-
-  if (!response.ok) {
-    throw new Error(typeof payload === "string" ? payload : payload.error || "请求失败");
-  }
-
-  return payload;
-}
-
-function getAudioFileDuration(file) {
-  return new Promise((resolve) => {
-    const audio = document.createElement(String(file?.type || "").startsWith("video/") ? "video" : "audio");
-    const objectUrl = URL.createObjectURL(file);
-    const timeout = window.setTimeout(() => {
-      URL.revokeObjectURL(objectUrl);
-      resolve(0);
-    }, 2500);
-
-    audio.preload = "metadata";
-    audio.src = objectUrl;
-    audio.onloadedmetadata = () => {
-      window.clearTimeout(timeout);
-      const durationMs = Number.isFinite(audio.duration) ? Math.round(audio.duration * 1000) : 0;
-      URL.revokeObjectURL(objectUrl);
-      resolve(durationMs);
-    };
-    audio.onerror = () => {
-      window.clearTimeout(timeout);
-      URL.revokeObjectURL(objectUrl);
-      resolve(0);
-    };
-  });
-}
-
-
-
-
-
-
-
-function todayDisplayDateFallback() {
-  const now = new Date();
-  return String(now.getMonth() + 1).padStart(2, "0") + "/" + String(now.getDate()).padStart(2, "0");
-}
-
-function todayDateKey() {
-  const now = new Date();
-  return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}-${String(now.getDate()).padStart(2, "0")}`;
-}
-
-function dateKeyFromDate(value) {
-  const date = value instanceof Date ? value : new Date(value || Date.now());
-  const safeDate = Number.isNaN(date.getTime()) ? new Date() : date;
-  return `${safeDate.getFullYear()}-${String(safeDate.getMonth() + 1).padStart(2, "0")}-${String(safeDate.getDate()).padStart(2, "0")}`;
-}
-
-function dateKeyFromRecording(recording) {
-  return dateKeyFromDate(recording?.createdAt || recording?.uploadedAt || recording?.updatedAt || Date.now());
-}
-
-function displayDateFromDateKey(dateKey) {
-  const [, month = "", day = ""] = String(dateKey || "").split("-");
-  return month && day ? `${month}/${day}` : todayDisplayDateFallback();
-}
-
-function dailyBriefDisplayDate(brief) {
-  return brief?.displayDate || displayDateFromDateKey(brief?.date);
-}
-
-function dailyBriefMeetingCount(brief, fallback = 0) {
-  const value = Number(brief?.meetingCount);
-  return Number.isFinite(value) ? value : fallback;
-}
-
-function dailyBriefFallbackContent(brief, meetingCount) {
-  const displayDate = dailyBriefDisplayDate(brief);
-  const saved = cleanQaVisibleText(brief?.summaryMarkdown || "", "");
-  if (saved) return saved;
-  if (brief?.status === "generating" || brief?.dirty) {
-    return [
-      `今日会议简报｜${displayDate}｜正在生成`,
-      "",
-      "正在生成今日会议简报",
-      "系统正在汇总今天上传的录音和会议提纲，生成完成后会自动显示在这里。",
-    ].join("\n");
-  }
-  if (!meetingCount) {
-    return [
-      `今日会议简报｜${displayDate}｜共 0 场会议`,
-      "",
-      "一、今日总体结论",
-      "今天还没有可总结的录音。",
-      "",
-      "二、会议列表",
-      "暂无会议。",
-      "",
-      "三、今日重点待办",
-      "暂无明确内容。",
-    ].join("\n");
-  }
-  return [
-    `今日会议简报｜${displayDate}｜共 ${meetingCount} 场会议`,
-    "",
-    "一、今日总体结论",
-    "今日会议简报正在生成中，生成完成后会自动展示。",
-    "",
-    "二、会议列表",
-    "暂无可展示的会议详情。",
-    "",
-    "三、今日重点待办",
-    "暂无明确内容。",
-  ].join("\n");
-}
-
-function DailyMeetingBriefCard({ brief, loading, meetingCount, onOpen }) {
-  const displayDate = dailyBriefDisplayDate(brief);
-  const countText = meetingCount > 0 ? `${meetingCount}场会议` : "暂无会议";
-  const hint = meetingCount > 0 ? "点击查看今日核心内容" : "今天还没有可总结的录音";
-  return (
-    <div className="daily-brief-wrapper">
-      <button className="daily-brief-card" type="button" onClick={onOpen} disabled={loading && !brief}>
-        <span className="daily-brief-title">今日会议简报</span>
-        <span className="daily-brief-subtitle">
-          {displayDate} ｜ {countText}
-        </span>
-        <span className="daily-brief-hint">{loading ? "正在读取今日简报" : hint}</span>
-      </button>
-    </div>
-  );
 }
 
 function normalizeDailyBriefTitle(value = "") {
@@ -660,36 +398,6 @@ function renderDailyBriefLines(markdown = "", options = {}) {
       ) : null,
     ].filter(Boolean);
   });
-}
-
-function DailyMeetingBriefMessage({ message, ttsState, onSpeakLine, onShare, onRefreshRecording, refreshingRecordingIds }) {
-  const content = cleanQaVisibleText(message.content || message.answer || "", "") || dailyBriefFallbackContent(null, 0);
-  const canShare = message.briefDate && message.status !== "generating";
-  const speechIdPrefix = `daily-brief-${message.briefDate || message.id || "message"}`;
-  return (
-    <article className="daily-brief-message">
-      <div className="daily-brief-message-kicker">今日会议简报</div>
-      <div className="daily-brief-message-body">
-        {renderDailyBriefLines(content, {
-          speechIdPrefix,
-          ttsState,
-          recordingStates: message.recordingStates || [],
-          refreshingRecordingIds,
-          briefDate: message.briefDate,
-          onRefreshRecording,
-          onSpeakLine: (line) => onSpeakLine?.(message, line),
-        })}
-      </div>
-      {canShare ? (
-        <div className="daily-brief-actions">
-          <button type="button" onClick={(event) => onShare?.(message, event)}>
-            <Share2 size={13} />
-            <span>分享 PDF</span>
-          </button>
-        </div>
-      ) : null}
-    </article>
-  );
 }
 
 function dailyBriefListContent(brief, meetingCount = 0, loading = false) {
@@ -1994,17 +1702,18 @@ export function App() {
   }
 
   async function uploadRecording(blob, durationMs, options = {}) {
+    const loadingMsg = options.uploadMessage || "正在上传录音并准备转写"
     const uploadId = options.uploadId || (options.showUploadCard === false || options.silent
       ? ""
       : createUploadCard({
           name: options.name || "新录音",
           durationMs,
-          message: options.uploadMessage || "正在上传录音并准备转写",
+          message: loadingMsg + ` call uploadRecording 1`,
         }));
     updateUploadCard(uploadId, {
       name: options.name || "新录音",
       durationMs,
-      message: options.uploadMessage || "正在上传录音并准备转写",
+      message: loadingMsg + ` call uploadRecording 2`,
     });
     const formData = new FormData();
     formData.append("audio", blob, options.fileName || `recording-${Date.now()}.webm`);
@@ -2037,18 +1746,19 @@ export function App() {
   }
 
   async function uploadRecordingSegments(segments, durationMs, options = {}) {
+    const loadingMsg = options.uploadMessage || "正在上传录音并准备转写"
     const uploadId = options.uploadId || (options.showUploadCard === false || options.silent
       ? ""
       : createUploadCard({
           name: options.name || (segments.length > 1 ? "上传录音" : "新录音"),
           durationMs,
-          message: options.uploadMessage || "正在上传录音并准备转写",
+          message: loadingMsg + ' call uploadRecordingSegments 1',
         }));
     console.log("[call] uploadRecordingSegments: ", uploadId)
     updateUploadCard(uploadId, {
       name: options.name || (segments.length > 1 ? "上传录音" : "新录音"),
       durationMs,
-      message: options.uploadMessage || "正在上传录音并准备转写",
+      message: loadingMsg + ' call uploadRecordingSegments 2',
     });
     console.log("[call] uploadRecordingSegments 前端乐观更新结束")
     let longUploadSessionId = "";
@@ -3564,6 +3274,7 @@ export function App() {
     <main className={keyboardVisible ? "app-shell keyboard-visible" : "app-shell"}>
       <div className={`h5-app view-${activeView}`}>
         <div className="view-stack">
+          {/* <div style={{fontSize: 30, color: 'red'}}>1232</div> */}
           {activeView === "record" ? (
             <RecorderView
               elapsedMs={elapsedMs}

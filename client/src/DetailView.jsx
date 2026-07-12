@@ -18,6 +18,7 @@ import {
   FileAudio,
   FileUp,
   Link,
+  X
 } from "lucide-react";
 import {
   uiText,
@@ -39,9 +40,16 @@ import {
   pointLabelForIndex,
   thinkingStepsForMessage,
   stripQaInternalIndexMarkers,
+  dailyBriefMeetingCount,
+  api,
+  fetchWithClient
 } from "./utils/index.js";
+import { dateKeyFromRecording, todayDisplayDateFallback, displayDateFromDateKey } from './utils/date.js'
+import { DailyMeetingBriefCard } from './DetailView/components/DailyMeetingBriefCard.jsx'
+import { requestMicrophoneStream } from './utils/audio.js'
+import {DailyMeetingBriefMessage} from './DetailView/components/DailyMeetingBriefMessage.jsx'
 
-function ChatDetailView({ recording, recordings = [], onBack, onToast, language, onSelectRecording }) {
+export function DetailView({ recording, recordings = [], onBack, onToast, language, onSelectRecording }) {
   const audioRef = useRef(null);
   const audioSourceRef = useRef("");
   const imageInputRef = useRef(null);
@@ -319,11 +327,20 @@ function ChatDetailView({ recording, recordings = [], onBack, onToast, language,
     return () => {
       ignored = true;
       if (voiceRecorderRef.current?.state === "recording") voiceRecorderRef.current.stop();
-      voiceStreamRef.current?.getTracks().forEach((track) => track.stop());
-      qaPollingRef.current.forEach((timer) => window.clearTimeout(timer));
+      const tracks = voiceStreamRef.current?.getTracks()
+      if (Array.isArray(tracks)) {
+        tracks.forEach((track) => track.stop());
+      }
+      if (Array.isArray(qaPollingRef.current)) {
+        qaPollingRef.current.forEach((timer) => window.clearTimeout(timer));
+      }
       qaPollingRef.current.clear();
-      dailyBriefPollingRef.current.forEach((timer) => window.clearTimeout(timer));
-      dailyBriefPollingRef.current.clear();
+      if (Array.isArray(dailyBriefPollingRef.current)) {
+        dailyBriefPollingRef.current.forEach((timer) => window.clearTimeout(timer));
+      }
+      if (dailyBriefPollingRef.current && typeof dailyBriefPollingRef.current.clear === 'function') {
+        dailyBriefPollingRef.current.clear();
+      }
     };
   }, []);
 
@@ -384,16 +401,18 @@ function ChatDetailView({ recording, recordings = [], onBack, onToast, language,
       byDate.set(brief.date, { ...(byDate.get(brief.date) || {}), ...brief });
     };
 
-    dailyBriefHistory.forEach(putBrief);
+    if (Array.isArray(dailyBriefHistory)) {
+      dailyBriefHistory.forEach(putBrief);
+    }
     putBrief(dailyBrief);
 
     const recordingsByDate = new Map();
-    activeRecordings.forEach((item) => {
+    Array.isArray(activeRecordings) && activeRecordings.forEach((item) => {
       const date = dateKeyFromRecording(item);
       recordingsByDate.set(date, [...(recordingsByDate.get(date) || []), item]);
     });
 
-    recordingsByDate.forEach((items, date) => {
+    Array.isArray(recordingsByDate) && recordingsByDate.forEach((items, date) => {
       const existing = byDate.get(date) || {};
       byDate.set(date, {
         id: existing.id || `daily-brief-${date}`,
@@ -477,7 +496,12 @@ function ChatDetailView({ recording, recordings = [], onBack, onToast, language,
   }, [latestAnswerKey]);
 
   useEffect(() => {
-    answers.filter((item) => item.pending).forEach((item) => pollQaMessage(item.id, 0, messageScopeFromKnown(item, activeScopeIdsRef.current, answers)));
+    if (Array.isArray(answers)) {
+      return
+    }
+    answers.filter((item) => item.pending).forEach((item) => {
+      pollQaMessage(item.id, 0, messageScopeFromKnown(item, activeScopeIdsRef.current, answers))
+    });
   }, [answers]);
 
   function normalizeRecordingIds(ids = []) {
@@ -517,7 +541,9 @@ function ChatDetailView({ recording, recordings = [], onBack, onToast, language,
 
   function mergeQaMessages(...groups) {
     const merged = new Map();
-    groups.flat().forEach((message) => {
+    const flatted = groups.flat()
+    if (!Array.isArray(flatted)) return []
+    flatted.forEach((message) => {
       if (!message?.id || message.deletedAt) return;
       const previous = merged.get(message.id);
       const scope = messageRecordingIds(message).length > 0 ? messageRecordingIds(message) : messageRecordingIds(previous || {});
@@ -541,7 +567,9 @@ function ChatDetailView({ recording, recordings = [], onBack, onToast, language,
   function restoreActiveQaConversation(messages = []) {
     const alive = sortMessagesAscending(messages.filter((item) => !item.deletedAt));
     const pendingMessages = alive.filter((item) => item.pending);
-    pendingMessages.forEach((item) => pollQaMessage(item.id, 0, messageScopeFromKnown(item, [], alive)));
+    (Array.isArray(pendingMessages) ? pendingMessages : []).forEach((item) => {
+      pollQaMessage(item.id, 0, messageScopeFromKnown(item, [], alive))
+    });
     if (!qaConversationViewRef.current) return;
     if (answers.length > 0) return;
 
@@ -594,7 +622,9 @@ function ChatDetailView({ recording, recordings = [], onBack, onToast, language,
     setScopeExpanded(false);
     if (latest) saveActiveQaMessageRef(latest);
     else clearActiveQaMessageRef();
-    history.filter((item) => item.pending).forEach((item) => pollQaMessage(item.id, 0, next));
+    (Array.isArray(history) ? history : []).filter((item) => item.pending).forEach((item) => {
+      pollQaMessage(item.id, 0, next)
+    });
     if (lockedRecordingId && id !== lockedRecordingId) onSelectRecording?.(id);
     window.requestAnimationFrame(() => {
       chatEndRef.current?.scrollIntoView({ block: "end", behavior: "smooth" });
@@ -855,7 +885,8 @@ function ChatDetailView({ recording, recordings = [], onBack, onToast, language,
         const blob = new Blob(voiceChunksRef.current, { type: recorder.mimeType || "audio/webm" });
         setListening(false);
         setVoiceBusy(true);
-        voiceStreamRef.current?.getTracks().forEach((track) => track.stop());
+        const tracks = voiceStreamRef.current?.getTracks() || [];
+        tracks.forEach((track) => track.stop());
         voiceStreamRef.current = null;
         try {
           await uploadVoiceQuestion(blob, durationMs);
@@ -1211,7 +1242,7 @@ function ChatDetailView({ recording, recordings = [], onBack, onToast, language,
     setDailyBriefExpanded(true);
     if (latest) saveActiveQaMessageRef(latest);
     else clearActiveQaMessageRef();
-    history.filter((item) => item.pending).forEach((item) => pollQaMessage(item.id, 0, activeScopeIdsRef.current));
+    (Array.isArray(history) ? history : []).filter((item) => item.pending).forEach((item) => pollQaMessage(item.id, 0, activeScopeIdsRef.current));
     setScopeExpanded(false);
     window.requestAnimationFrame(() => {
       chatEndRef.current?.scrollIntoView({ block: "end", behavior: "smooth" });
@@ -2105,7 +2136,7 @@ function ChatDetailView({ recording, recordings = [], onBack, onToast, language,
       </div>
     );
   }
-
+  
   return (
     <section className="screen detail-screen chat-detail-screen" aria-label="录音问答">
       <header className="chat-page-header compact">
@@ -2657,9 +2688,4 @@ function ChatDetailView({ recording, recordings = [], onBack, onToast, language,
 
     </section>
   );
-}
-
-
-export function DetailView(props) {
-  return <ChatDetailView {...props} />;
 }

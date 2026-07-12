@@ -1,8 +1,9 @@
 import { Toast } from "antd-mobile";
+import {displayDateFromDateKey} from './date.js'
 
-const cardColors = ["coral", "indigo", "violet", "teal", "clay", "ink"];
+export const cardColors = ["coral", "indigo", "violet", "teal", "clay", "ink"];
 
-function showToast(content, duration = 2000) {
+export function showToast(content, duration = 2000) {
   if (!content) return;
   Toast.show({
     content,
@@ -11,7 +12,7 @@ function showToast(content, duration = 2000) {
   });
 }
 
-function mergeRequestHeaders(headers = {}) {
+export function mergeRequestHeaders(headers = {}) {
   const next = new Headers(headers);
   next.set("Content-Type", "application/json");
   const auth = getStoredAuth();
@@ -21,18 +22,18 @@ function mergeRequestHeaders(headers = {}) {
   return next;
 }
 
-function appendUrlParam(url, key, value) {
+export function appendUrlParam(url, key, value) {
   if (!value) return url;
   const separator = url.includes("?") ? "&" : "?";
   return `${url}${separator}${encodeURIComponent(key)}=${encodeURIComponent(value)}`;
 }
 
-function mediaRequestUrl(url, version = "") {
+export function mediaRequestUrl(url, version = "") {
   const auth = getStoredAuth();
   return appendUrlParam(appendUrlParam(appendUrlParam(url, "clientId", getClientId()), "authToken", auth?.token || ""), "v", version);
 }
 
-async function api(path, options = {}) {
+export async function api(path, options = {}) {
   const response = await fetch(path, {
     ...options,
     headers: mergeRequestHeaders(options.headers),
@@ -51,9 +52,9 @@ async function api(path, options = {}) {
   return payload;
 }
 
-const QA_TECHNICAL_FALLBACK = "回答内容包含模型中间格式，已自动隐藏。请点击重新生成。";
-const QA_THINKING_STEPS = ["读取选中录音的逐字稿", "抽取与问题最相关的候选语义段", "核对时间点与原文证据", "组织结论、原因和依据"];
-const MOJIBAKE_REPLACEMENTS = [
+export const QA_TECHNICAL_FALLBACK = "回答内容包含模型中间格式，已自动隐藏。请点击重新生成。";
+export const QA_THINKING_STEPS = ["读取选中录音的逐字稿", "抽取与问题最相关的候选语义段", "核对时间点与原文证据", "组织结论、原因和依据"];
+export const MOJIBAKE_REPLACEMENTS = [
   [/\u7481\u677f\u7d8d/g, "记录"],
   [/\u675e\ue100\u5553\u68f0\u52ee\ue74d/g, "转写预览"],
   [/\u93c0\u60f0\u6363/g, "收起"],
@@ -65,28 +66,28 @@ const MOJIBAKE_REPLACEMENTS = [
   [/\u9352\u55d5\u97e9/g, "分享"],
   [/\u6fb6\u8fab\u89e6/g, "失败"],
 ];
-const MOJIBAKE_PATTERN =
+export const MOJIBAKE_PATTERN =
   /\u7481\u677f\u7d8d|\u675e\ue100\u5553\u68f0\u52ee\ue74d|\u93c0\u60f0\u6363|\u8930\u66e2|\u6d7c\u6c33|\u7490\u71bb|\u59dd\uff45\u6e6a|\u6fb6\u8fab\u89e6|\u93c2\u56e7\u74e7|\u93c3\u5815\u66b1|\u95ca\u62bd|\u9352\u55d5\u97e9|\u934f\u62bd\u68f4|\u6fb6\u5d85\u57d7|\u6434\u66e2\u5134|\u7035\u8270\u57c5|\u93b4\u6220|\u93bb\u6130\u68f6|\u93c8\u6944|\u9350\u546d|\u7ef1\u3220\u7d29|\u59af\u2033\u7037|\u9422\u71b8\u579a|\u9358\u71b7\u6d1c|\u934f\u62bd\u656d|\u6e1a\u6fc7\u5d41|\u93c1\u7fe0\u7d8b|\u9352\u3086\u67c7|\u934a\u60e7\u609c|\u7ecb\u5b2a\u5bb3|\u93cd\u7a3f\u7e3e|\u9352\u55d9\u5063|\u7f01\u64b9|\u95c2\ue1be\u74df|\u9286|\u951b|\u951f|\ufffd/;
-const TECHNICAL_ANSWER_PATTERN =
+export const TECHNICAL_ANSWER_PATTERN =
   /DSML|tool_calls|search_transcript_segments|<\s*\|\s*DSML|<\/\s*\|\s*DSML|overall_judgement|final_conclusion|"evidences"\s*:|"analysis"\s*:|"confidence"\s*:|cleanText\(|\{cleanText|point\.(?:conclusion|reason|basis)|Bad control character|JSON parse failed|Cannot POST|<!DOCTYPE html|<html\b|parameter name=|invoke name=|function\s+\w+\s*\(|const\s+\w+\s*=|=>\s*\{|```/i;
 
-const RECORDING_RECOVERY_DB = "wecomRecorderRecordingRecovery";
-const RECORDING_RECOVERY_STORE = "segments";
-const RECORDING_RECOVERY_VERSION = 1;
-const RECORDING_SESSION_STORAGE_KEY = "wecomRecorderActiveRecordingSession";
-const RECORDING_SESSION_QUEUE_STORAGE_KEY = "wecomRecorderRecordingRecoveryQueue";
-const AUTH_STORAGE_KEY = "wecomRecorderAccountAuth";
-const PROFILE_STORAGE_KEY = "wecomRecorderProfile";
+export const RECORDING_RECOVERY_DB = "wecomRecorderRecordingRecovery";
+export const RECORDING_RECOVERY_STORE = "segments";
+export const RECORDING_RECOVERY_VERSION = 1;
+export const RECORDING_SESSION_STORAGE_KEY = "wecomRecorderActiveRecordingSession";
+export const RECORDING_SESSION_QUEUE_STORAGE_KEY = "wecomRecorderRecordingRecoveryQueue";
+export const AUTH_STORAGE_KEY = "wecomRecorderAccountAuth";
+export const PROFILE_STORAGE_KEY = "wecomRecorderProfile";
 
-function isEnglishLanguage(language) {
+export function isEnglishLanguage(language) {
   return /^en/i.test(String(language || ""));
 }
 
-function uiText(language, zh, en) {
+export function uiText(language, zh, en) {
   return isEnglishLanguage(language) ? en : zh;
 }
 
-function formatDuration(ms = 0, precise = false) {
+export function formatDuration(ms = 0, precise = false) {
   const safeMs = Math.max(0, ms);
   const totalSeconds = Math.floor(safeMs / 1000);
   const minutes = String(Math.floor(totalSeconds / 60)).padStart(2, "0");
@@ -96,7 +97,7 @@ function formatDuration(ms = 0, precise = false) {
   return `${minutes}:${seconds},${hundredths}`;
 }
 
-function formatShortDate(iso) {
+export function formatShortDate(iso) {
   if (!iso) return "";
   return new Intl.DateTimeFormat("zh-CN", {
     month: "2-digit",
@@ -104,7 +105,7 @@ function formatShortDate(iso) {
   }).format(new Date(iso));
 }
 
-function formatDate(iso) {
+export function formatDate(iso) {
   if (!iso) return "";
   return new Intl.DateTimeFormat("zh-CN", {
     month: "2-digit",
@@ -114,11 +115,11 @@ function formatDate(iso) {
   }).format(new Date(iso));
 }
 
-function formatTimecode(ms) {
+export function formatTimecode(ms) {
   return formatDuration(ms);
 }
 
-function formatClockTime(iso) {
+export function formatClockTime(iso) {
   if (!iso) return "";
   return new Intl.DateTimeFormat("zh-CN", {
     hour: "2-digit",
@@ -126,7 +127,7 @@ function formatClockTime(iso) {
   }).format(new Date(iso));
 }
 
-function formatCardDateParts(iso) {
+export function formatCardDateParts(iso) {
   if (!iso) return { month: "", day: "", weekday: "" };
   const date = new Date(iso);
   if (Number.isNaN(date.getTime())) return { month: "", day: "", weekday: "" };
@@ -137,7 +138,7 @@ function formatCardDateParts(iso) {
   };
 }
 
-function isToday(iso) {
+export function isToday(iso) {
   if (!iso) return false;
   const date = new Date(iso);
   const now = new Date();
@@ -148,18 +149,18 @@ function isToday(iso) {
   );
 }
 
-function safeFileName(name) {
+export function safeFileName(name) {
   return String(name || "recording").replace(/[\\/:*?"<>|]+/g, "_").slice(0, 80) || "recording";
 }
 
-function safeFileNameWithExtension(name, extension) {
+export function safeFileNameWithExtension(name, extension) {
   const suffix = extension.startsWith(".") ? extension : `.${extension}`;
   const safe = safeFileName(name);
   const escapedSuffix = suffix.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
   return new RegExp(`${escapedSuffix}$`, "i").test(safe) ? safe : `${safe}${suffix}`;
 }
 
-function recordTitleSize(name) {
+export function recordTitleSize(name) {
   const length = Array.from(String(name || "")).length;
   if (length >= 34) return "12px";
   if (length >= 28) return "13px";
@@ -169,7 +170,7 @@ function recordTitleSize(name) {
   return "clamp(20px, 5vw, 23px)";
 }
 
-function downloadBlob(blob, fileName) {
+export function downloadBlob(blob, fileName) {
   const url = URL.createObjectURL(blob);
   const link = document.createElement("a");
   link.href = url;
@@ -180,7 +181,7 @@ function downloadBlob(blob, fileName) {
   window.setTimeout(() => URL.revokeObjectURL(url), 500);
 }
 
-function openDownloadUrl(url, fileName = "") {
+export function openDownloadUrl(url, fileName = "") {
   const link = document.createElement("a");
   link.href = url;
   if (fileName) link.download = fileName;
@@ -190,7 +191,7 @@ function openDownloadUrl(url, fileName = "") {
   link.remove();
 }
 
-function isUploadableMediaFile(file) {
+export function isUploadableMediaFile(file) {
   const name = String(file?.name || "").toLowerCase();
   const type = String(file?.type || "").toLowerCase();
   return (
@@ -200,13 +201,13 @@ function isUploadableMediaFile(file) {
   );
 }
 
-function isImageFile(file) {
+export function isImageFile(file) {
   const type = String(file?.type || "").toLowerCase();
   const name = String(file?.name || "").toLowerCase();
   return type.startsWith("image/") || /\.(png|jpe?g|webp|gif|bmp|heic|heif)$/i.test(name);
 }
 
-function canvasToBlob(canvas, type, quality) {
+export function canvasToBlob(canvas, type, quality) {
   return new Promise((resolve) => {
     if (canvas.toBlob) {
       canvas.toBlob(resolve, type, quality);
@@ -220,7 +221,7 @@ function canvasToBlob(canvas, type, quality) {
   });
 }
 
-function blobToDataUrl(blob) {
+export function blobToDataUrl(blob) {
   return new Promise((resolve, reject) => {
     const reader = new FileReader();
     reader.onload = () => resolve(String(reader.result || ""));
@@ -229,13 +230,13 @@ function blobToDataUrl(blob) {
   });
 }
 
-function getSupportedMimeType() {
+export function getSupportedMimeType() {
   if (!window.MediaRecorder) return "";
   const types = ["audio/mp4", "audio/aac", "audio/mpeg", "audio/webm;codecs=opus", "audio/webm"];
   return types.find((type) => MediaRecorder.isTypeSupported(type)) || "";
 }
 
-function audioExtensionFromMimeType(mimeType = "") {
+export function audioExtensionFromMimeType(mimeType = "") {
   const normalized = String(mimeType || "").toLowerCase();
   if (normalized.includes("mp4")) return "m4a";
   if (normalized.includes("aac")) return "aac";
@@ -244,12 +245,12 @@ function audioExtensionFromMimeType(mimeType = "") {
   return "webm";
 }
 
-function canRequestMicrophone() {
+export function canRequestMicrophone() {
   const localHosts = ["localhost", "127.0.0.1", "::1"];
   return window.isSecureContext || localHosts.includes(window.location.hostname);
 }
 
-function microphoneErrorMessage(error) {
+export function microphoneErrorMessage(error) {
   const name = error?.name || "";
 
   if (!canRequestMicrophone()) {
@@ -275,7 +276,7 @@ function microphoneErrorMessage(error) {
   return "无法获取麦克风权限，请允许访问麦克风后再试。";
 }
 
-function recordingUploadErrorMessage(error) {
+export function recordingUploadErrorMessage(error) {
   const message = error instanceof Error ? error.message : String(error || "");
   if (/服务器正在处理数据|稍后重试|重试|retry|busy|processing/i.test(message)) {
     return "录音已提交，服务器正在后台处理转写，请稍后刷新记录。";
@@ -292,11 +293,11 @@ function recordingUploadErrorMessage(error) {
   return "上传失败，请检查服务器后重新录音。";
 }
 
-function pointLabelForIndex(index) {
+export function pointLabelForIndex(index) {
   return `观点 ${index + 1}`;
 }
 
-function stripQaInternalIndexMarkers(value) {
+export function stripQaInternalIndexMarkers(value) {
   return String(value ?? "")
     .replace(/\s*[\uFF08(]\s*(?:candidate\s*)?(?:index|indices|indexes|索引|候选索引)\s*[:：]?\s*[\d,\s、，和and-]+[\uFF09)]/gi, "")
     .replace(/\b(?:candidate\s*)?(?:index|indices|indexes)\s*[:：]?\s*[\d,\s、，和and-]+/gi, "")
@@ -309,20 +310,20 @@ function stripQaInternalIndexMarkers(value) {
     .trim();
 }
 
-function repairKnownMojibake(value) {
+export function repairKnownMojibake(value) {
   return MOJIBAKE_REPLACEMENTS.reduce((text, [pattern, replacement]) => text.replace(pattern, replacement), String(value ?? ""));
 }
 
-function looksLikeMojibake(value) {
+export function looksLikeMojibake(value) {
   return MOJIBAKE_PATTERN.test(String(value || ""));
 }
 
-function looksLikeTechnicalAnswerLeak(value) {
+export function looksLikeTechnicalAnswerLeak(value) {
   const text = String(value || "");
   return looksLikeMojibake(text) || TECHNICAL_ANSWER_PATTERN.test(text);
 }
 
-function cleanQaVisibleText(value, fallback = "") {
+export function cleanQaVisibleText(value, fallback = "") {
   const clean = stripQaInternalIndexMarkers(
     repairKnownMojibake(value)
       .replace(/\*\*/g, "")
@@ -339,7 +340,7 @@ function cleanQaVisibleText(value, fallback = "") {
   return looksLikeTechnicalAnswerLeak(clean) ? fallback : clean;
 }
 
-function parseStructuredAnswer(answer) {
+export function parseStructuredAnswer(answer) {
   if (!answer) return null;
   if (typeof answer === "object") return answer;
   const raw = String(answer || "").trim();
@@ -368,11 +369,11 @@ function parseStructuredAnswer(answer) {
   return null;
 }
 
-function structuredAnswerFromItem(item) {
+export function structuredAnswerFromItem(item) {
   return parseStructuredAnswer(item?.structuredAnswer) || parseStructuredAnswer(item?.answer);
 }
 
-function structuredAnswerToPlainText(structured) {
+export function structuredAnswerToPlainText(structured) {
   if (!structured || typeof structured !== "object") return "";
   const cleanText = (value) => cleanQaVisibleText(value);
   const lines = [];
@@ -412,13 +413,13 @@ function structuredAnswerToPlainText(structured) {
   return looksLikeTechnicalAnswerLeak(text) ? "" : text;
 }
 
-function cleanAnswerForDisplay(answer) {
+export function cleanAnswerForDisplay(answer) {
   const structured = parseStructuredAnswer(answer);
   if (structured) return structuredAnswerToPlainText(structured) || QA_TECHNICAL_FALLBACK;
   return cleanQaVisibleText(answer, QA_TECHNICAL_FALLBACK);
 }
 
-function answerBlocksForDisplay(answer) {
+export function answerBlocksForDisplay(answer) {
   const clean = cleanAnswerForDisplay(answer);
   if (!clean) return [];
 
@@ -434,7 +435,7 @@ function answerBlocksForDisplay(answer) {
     .filter(Boolean);
 }
 
-function thinkingStepsForMessage(item) {
+export function thinkingStepsForMessage(item) {
   const thinking = item?.thinking || item?.reasoning || item?.reasoningContent || "";
   const cleanSteps = (steps) => {
     const safeSteps = steps
@@ -461,7 +462,7 @@ function thinkingStepsForMessage(item) {
   return QA_THINKING_STEPS;
 }
 
-function meetingReportBlocks(markdown = "") {
+export function meetingReportBlocks(markdown = "") {
   const lines = String(markdown || "")
     .replace(/\r/g, "")
     .split("\n")
@@ -489,7 +490,7 @@ function meetingReportBlocks(markdown = "") {
     .filter(Boolean);
 }
 
-function isTencentMeetingWaitingDownload(recording) {
+export function isTencentMeetingWaitingDownload(recording) {
   if (recording?.tencentMeeting?.waitingDownload) return true;
   const tag = String(recording?.tag || "");
   const message = String(recording?.errorMessage || "");
@@ -506,7 +507,7 @@ function isTencentMeetingWaitingDownload(recording) {
   return tag.includes("等待下载权限") || tag.includes("待授权") || message.includes("STS-Token") || message.includes("暂无权限");
 }
 
-function isTencentMeetingRecorderPen(recording = {}) {
+export function isTencentMeetingRecorderPen(recording = {}) {
   if (!recording?.tencentMeeting?.imported) return false;
   const sourceKind = String(recording?.tencentMeeting?.sourceKind || recording?.tencentMeetingSourceKind || "").toLowerCase();
   if (sourceKind === "recorder") return true;
@@ -514,7 +515,7 @@ function isTencentMeetingRecorderPen(recording = {}) {
   return sourceText.includes("录音笔");
 }
 
-function isTencentMeetingNoTranscript(recording) {
+export function isTencentMeetingNoTranscript(recording) {
   const tag = String(recording?.tag || "");
   const message = String(recording?.errorMessage || "");
   if (
@@ -536,7 +537,7 @@ function isTencentMeetingNoTranscript(recording) {
   );
 }
 
-function isTencentMeetingWaitingTranscript(recording) {
+export function isTencentMeetingWaitingTranscript(recording) {
   if (isTencentMeetingNoTranscript(recording)) return false;
   if (recording?.tencentMeeting?.waitingTranscript) return true;
   const tag = String(recording?.tag || "");
@@ -564,7 +565,7 @@ function isTencentMeetingWaitingTranscript(recording) {
       message.includes("腾讯会议还没有返回"));
 }
 
-function recordingStatusLabel(recording, isTrashView = false) {
+export function recordingStatusLabel(recording, isTrashView = false) {
   if (isTrashView) return "回收站";
   if (isTencentMeetingNoTranscript(recording)) return "腾讯无文字";
   if (isTencentMeetingWaitingDownload(recording)) return "待同步";
@@ -575,7 +576,7 @@ function recordingStatusLabel(recording, isTrashView = false) {
   return "处理中";
 }
 
-function recordingDetailStatusLabel(recording) {
+export function recordingDetailStatusLabel(recording) {
   if (isTencentMeetingNoTranscript(recording)) return "腾讯无文字";
   if (isTencentMeetingWaitingDownload(recording)) return "等待同步";
   if (isTencentMeetingWaitingTranscript(recording)) return "等待腾讯文字";
@@ -584,12 +585,12 @@ function recordingDetailStatusLabel(recording) {
   return "服务处理中";
 }
 
-function recordingDurationLabel(recording) {
+export function recordingDurationLabel(recording) {
   if (isTencentMeetingWaitingDownload(recording) && !recording?.durationMs) return "待同步";
   return formatDuration(recording?.durationMs || 0);
 }
 
-function recordDateToneClass(recording, isTrashView = false) {
+export function recordDateToneClass(recording, isTrashView = false) {
   if (isTrashView) return "date-ready";
   if (
     recording?.status === "failed" ||
@@ -614,7 +615,7 @@ function recordDateToneClass(recording, isTrashView = false) {
   return "date-ready";
 }
 
-function recordVisualClass(recording = {}) {
+export function recordVisualClass(recording = {}) {
   const sourceClass = isTencentMeetingRecorderPen(recording) ? " visual-tencent-recorder" : "";
   const text = `${recording.name || ""} ${recording.tag || ""} ${recording.transcriptText || ""}`.toLowerCase();
   if (recording.status === "failed" || recording.transcriptHealth?.isFallback) return `visual-voice${sourceClass}`;
@@ -625,7 +626,7 @@ function recordVisualClass(recording = {}) {
   return recording.shared !== false ? `visual-voice${sourceClass}` : `visual-dots${sourceClass}`;
 }
 
-function recordSourceMeta(recording = {}) {
+export function recordSourceMeta(recording = {}) {
   const sourceKind = String(recording?.tencentMeeting?.sourceKind || recording?.tencentMeetingSourceKind || "").toLowerCase();
   if (recording?.tencentMeeting?.imported && sourceKind === "recorder") {
     return { className: "source-recorder", label: "录音笔" };
@@ -636,7 +637,7 @@ function recordSourceMeta(recording = {}) {
   return { className: "source-upload", label: "上传文件" };
 }
 
-function transcriptTextForRecording(recording) {
+export function transcriptTextForRecording(recording) {
   return (
     recording?.transcriptText ||
     (recording?.transcript || [])
@@ -645,7 +646,7 @@ function transcriptTextForRecording(recording) {
   );
 }
 
-function transcriptPlainTextForRecording(recording) {
+export function transcriptPlainTextForRecording(recording) {
   const header = [
     recording?.name || "录音转写",
     `时间：${formatDate(recording?.createdAt)}`,
@@ -658,13 +659,13 @@ function transcriptPlainTextForRecording(recording) {
   return `${header.concat(lines).join("\n")}\n`;
 }
 
-function transcriptTextFileForRecording(recording) {
+export function transcriptTextFileForRecording(recording) {
   return new File([transcriptPlainTextForRecording(recording)], `${safeFileName(recording?.name)}.txt`, {
     type: "text/plain;charset=utf-8",
   });
 }
 
-function recordingListSignature(recordings = []) {
+export function recordingListSignature(recordings = []) {
   return recordings
     .map((recording) =>
       [
@@ -691,7 +692,7 @@ function recordingListSignature(recordings = []) {
     .join("|");
 }
 
-function isFreshUploadLikeRecording(recording) {
+export function isFreshUploadLikeRecording(recording) {
   if (!recording?.id || recording.deletedAt) return false;
   if (!recording.transcriptHealth?.apiSourceAllowed) return false;
   const status = String(recording.status || "");
@@ -701,7 +702,7 @@ function isFreshUploadLikeRecording(recording) {
   return Date.now() - timestamp < 90 * 1000;
 }
 
-function mergeFreshUploadRecordings(nextRecordings = [], currentRecordings = [], removedIds = new Set()) {
+export function mergeFreshUploadRecordings(nextRecordings = [], currentRecordings = [], removedIds = new Set()) {
   const nextIds = new Set(nextRecordings.map((recording) => recording.id));
   const carry = currentRecordings.filter(
     (recording) => !nextIds.has(recording.id) && !removedIds.has(recording.id) && isFreshUploadLikeRecording(recording),
@@ -710,7 +711,7 @@ function mergeFreshUploadRecordings(nextRecordings = [], currentRecordings = [],
   return [...nextRecordings, ...carry].sort((a, b) => new Date(b.createdAt || b.updatedAt || 0) - new Date(a.createdAt || a.updatedAt || 0));
 }
 
-function speakersForRecording(recording) {
+export function speakersForRecording(recording) {
   if (recording?.speakers?.length) return recording.speakers;
   return [
     {
@@ -722,12 +723,12 @@ function speakersForRecording(recording) {
   ];
 }
 
-function speakerDraftsForRecording(recording) {
+export function speakerDraftsForRecording(recording) {
   const speakerMap = recording?.speakerMap || {};
   return Object.fromEntries(speakersForRecording(recording).map((speaker) => [speaker.key, speakerMap[speaker.key] || speaker.name]));
 }
 
-function readStoredJson(key) {
+export function readStoredJson(key) {
   try {
     return JSON.parse(window.localStorage.getItem(key) || "{}");
   } catch {
@@ -735,7 +736,7 @@ function readStoredJson(key) {
   }
 }
 
-function getStoredAuth() {
+export function getStoredAuth() {
   try {
     const auth = JSON.parse(window.localStorage.getItem(AUTH_STORAGE_KEY) || "{}");
     if (!auth?.token || Number(auth.expiresAt || 0) < Date.now()) {
@@ -748,35 +749,35 @@ function getStoredAuth() {
   }
 }
 
-function saveStoredAuth(auth) {
+export function saveStoredAuth(auth) {
   if (!auth?.token) return;
   window.localStorage.setItem(AUTH_STORAGE_KEY, JSON.stringify(auth));
 }
 
-function clearStoredAuth() {
+export function clearStoredAuth() {
   window.localStorage.removeItem(AUTH_STORAGE_KEY);
 }
 
-function getDetectedWecomName() {
+export function getDetectedWecomName() {
   const profile = getLocalProfile();
   return String(profile.wecomName || profile.wecomUserName || profile.wecomNickname || profile.wecomNickName || "").trim();
 }
 
-function getAccountDisplayName(profile = getLocalProfile()) {
+export function getAccountDisplayName(profile = getLocalProfile()) {
   const auth = getStoredAuth();
   return String(auth?.account?.username || auth?.profile?.username || profile.username || "").trim();
 }
 
-function getClientName() {
+export function getClientName() {
   const profile = getLocalProfile();
   return getAccountDisplayName(profile) || getDetectedWecomName() || String(profile.name || "").trim() || "未设置姓名";
 }
 
-function profileStorageKey(clientId = getClientId()) {
+export function profileStorageKey(clientId = getClientId()) {
   return `${PROFILE_STORAGE_KEY}:${clientId || "local"}`;
 }
 
-function getClientId() {
+export function getClientId() {
   const auth = getStoredAuth();
   if (auth?.account?.clientId) return auth.account.clientId;
   if (auth?.profile?.clientId) return auth.profile.clientId;
@@ -789,7 +790,7 @@ function getClientId() {
   return clientId;
 }
 
-function getLocalProfile() {
+export function getLocalProfile() {
   const clientId = getClientId();
   const key = profileStorageKey(clientId);
   const profile = readStoredJson(key);
@@ -809,7 +810,7 @@ function getLocalProfile() {
   return {};
 }
 
-function saveLocalProfile(profile) {
+export function saveLocalProfile(profile) {
   const clientId = getClientId();
   const next = { ...(profile || {}), clientId, updatedAt: new Date().toISOString() };
   try {
@@ -819,7 +820,7 @@ function saveLocalProfile(profile) {
   }
 }
 
-function sharedProfileDefaults(profile = {}) {
+export function sharedProfileDefaults(profile = {}) {
   const {
     name,
     avatarUrl,
@@ -834,7 +835,7 @@ function sharedProfileDefaults(profile = {}) {
   return rest;
 }
 
-function openRecordingRecoveryDb() {
+export function openRecordingRecoveryDb() {
   return new Promise((resolve, reject) => {
     if (!window.indexedDB) {
       reject(new Error("IndexedDB unavailable"));
@@ -854,14 +855,14 @@ function openRecordingRecoveryDb() {
   });
 }
 
-function idbRequest(request) {
+export function idbRequest(request) {
   return new Promise((resolve, reject) => {
     request.onsuccess = () => resolve(request.result);
     request.onerror = () => reject(request.error || new Error("IndexedDB request failed"));
   });
 }
 
-function normalizeRecordingSessionManifest(manifest) {
+export function normalizeRecordingSessionManifest(manifest) {
   if (!manifest?.id) return null;
   const segments = Array.isArray(manifest.segments)
     ? manifest.segments
@@ -890,7 +891,7 @@ function normalizeRecordingSessionManifest(manifest) {
   };
 }
 
-function readRecordingRecoveryQueue() {
+export function readRecordingRecoveryQueue() {
   try {
     const raw = window.localStorage.getItem(RECORDING_SESSION_QUEUE_STORAGE_KEY);
     const parsed = raw ? JSON.parse(raw) : [];
@@ -910,7 +911,7 @@ function readRecordingRecoveryQueue() {
   }
 }
 
-function readRecordingSessionManifest() {
+export function readRecordingSessionManifest() {
   try {
     const raw = window.localStorage.getItem(RECORDING_SESSION_STORAGE_KEY);
     if (!raw) return null;
@@ -923,7 +924,7 @@ function readRecordingSessionManifest() {
   }
 }
 
-function writeRecordingRecoveryQueue(queue) {
+export function writeRecordingRecoveryQueue(queue) {
   const normalized = [];
   const seen = new Set();
   for (const manifest of Array.isArray(queue) ? queue : []) {
@@ -935,7 +936,7 @@ function writeRecordingRecoveryQueue(queue) {
   window.localStorage.setItem(RECORDING_SESSION_QUEUE_STORAGE_KEY, JSON.stringify(normalized));
 }
 
-function upsertRecordingRecoveryManifest(manifest) {
+export function upsertRecordingRecoveryManifest(manifest) {
   const normalized = normalizeRecordingSessionManifest(manifest);
   if (!normalized?.id) return null;
   const queue = readRecordingRecoveryQueue().filter((item) => item.id !== normalized.id);
@@ -944,12 +945,12 @@ function upsertRecordingRecoveryManifest(manifest) {
   return normalized;
 }
 
-function removeRecordingRecoveryManifest(sessionId) {
+export function removeRecordingRecoveryManifest(sessionId) {
   if (!sessionId) return;
   writeRecordingRecoveryQueue(readRecordingRecoveryQueue().filter((manifest) => manifest.id !== sessionId));
 }
 
-function readRecoverableRecordingManifests() {
+export function readRecoverableRecordingManifests() {
   const queue = readRecordingRecoveryQueue();
   const active = (() => {
     try {
@@ -967,7 +968,7 @@ function readRecoverableRecordingManifests() {
     .sort((a, b) => String(a.createdAt || "").localeCompare(String(b.createdAt || "")));
 }
 
-function writeRecordingSessionManifest(manifest, options = {}) {
+export function writeRecordingSessionManifest(manifest, options = {}) {
   if (!manifest?.id) return;
   const normalized = upsertRecordingRecoveryManifest(manifest);
   if (normalized && options.setActive !== false) {
@@ -975,7 +976,7 @@ function writeRecordingSessionManifest(manifest, options = {}) {
   }
 }
 
-function clearRecordingSessionManifest(sessionId = "") {
+export function clearRecordingSessionManifest(sessionId = "") {
   if (!sessionId) {
     window.localStorage.removeItem(RECORDING_SESSION_STORAGE_KEY);
     return;
@@ -989,85 +990,18 @@ function clearRecordingSessionManifest(sessionId = "") {
   }
 }
 
-export {
-  api,
-  mediaRequestUrl,
-  cardColors,
-  showToast,
-  formatDuration,
-  formatShortDate,
-  formatDate,
-  formatTimecode,
-  isToday,
-  uiText,
-  safeFileName,
-  safeFileNameWithExtension,
-  downloadBlob,
-  openDownloadUrl,
-  audioExtensionFromMimeType,
-  canRequestMicrophone,
-  getSupportedMimeType,
-  microphoneErrorMessage,
-  cleanQaVisibleText,
-  cleanAnswerForDisplay,
-  answerBlocksForDisplay,
-  structuredAnswerFromItem,
-  pointLabelForIndex,
-  thinkingStepsForMessage,
-  stripQaInternalIndexMarkers,
-  recordDateToneClass,
-  recordVisualClass,
-  recordingStatusLabel,
-  recordingDetailStatusLabel,
-  recordingDurationLabel,
-  formatClockTime,
-  formatCardDateParts,
-  isEnglishLanguage,
-  recordTitleSize,
-  recordSourceMeta,
-  transcriptTextForRecording,
-  transcriptPlainTextForRecording,
-  transcriptTextFileForRecording,
-  recordingListSignature,
-  isFreshUploadLikeRecording,
-  mergeFreshUploadRecordings,
-  isUploadableMediaFile,
-  isImageFile,
-  canvasToBlob,
-  blobToDataUrl,
-  repairKnownMojibake,
-  looksLikeMojibake,
-  looksLikeTechnicalAnswerLeak,
-  parseStructuredAnswer,
-  structuredAnswerToPlainText,
-  meetingReportBlocks,
-  speakersForRecording,
-  speakerDraftsForRecording,
-  recordingUploadErrorMessage,
-  isTencentMeetingWaitingDownload,
-  isTencentMeetingRecorderPen,
-  isTencentMeetingNoTranscript,
-  isTencentMeetingWaitingTranscript,
-  getClientId,
-  getStoredAuth,
-  saveStoredAuth,
-  clearStoredAuth,
-  readStoredJson,
-  getLocalProfile,
-  saveLocalProfile,
-  sharedProfileDefaults,
-  openRecordingRecoveryDb,
-  idbRequest,
-  readRecordingSessionManifest,
-  normalizeRecordingSessionManifest,
-  readRecordingRecoveryQueue,
-  writeRecordingRecoveryQueue,
-  upsertRecordingRecoveryManifest,
-  removeRecordingRecoveryManifest,
-  readRecoverableRecordingManifests,
-  writeRecordingSessionManifest,
-  clearRecordingSessionManifest,
-  getClientName,
-  getAccountDisplayName,
-  getDetectedWecomName,
-};
+export function dailyBriefMeetingCount(brief, fallback = 0) {
+  const value = Number(brief?.meetingCount);
+  return Number.isFinite(value) ? value : fallback;
+}
+
+export function fetchWithClient(url, options = {}) {
+  return fetch(url, {
+    ...options,
+    headers: mergeRequestHeaders(options.headers),
+  });
+}
+
+export function dailyBriefDisplayDate(brief) {
+  return brief?.displayDate || displayDateFromDateKey(brief?.date);
+}
