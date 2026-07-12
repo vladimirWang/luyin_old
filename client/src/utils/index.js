@@ -278,7 +278,7 @@ function recordingUploadErrorMessage(error) {
   if (/ffmpeg|转码|MP3|audio/i.test(message)) {
     return "上传失败，服务器音频转码没有完成，请检查 ffmpeg 配置。";
   }
-  return "上传失败，请检查服务器后重新录音。";
+  return "上传失败，请检查服务器后重新录音。" + error.message;
 }
 
 function pointLabelForIndex(index) {
