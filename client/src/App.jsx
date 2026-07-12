@@ -118,6 +118,7 @@ import {
   getClientName,
   getAccountDisplayName,
   getDetectedWecomName,
+  showToast,
 } from './utils/index.js'
 
 const cardColors = ["coral", "indigo", "violet", "teal", "clay", "ink"];
@@ -1447,7 +1448,6 @@ export function App() {
   const [loading, setLoading] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [shareSheet, setShareSheet] = useState(null);
-  const [toast, setToast] = useState("");
   const [deletingRecordIds, setDeletingRecordIds] = useState([]);
   const [isRecording, setIsRecording] = useState(false);
   const [elapsedMs, setElapsedMs] = useState(0);
@@ -1820,12 +1820,6 @@ export function App() {
   // }, [recordings, query, selectedFolderId]);
 
   useEffect(() => {
-    if (!toast) return undefined;
-    const timeout = window.setTimeout(() => setToast(""), 2200);
-    return () => window.clearTimeout(timeout);
-  }, [toast]);
-
-  useEffect(() => {
     isRecordingRef.current = isRecording;
   }, [isRecording]);
 
@@ -2029,9 +2023,9 @@ export function App() {
       finishUploadCard(uploadId, payload.recording);
       if (!options.keepSelection && activeViewRef.current !== "detail") setSelectedId(payload.recording.id);
       if (options.toastMessage) {
-        setToast(options.toastMessage);
+        showToast(options.toastMessage);
       } else if (!options.silent) {
-        setToast("录音已上传服务器，可在记录里查看");
+        showToast("录音已上传服务器，可在记录里查看");
       }
       window.setTimeout(() => {
         refreshRecordings(query, selectedFolderId).catch(() => {});
@@ -2114,9 +2108,9 @@ export function App() {
       finishUploadCard(uploadId, payload.recording);
       if (!options.keepSelection && activeViewRef.current !== "detail") setSelectedId(payload.recording.id);
       if (options.toastMessage) {
-        setToast(options.toastMessage);
+        showToast(options.toastMessage);
       } else if (!options.silent) {
-        setToast("录音已上传服务器，可在记录里查看");
+        showToast("录音已上传服务器，可在记录里查看");
       }
       window.setTimeout(() => {
         refreshRecordings(query, selectedFolderId).catch(() => {});
@@ -2326,7 +2320,7 @@ export function App() {
       await clearRecordingRecoveryManifest(manifest);
       return true;
     } catch (error) {
-      setToast(recordingUploadErrorMessage(error));
+      showToast(recordingUploadErrorMessage(error));
       return false;
     }
   }
@@ -2474,7 +2468,7 @@ export function App() {
 
     if (segments.length === 0) {
       if (sessionId) await clearRecordingRecoverySession(sessionId).catch(() => {});
-      if (uploadStartIndex > 0) setToast("中断前录音已自动保存");
+      if (uploadStartIndex > 0) showToast("中断前录音已自动保存");
       backgroundUploadSessionIdsRef.current.delete(sessionId);
       return;
     }
@@ -2486,7 +2480,7 @@ export function App() {
       setRecordingError("");
     } catch (error) {
       setRecordingError("");
-      setToast(recordingUploadErrorMessage(error));
+      showToast(recordingUploadErrorMessage(error));
     } finally {
       if (uploaded) {
         await clearRecordingRecoverySnapshot(uploadSnapshot).catch(() => {});
@@ -2516,7 +2510,7 @@ export function App() {
       autosavedDurationMsRef.current += durationMs;
     } catch (error) {
       setRecordingError("");
-      setToast(recordingUploadErrorMessage(error));
+      showToast(recordingUploadErrorMessage(error));
     }
   }
 
@@ -2660,7 +2654,7 @@ export function App() {
     if (segments.length === 0) {
       if (sessionId) await clearRecordingRecoverySession(sessionId).catch(() => {});
       releaseRecorderUi();
-      if (uploadStartIndex > 0) setToast("中断前录音已自动保存");
+      if (uploadStartIndex > 0) showToast("中断前录音已自动保存");
       return;
     }
 
@@ -2674,7 +2668,7 @@ export function App() {
       setRecordingError("");
     } catch (error) {
       setRecordingError("");
-      setToast(recordingUploadErrorMessage(error));
+      showToast(recordingUploadErrorMessage(error));
     } finally {
       if (uploaded && sessionManifest?.id) {
         await clearRecordingRecoveryManifest(sessionManifest).catch(() => {});
@@ -2706,7 +2700,7 @@ export function App() {
         const staleManifests = readRecoverableRecordingManifests().filter((manifest) => !backgroundUploadSessionIdsRef.current.has(manifest.id));
         if (staleManifests.length > 0) {
           recoverInterruptedRecordingSession().catch(() => {});
-          setToast("正在后台恢复中断前的录音");
+          showToast("正在后台恢复中断前的录音");
         }
         resetRecordingSession();
         ensureRecordingSessionManifest();
@@ -2851,7 +2845,7 @@ export function App() {
         cleanupCapture();
         mediaRecorderRef.current = null;
         await finishRecordingSession().catch((error) => {
-          setToast(recordingUploadErrorMessage(error));
+          showToast(recordingUploadErrorMessage(error));
           finalizingRecordingRef.current = false;
         });
       }
@@ -2870,7 +2864,7 @@ export function App() {
       setResumeAvailable(false);
       resumeAvailableRef.current = false;
       await finishRecordingSession().catch((error) => {
-        setToast(recordingUploadErrorMessage(error));
+        showToast(recordingUploadErrorMessage(error));
         finalizingRecordingRef.current = false;
       });
     }
@@ -2890,13 +2884,13 @@ export function App() {
 
     const mediaFiles = files.filter(isUploadableMediaFile);
     if (mediaFiles.length === 0) {
-      setToast("请选择音频或视频文件");
+      showToast("请选择音频或视频文件");
       return;
     }
     if (mediaFiles.length !== files.length) {
-      setToast("已跳过不支持的文件");
+      showToast("已跳过不支持的文件");
     } else if (mediaFiles.length > 1) {
-      setToast(`正在上传 ${mediaFiles.length} 个录音文件`);
+      showToast(`正在上传 ${mediaFiles.length} 个录音文件`);
     }
 
     const folderId =
@@ -2925,7 +2919,7 @@ export function App() {
           folderId,
           uploadId,
         });
-        setToast("录音已上传并开始转写");
+        showToast("录音已上传并开始转写");
         return;
       }
 
@@ -2941,7 +2935,7 @@ export function App() {
       refreshFolders().catch(() => {});
     } catch (error) {
       failUploadCard(uploadId);
-      setToast(recordingUploadErrorMessage(error));
+      showToast(recordingUploadErrorMessage(error));
     }
   }
 
@@ -2959,7 +2953,7 @@ export function App() {
     };
 
     setFolders((current) => [...current, optimisticFolder]);
-    setToast("正在创建文件夹");
+    showToast("正在创建文件夹");
 
     try {
       const payload = await api("/api/folders", {
@@ -2973,10 +2967,10 @@ export function App() {
       );
       setSelectedFolderId(payload.folder.id);
       refreshFolders().catch(() => {});
-      setToast("文件夹已创建");
+      showToast("文件夹已创建");
     } catch (error) {
       setFolders((current) => current.filter((folder) => folder.id !== optimisticId));
-      setToast(error instanceof Error ? error.message : "文件夹创建失败");
+      showToast(error instanceof Error ? error.message : "文件夹创建失败");
     }
   }
 
@@ -2990,7 +2984,7 @@ export function App() {
       body: JSON.stringify({ name: trimmed }),
     });
     await refreshFolders();
-    setToast("文件夹已重命名");
+    showToast("文件夹已重命名");
   }
 
   async function deleteFolder(id) {
@@ -2998,7 +2992,7 @@ export function App() {
     if (selectedFolderId === id) setSelectedFolderId("all");
     await refreshFolders();
     await refreshRecordings(query, selectedFolderId === id ? "all" : selectedFolderId);
-    setToast("文件夹已删除，录音已回到未分类");
+    showToast("文件夹已删除，录音已回到未分类");
   }
 
   async function moveRecording(id, folderId) {
@@ -3035,11 +3029,11 @@ export function App() {
       });
       setRecordings((current) => current.map((item) => (item.id === id ? payload.recording : item)));
       if (Object.prototype.hasOwnProperty.call(patch, "shared")) {
-        setToast(payload.recording.shared ? "已开启共享" : "已设为仅自己可见");
+        showToast(payload.recording.shared ? "已开启共享" : "已设为仅自己可见");
       }
     } catch (error) {
       setRecordings(previous);
-      setToast(error instanceof Error ? error.message : "保存失败");
+      showToast(error instanceof Error ? error.message : "保存失败");
     }
   }
 
@@ -3059,10 +3053,10 @@ export function App() {
   async function retranscribeRecording(recording) {
     if (!recording?.id || recording.status === "transcribing" || recording.status === "processing") return;
     if (recording.transcriptHealth?.apiEnabled === false && !recording.tencentMeeting?.imported) {
-      setToast("录音 API 转写已停用");
+      showToast("录音 API 转写已停用");
       return;
     }
-    setToast("已开始重新转写");
+    showToast("已开始重新转写");
     setRecordings((current) =>
       current.map((item) =>
         item.id === recording.id
@@ -3076,14 +3070,14 @@ export function App() {
       refreshTranscriptionStatus().catch(() => {});
     } catch (error) {
       await refreshRecording(recording.id).catch(() => {});
-      setToast(error instanceof Error ? error.message : "重新转写失败");
+      showToast(error instanceof Error ? error.message : "重新转写失败");
     }
   }
 
   async function shareRecording(recording, mode = "both") {
     const shareMode = ["text", "audio", "both", "outline"].includes(mode) ? mode : "both";
-    if (shareMode === "outline") setToast("正在准备会议提纲 PDF");
-    else if (shareMode !== "text") setToast("正在准备 MP3 分享");
+    if (shareMode === "outline") showToast("正在准备会议提纲 PDF");
+    else if (shareMode !== "text") showToast("正在准备 MP3 分享");
     const audioDownloadUrl = `${window.location.origin}/api/recordings/${encodeURIComponent(recording.id)}/audio.mp3`;
     const transcriptUrl = `${window.location.origin}/api/recordings/${encodeURIComponent(recording.id)}/transcript.txt`;
     const outlineUrl = `${window.location.origin}/api/recordings/${encodeURIComponent(recording.id)}/meeting-outline.pdf`;
@@ -3162,7 +3156,7 @@ export function App() {
           mediaid: mediaId,
         },
       });
-      setToast("已打开企业微信 MP3 文件分享");
+      showToast("已打开企业微信 MP3 文件分享");
       return true;
     }
 
@@ -3185,7 +3179,7 @@ export function App() {
     async function downloadAudioFileFallback(toastText) {
       const shareInfo = await getAudioShareInfo();
       openDownloadUrl(shareInfo.url, shareInfo.fileName || audioFileName);
-      setToast(toastText);
+      showToast(toastText);
     }
 
     async function shareUrl(url, shareText = text) {
@@ -3206,7 +3200,7 @@ export function App() {
         }
         const mp3File = await getAudioFile();
         if (await shareFiles([mp3File], "", { fileOnly: true })) {
-          setToast("已调起 MP3 文件分享");
+          showToast("已调起 MP3 文件分享");
           return;
         }
         await downloadAudioFileFallback("已开始下载 MP3 文件，请从企业微信文件里发送");
@@ -3216,13 +3210,13 @@ export function App() {
         if (await shareFiles([pdfFile], `${recording.name}\n会议提纲 PDF`)) return;
         if (await shareUrl(outlineUrl, `${text}\nPDF：${outlineUrl}`)) return;
         downloadBlob(pdfFile, `${safeFileName(recording.name)}-会议提纲.pdf`);
-        setToast("会议提纲 PDF 已下载，请从文件发送");
+        showToast("会议提纲 PDF 已下载，请从文件发送");
         return;
       } else {
         try {
           if (await shareWecomAudioFile()) {
             downloadBlob(transcriptFile, `${safeFileName(recording.name)}.txt`);
-            setToast("已打开企业微信 MP3 文件分享，TXT 已保存到本机");
+            showToast("已打开企业微信 MP3 文件分享，TXT 已保存到本机");
             return;
           }
         } catch {
@@ -3230,7 +3224,7 @@ export function App() {
         }
         const mp3File = await getAudioFile();
         if (await shareFiles([transcriptFile, mp3File], "", { fileOnly: true })) {
-          setToast("已调起 MP3 和 TXT 文件分享");
+          showToast("已调起 MP3 和 TXT 文件分享");
           return;
         }
         downloadBlob(transcriptFile, `${safeFileName(recording.name)}.txt`);
@@ -3243,10 +3237,10 @@ export function App() {
         try {
           const pdfFile = await getOutlineFile();
           downloadBlob(pdfFile, `${safeFileName(recording.name)}-会议提纲.pdf`);
-          setToast("会议提纲 PDF 已下载，请从企业微信文件里发送");
+          showToast("会议提纲 PDF 已下载，请从企业微信文件里发送");
           return;
         } catch {
-          setToast(error instanceof Error ? error.message : "会议提纲 PDF 分享失败");
+          showToast(error instanceof Error ? error.message : "会议提纲 PDF 分享失败");
           return;
         }
       }
@@ -3255,7 +3249,7 @@ export function App() {
           await downloadAudioFileFallback("已开始下载 MP3 文件，请从企业微信文件里发送");
           return;
         } catch {
-          setToast(error instanceof Error ? error.message : "MP3 分享失败");
+          showToast(error instanceof Error ? error.message : "MP3 分享失败");
           return;
         }
       }
@@ -3269,7 +3263,7 @@ export function App() {
         );
         return;
       } catch (error) {
-        setToast(error instanceof Error ? error.message : "MP3 分享失败");
+        showToast(error instanceof Error ? error.message : "MP3 分享失败");
         return;
       }
     }
@@ -3299,7 +3293,7 @@ export function App() {
             },
           );
         });
-        setToast("已打开企业微信分享");
+        showToast("已打开企业微信分享");
         return;
       } catch {
         // Fall through to copy/share sheet.
@@ -3318,13 +3312,13 @@ export function App() {
       await navigator.clipboard.writeText(fallbackText);
       if (shareMode === "text") {
         downloadBlob(transcriptFile, `${safeFileName(recording.name)}.txt`);
-        setToast("TXT 已下载，文字链接已复制");
+        showToast("TXT 已下载，文字链接已复制");
       } else if (shareMode === "audio") {
         await downloadAudioFileFallback("已开始下载 MP3 文件，没有复制网页链接");
       } else if (shareMode === "outline") {
         const pdfFile = await getOutlineFile();
         downloadBlob(pdfFile, `${safeFileName(recording.name)}-会议提纲.pdf`);
-        setToast("会议提纲 PDF 已下载，链接已复制");
+        showToast("会议提纲 PDF 已下载，链接已复制");
       } else {
         downloadBlob(transcriptFile, `${safeFileName(recording.name)}.txt`);
         await downloadAudioFileFallback("TXT 已保存，已开始下载 MP3 文件，没有复制录音网页链接");
@@ -3348,10 +3342,10 @@ export function App() {
     if (!shareSheet?.text) return;
     try {
       await navigator.clipboard.writeText(shareSheet.text);
-      setToast("分享内容已复制");
+      showToast("分享内容已复制");
       setShareSheet(null);
     } catch {
-      setToast("请长按选择内容复制");
+      showToast("请长按选择内容复制");
     }
   }
 
@@ -3421,7 +3415,7 @@ export function App() {
       releaseOptimisticRecordingRemoval(recording.id);
       refreshFolders().catch(() => {});
       refreshRecordings(query, selectedFolderId, { silent: true }).catch(() => {});
-      setToast("删除失败，请稍后重试");
+      showToast("删除失败，请稍后重试");
     }
   }
 
@@ -3442,7 +3436,7 @@ export function App() {
     setRecordings((current) => current.filter((item) => item.id !== recording.id));
     setSelectedId(payload.recording.id);
     refreshFolders().catch(() => {});
-    setToast("录音已恢复");
+    showToast("录音已恢复");
   }
 
   async function permanentDeleteRecording(recording) {
@@ -3473,7 +3467,7 @@ export function App() {
     saveLocalProfile(nextProfile);
     window.localStorage.removeItem(QA_ACTIVE_MESSAGE_KEY);
     setSelectedId("");
-    setToast(message);
+    showToast(message);
     refreshFolders().catch(() => {});
     refreshRecordings("", selectedFolderId, { silent: true }).catch(() => {});
   }
@@ -3516,7 +3510,7 @@ export function App() {
     setProfile(nextProfile);
     saveLocalProfile(nextProfile);
     setSelectedId("");
-    setToast("已退出登录");
+    showToast("已退出登录");
     refreshFolders().catch(() => {});
     refreshRecordings("", selectedFolderId, { silent: true }).catch(() => {});
   }
@@ -3539,10 +3533,10 @@ export function App() {
       };
       setProfile(nextProfile);
       saveLocalProfile(nextProfile);
-      setToast(uiText(nextProfile.language || profileToSave.language || "中文", "个人信息已保存", "Profile saved"));
+      showToast(uiText(nextProfile.language || profileToSave.language || "中文", "个人信息已保存", "Profile saved"));
       return nextProfile;
     } catch {
-      setToast(uiText(profileToSave.language || "中文", "个人信息已保存到本机，服务器同步失败", "Profile saved on this device, server sync failed"));
+      showToast(uiText(profileToSave.language || "中文", "个人信息已保存到本机，服务器同步失败", "Profile saved on this device, server sync failed"));
       return profileToSave;
     }
   }
@@ -3624,7 +3618,7 @@ export function App() {
               onBack={() => setActiveView("records")}
               onRename={renameRecording}
               onUpdateMeta={updateRecordingMeta}
-              onToast={setToast}
+              onToast={showToast}
               language={profile.language}
               onSelectRecording={(id) => setSelectedId(id)}
               onRefreshRecording={(id) => {
@@ -3662,7 +3656,6 @@ export function App() {
         }}
       />
       <ShareSheet share={shareSheet} onCopy={copyShareSheet} onClose={() => setShareSheet(null)} />
-      {toast ? <div className="toast">{toast}</div> : null}
     </main>
   );
 }

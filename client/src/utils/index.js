@@ -1,4 +1,14 @@
+import { Toast } from "antd-mobile";
+
 const cardColors = ["coral", "indigo", "violet", "teal", "clay", "ink"];
+
+function showToast(content) {
+  if (!content) return;
+  Toast.show({
+    content,
+    position: "bottom",
+  });
+}
 
 function mergeRequestHeaders(headers = {}) {
   const next = new Headers(headers);
@@ -982,6 +992,7 @@ export {
   api,
   mediaRequestUrl,
   cardColors,
+  showToast,
   formatDuration,
   formatShortDate,
   formatDate,
