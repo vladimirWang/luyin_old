@@ -1,3 +1,10 @@
+import { isImageFile, canvasToBlob, blobToDataUrl } from "./index.js";
+
+const AVATAR_MAX_SOURCE_BYTES = 60 * 1024 * 1024;
+const AVATAR_TARGET_BYTES = 360 * 1024;
+const AVATAR_HARD_LIMIT_BYTES = 720 * 1024;
+const AVATAR_MAX_DIMENSION = 512;
+
 export async function loadImageSource(file) {
   if (window.createImageBitmap) {
     try {
