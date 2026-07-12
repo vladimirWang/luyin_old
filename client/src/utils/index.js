@@ -2,11 +2,12 @@ import { Toast } from "antd-mobile";
 
 const cardColors = ["coral", "indigo", "violet", "teal", "clay", "ink"];
 
-function showToast(content) {
+function showToast(content, duration = 2000) {
   if (!content) return;
   Toast.show({
     content,
     position: "bottom",
+    duration
   });
 }
 

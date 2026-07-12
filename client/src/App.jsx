@@ -91,7 +91,6 @@ import {
   meetingReportBlocks,
   speakersForRecording,
   speakerDraftsForRecording,
-  recordingUploadErrorMessage,
   isTencentMeetingWaitingDownload,
   isTencentMeetingRecorderPen,
   isTencentMeetingNoTranscript,
@@ -2321,7 +2320,7 @@ export function App() {
       return true;
     } catch (error) {
       console.error("call recoverSingleRecordingManifest failed: "+ error.message)
-      showToast(recordingUploadErrorMessage(error));
+      showToast(`调用 recoverSingleRecordingManifest failed: ${error.message}`, 4000);
       return false;
     }
   }
@@ -2482,7 +2481,7 @@ export function App() {
     } catch (error) {
       console.error("call uploadStoppedRecordingSnapshot: ", error.message)
       setRecordingError("");
-      showToast(recordingUploadErrorMessage(error));
+      showToast(`调用 uploadStoppedRecordingSnapshot failed: ${error.message}`, 4000);
     } finally {
       if (uploaded) {
         await clearRecordingRecoverySnapshot(uploadSnapshot).catch(() => {});
@@ -2513,7 +2512,7 @@ export function App() {
     } catch (error) {
       console.error('call recordingUploadErrorMessage failed: ', error.message)
       setRecordingError("");
-      showToast(recordingUploadErrorMessage(error));
+      showToast(`调用 autoSaveInterruptedRecording failed: ${error.message}`, 4000);
     }
   }
 
@@ -2672,7 +2671,7 @@ export function App() {
     } catch (error) {
       console.error("call finishRecordingSession failed: ", error.message)
       setRecordingError("");
-      showToast(recordingUploadErrorMessage(error));
+      showToast(`调用 finishRecordingSession failed: ${error.message}`, 4000);
     } finally {
       if (uploaded && sessionManifest?.id) {
         await clearRecordingRecoveryManifest(sessionManifest).catch(() => {});
@@ -2849,7 +2848,7 @@ export function App() {
         cleanupCapture();
         mediaRecorderRef.current = null;
         await finishRecordingSession().catch((error) => {
-          showToast(recordingUploadErrorMessage(error));
+          showToast(`调用 finishRecordingSession failed: ${error.message}`, 4000);
           finalizingRecordingRef.current = false;
         });
       }
@@ -2868,7 +2867,7 @@ export function App() {
       setResumeAvailable(false);
       resumeAvailableRef.current = false;
       await finishRecordingSession().catch((error) => {
-        showToast(recordingUploadErrorMessage(error));
+        showToast(`调用 finishRecordingSession failed: ${error.message}`, 4000);
         finalizingRecordingRef.current = false;
       });
     }
@@ -2940,7 +2939,7 @@ export function App() {
     } catch (error) {
       console.error("call handleUploadFile failed: ", error.message)
       failUploadCard(uploadId);
-      showToast(recordingUploadErrorMessage(error));
+      showToast(`调用 handleUploadFile failed: ${error.message}`, 4000);
     }
   }
 
