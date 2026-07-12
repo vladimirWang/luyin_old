@@ -1960,7 +1960,8 @@ export function App() {
       try {
         const row = await getRecordingRecoverySegment(persistedId);
         if (row?.blob?.size > 0) segments.push(row.blob);
-      } catch {
+      } catch(error) {
+        console.error("call recordingSegmentsForRange failed: ", `persistedId: ${persistedId} err: ${error.message}`);
         // If persistent recovery is unavailable, skip missing chunks instead of blocking saved audio.
       }
     }
@@ -1999,7 +2000,8 @@ export function App() {
         try {
           const row = await getRecordingRecoverySegment(segment.id);
           if (row?.blob?.size > 0) rows.push(row);
-        } catch {
+        } catch (err) {
+          console.error("reverSignleRecordingManifest failed: ", err.message)
           // Continue with the segments that can still be recovered.
         }
       }
@@ -2398,15 +2400,15 @@ export function App() {
     if (!resume) manualStopRequestedRef.current = false;
     setRecordingError("");
 
-    // if (!canRequestMicrophone()) {
-    //   setRecordingError("手机端录音必须通过 HTTPS 打开。请部署到 HTTPS 域名后，再从企业微信应用入口访问。");
-    //   return;
-    // }
+    if (!canRequestMicrophone()) {
+      setRecordingError("手机端录音必须通过 HTTPS 打开。请部署到 HTTPS 域名后，再从企业微信应用入口访问。");
+      return;
+    }
 
-    // if (!navigator.mediaDevices?.getUserMedia || !window.MediaRecorder) {
-    //   setRecordingError("当前环境不支持网页录音，请升级企业微信或使用系统浏览器打开。");
-    //   return;
-    // }
+    if (!navigator.mediaDevices?.getUserMedia || !window.MediaRecorder) {
+      setRecordingError("当前环境不支持网页录音，请升级企业微信或使用系统浏览器打开。");
+      return;
+    }
 
     try {
       if (!resume) {

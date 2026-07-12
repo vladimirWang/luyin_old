@@ -215,7 +215,9 @@ router.post("/", upload.single("audio"), async (request, response, next) => {
 });
 
 router.post("/segments", upload.array("audio", 480), async (request, response, next) => {
+  // response.status(200).json({message: 'fff'})
   const { queueTranscriptionJob, verifiedStoredRecording = fileInfo, requestClientId, requestClientName, publicRecording } = dependencies;
+  logger.debug("post recording.segments", {message: `files.length: ${request.files.length}`});
   const files = Array.isArray(request.files) ? request.files : [];
   try {
     if (files.length === 0) {

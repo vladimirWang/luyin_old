@@ -17,7 +17,7 @@
       "type": "node",
       "request": "launch",
       "name": "Server: Nodemon",
-      "runtimeExecutable": "${workspaceFolder}/node_modules/.bin/nodemon.cmd",
+      "runtimeExecutable": "${workspaceFolder}/node_modules/.bin/nodemon",
       "program": "${workspaceFolder}/server/index.mjs",
       "cwd": "${workspaceFolder}",
       "envFile": "${workspaceFolder}/.env.dev",

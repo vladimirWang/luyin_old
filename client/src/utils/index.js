@@ -12,9 +12,11 @@ export function showToast(content, duration = 2000) {
   });
 }
 
-export function mergeRequestHeaders(headers = {}) {
+export function mergeRequestHeaders(headers = {}, body = null) {
   const next = new Headers(headers);
-  next.set("Content-Type", "application/json");
+  if (!(body instanceof FormData)) {
+    next.set("Content-Type", "application/json");
+  }
   const auth = getStoredAuth();
   if (auth?.token) next.set("Authorization", `Bearer ${auth.token}`);
   const wecomName = getDetectedWecomName();
@@ -36,7 +38,7 @@ export function mediaRequestUrl(url, version = "") {
 export async function api(path, options = {}) {
   const response = await fetch(path, {
     ...options,
-    headers: mergeRequestHeaders(options.headers),
+    headers: mergeRequestHeaders(options.headers, options.body),
   });
   const contentType = response.headers.get("content-type") || "";
   const payload = contentType.includes("application/json") ? await response.json() : await response.text();
