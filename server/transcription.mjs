@@ -1317,7 +1317,7 @@ const supportedAsrProviders = new Set(["local-fallback", "openai", "custom", "mi
 
 export function getTranscriptionDiagnostics() {
   const mode = getTranscriptionMode();
-  logger.info(`[CALL] getTranscriptionDiagnostics:  Transcription mode: ${mode}`);
+  logger.info("[CALL] getTranscriptionDiagnostics", {message: `Transcription mode: ${mode}`});
   const recordingApiEnabled = isRecordingApiTranscriptionEnabled();
   const checks = {
     openaiKey: Boolean(env("OPENAI_API_KEY")),

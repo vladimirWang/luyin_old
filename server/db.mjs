@@ -370,7 +370,7 @@ export async function ensureStorage() {
 }
 
 export async function loadDb() {
-  logger.info("[CALL] loadDb: ");
+  logger.info("[CALL] loadDb", {message: "start"});
   // TODO 待删除 多余判断, 因为肯定会有mysql
   // if (mysqlEnabled()) {
   //   logger.info("[CALL] loadDb: mysqlEnabled() is true, loading from MySQL database");

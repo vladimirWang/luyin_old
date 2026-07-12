@@ -1,0 +1,25 @@
+{
+  "name": "wecom-recorder-h5",
+  "version": "1.0.0",
+  "description": "Enterprise WeChat H5 recorder with MP3 storage, TXT transcripts, Tencent ASR and recording QA.",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "dotenv -e ../.env.dev nodemon index.mjs",
+    "start:prod": "pm2-runtime ecosystem.config.cjs"
+  },
+  "dependencies": {
+    "cors": "^2.8.6",
+    "express": "^5.2.1",
+    "multer": "^2.2.0",
+    "mysql2": "^3.22.5",
+    "pdfkit": "^0.19.1",
+    "pm2": "^5.4.0",
+    "winston": "^3.19.0",
+    "winston-daily-rotate-file": "^5.0.0"
+  },
+  "devDependencies": {
+    "dotenv-cli": "^11.0.0",
+    "nodemon": "^3.1.14"
+  }
+}

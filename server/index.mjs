@@ -30,6 +30,22 @@ import {
 import { attachmentDir, audioDir, loadDb, tempDir, transcriptDir, ttsDir, updateDb } from "./db.mjs";
 import { convertAudioFileToMp3, fileInfo, mergeAudioFilesToMp3, probeAudioDurationMs, removeFileIfExists, writeTranscriptTextFile } from "./media.mjs";
 import {init} from "./init.mjs";
+import recordingsRouter, { configure as configureRecordingsRouter } from "./router/recordings.js";
+import recordingUploadSessionsRouter, { configure as configureRecordingUploadSessionsRouter } from "./router/recordingUploadSessions.js";
+import tencentMeetingRouter, { configure as configureTencentMeetingRouter } from "./router/tencentMeeting.js";
+import ttsRouter, { configure as configureTtsRouter } from "./router/tts.js";
+import wecomRouter, { configure as configureWecomRouter } from "./router/wecom.js";
+import healthRouter, { configure as configureHealthRouter } from "./router/health.js";
+import meetingBriefsRouter, { configure as configureMeetingBriefsRouter } from "./router/meetingBriefs.js";
+import qaMessagesRouter, { configure as configureQaMessagesRouter } from "./router/qaMessages.js";
+import askRouter, { configure as configureAskRouter } from "./router/ask.js";
+import voiceInputRouter, { configure as configureVoiceInputRouter } from "./router/voiceInput.js";
+import profileRouter, { configure as configureProfileRouter } from "./router/profile.js";
+import transcriptionRouter, { configure as configureTranscriptionRouter } from "./router/transcription.js";
+import authRouter, { configure as configureAuthRouter } from "./router/auth.js";
+import foldersRouter, { configure as configureFoldersRouter } from "./router/folders.js";
+import { resolveRecordingAudioPath } from "./utils/recordings.js";
+
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const projectRoot = path.resolve(__dirname, "..");
@@ -83,14 +99,6 @@ const host = process.env.HOST || "0.0.0.0";
 const httpsPort = Number(process.env.HTTPS_PORT || 0);
 
 const app = express();
-
-function logError(event, error, extra = {}) {
-  logger.error({
-    event,
-    error: error instanceof Error ? { message: error.message, stack: error.stack } : error,
-    ...extra,
-  });
-}
 
 let wecomTokenCache = { value: "", expiresAt: 0 };
 
@@ -753,15 +761,7 @@ app.use((request, response, next) => {
   const startedAt = Date.now();
   console.log("进入全局请求日志: ", request.method, request.originalUrl || request.url);
   response.on("finish", () => {
-    logger.info("http_request", {
-      method: request.method,
-      path: request.originalUrl || request.url,
-      status: response.statusCode,
-      durationMs: Date.now() - startedAt,
-      ip: request.ip,
-      userAgent: request.get("user-agent") || "",
-      contentLength: response.get("content-length") || "",
-    });
+    logger.info("http_request", {message: `${request.method} ${request.originalUrl || request.url} ${response.statusCode} ${Date.now() - startedAt}ms`, method: request.method, path: request.originalUrl || request.url, status: response.statusCode, durationMs: Date.now() - startedAt, ip: request.ip, userAgent: request.get("user-agent") || "", contentLength: response.get("content-length") || ""});
   });
   next();
 });
@@ -769,6 +769,197 @@ app.use((request, response, next) => {
 app.get("/api/ping", (req, res) => {
   res.json({ ping: `pong ${Date.now()}` })
 });
+
+configureRecordingsRouter(projectRoot, {
+  queueTranscriptionJob,
+  hasValidAudioDownloadToken,
+  createAudioDownloadToken,
+  isTencentMeetingRecording,
+  tencentMeetingSyncInfoFromRecording,
+  syncTencentMeetingBuiltInTranscript,
+  queueTencentMeetingImportSync,
+  isLocalApiTranscriptionRecording,
+  schedulePendingLocalTranscriptionSweep,
+  findReusableQaMessage,
+  publicQaMessage,
+  persistQaAttachments,
+  cacheQaMessage,
+  persistQaMessageSnapshot,
+  scheduleQaJob,
+  uploadWecomTemporaryFile,
+  verifiedStoredRecording,
+  requestClientId,
+  requestClientName,
+  requestCanDeleteAllRecordings,
+  canReadRecording,
+  canManageRecording,
+  canDeleteRecording,
+  findRecording,
+  findSegments,
+  publicRecording,
+  resolveRecordingAudioPath,
+  generateAndStoreMeetingOutline,
+  renderMeetingOutlinePdf,
+});
+app.use("/api/recordings", recordingsRouter);
+
+configureRecordingUploadSessionsRouter(projectRoot, {
+  requestClientId,
+  requestClientName,
+  queueTranscriptionJob,
+  verifiedStoredRecording,
+  publicRecording,
+});
+app.use("/api/recording-upload-sessions", recordingUploadSessionsRouter);
+
+configureTencentMeetingRouter({
+  tencentMeetingWebhookStatus,
+  queueTencentMeetingCloudDiscovery,
+  importTencentMeetingCloudRecordingsFromApi,
+  tencentMeetingVerifiedPlaintext,
+  appendTencentMeetingWebhookEvent,
+  importTencentMeetingStsTokenPayload,
+  importTencentMeetingWebhookPayload,
+});
+app.use("/api/tencent-meeting", tencentMeetingRouter);
+app.use("/tencent-meeting", tencentMeetingRouter);
+
+configureTtsRouter({
+  generateQwenTtsAudio,
+  detectTtsAudioFormat,
+  findCachedTtsAudio,
+});
+app.use("/api/tts", ttsRouter);
+
+configureWecomRouter({
+  wecomConfig,
+  hasWecomConfig,
+  getWecomUserByCode,
+});
+app.use("/api/wecom", wecomRouter);
+
+configureHealthRouter({
+  getTranscriptionDiagnostics,
+  tencentMeetingWebhookStatus,
+  ttsDiagnostics,
+});
+app.use("/api/health", healthRouter);
+
+configureMeetingBriefsRouter({
+  dailyBriefDateParts,
+  requestClientId,
+  requestClientName,
+  loadDb,
+  recordingsForBriefDate,
+  findDailyBrief,
+  emptyDailyBrief,
+  updateDb,
+  upsertDailyBriefInDb,
+  publicDailyBrief,
+  isOrphanDailyBriefGenerating,
+  queueDailyBriefGeneration,
+  shouldGenerateDailyBrief,
+  dailyBriefDateKeysForRecordings,
+  dailyBriefOwnerKey,
+  dailyBriefPartsFromDateKey,
+  dailyBriefPlaceholder,
+  normalizeDailyBriefDateParam,
+  renderDailyBriefPdf,
+  safeDownloadName,
+});
+app.use("/api/meeting-briefs", meetingBriefsRouter);
+
+configureQaMessagesRouter({
+  requestClientId,
+  loadDb,
+  canReadQaMessage,
+  qaMessageCache,
+  schedulePendingQaMessages,
+  publicQaMessage,
+  cachedQaMessage,
+  scheduleQaJob,
+  findQaMessage,
+  updateDb,
+  renderQaMessagePdf,
+  safeDownloadName,
+  existsSync,
+});
+app.use("/api/qa-messages", qaMessagesRouter);
+
+configureAskRouter({
+  requestClientId,
+  requestClientName,
+  loadDb,
+  canReadRecording,
+  findReusableQaMessage,
+  publicQaMessage,
+  scheduleQaJob,
+  crypto,
+  persistQaAttachments,
+  cacheQaMessage,
+  persistQaMessageSnapshot,
+});
+app.use("/api/ask", askRouter);
+
+configureVoiceInputRouter({
+  upload,
+  crypto,
+  tempDir,
+  convertAudioFileToMp3,
+  removeFileIfExists,
+  fileInfo,
+  getTranscriptionMode,
+  expandTranscriptSegments,
+  transcribeVoiceInputRecording,
+});
+app.use("/api/voice-input", voiceInputRouter);
+
+configureProfileRouter({
+  loadDb,
+  clientProfileForRequest,
+  requestClientId,
+  requestAccountPayload,
+  updateDb,
+  profilePatchForClient,
+  accountClientId,
+});
+app.use("/api/profile", profileRouter);
+
+configureTranscriptionRouter({
+  getTranscriptionDiagnostics,
+});
+app.use("/api/transcription", transcriptionRouter);
+
+configureAuthRouter({
+  loadDb,
+  requestAccountPayload,
+  publicAccount,
+  normalizeAccountUsername,
+  requestClientId,
+  profilePatchForClient,
+  updateDb,
+  ensureDeleteAllAccount,
+  verifyPassword,
+  mergeLocalClientDataIntoAccount,
+  crypto,
+  createPasswordRecord,
+  logger,
+  accountAuthResponse,
+});
+app.use("/api/auth", authRouter);
+
+configureFoldersRouter({
+  loadDb,
+  requestClientId,
+  requestClientName,
+  requestCanDeleteAllRecordings,
+  canReadRecording,
+  canReadFolder,
+  publicFolder,
+  updateDb,
+  crypto,
+});
+app.use("/api/folders", foldersRouter);
 
 function decodedTencentMeetingAesKeyLength(encodingAesKey) {
   try {
@@ -2369,11 +2560,11 @@ async function fetchTencentMeetingBuiltInTranscript(info = {}, durationMs = 0) {
 
   // 获取 STS Token（确保 API 调用权限）
   await requestTencentMeetingStsTokenIfPossible();
-  logger.info(`[CALL] fetchTencentMeetingBuiltInTranscript: `, {message: `获取到 STS Token`});
+  logger.info("[CALL] fetchTencentMeetingBuiltInTranscript", {message: `获取到 STS Token`});
   const failureKinds = [];
 
   const operatorParamsList = tencentMeetingCandidateTranscriptOperatorParams(info);
-  logger.info(`[CALL] fetchTencentMeetingBuiltInTranscript: `, {message: `operatorParamsList: ${JSON.stringify(operatorParamsList)}`});
+  logger.info("[CALL] fetchTencentMeetingBuiltInTranscript", {message: `operatorParamsList: ${JSON.stringify(operatorParamsList)}`});
   for (const operatorParams of operatorParamsList) {
     // 方式a 标准转写详情接口
     const uri = tencentMeetingQuery("/v1/records/transcripts/details", {
@@ -2382,12 +2573,12 @@ async function fetchTencentMeetingBuiltInTranscript(info = {}, durationMs = 0) {
       transcripts_type: Number(process.env.TENCENT_MEETING_TRANSCRIPTS_TYPE || 1),
       ...operatorParams,
     });
-    logger.info(`[CALL] fetchTencentMeetingBuiltInTranscript: `, {message: `uri: ${uri}`});
+    logger.info("[CALL] fetchTencentMeetingBuiltInTranscript", {message: `uri: ${uri}`});
     try {
       const payload = await tencentMeetingApiRequest("GET", uri);
-      logger.info(`[CALL] fetchTencentMeetingBuiltInTranscript: `, {message: `腾讯会议API标准转写结果原始响应数据 payload: ${JSON.stringify(payload)}`});
+      logger.info("[CALL] fetchTencentMeetingBuiltInTranscript", {message: `腾讯会议API标准转写结果原始响应数据 payload: ${JSON.stringify(payload)}`});
       const result = tencentMeetingTranscriptSegmentsFromPayload(payload, durationMs);
-      logger.info(`[CALL] fetchTencentMeetingBuiltInTranscript: `, {message: `腾讯会议API标准转写结果解析后的数据 result: ${JSON.stringify(result).slice(0,200)}`});
+      logger.info("[CALL] fetchTencentMeetingBuiltInTranscript", {message: `腾讯会议API标准转写结果解析后的数据 result: ${JSON.stringify(result).slice(0,200)}`});
       if (result.segments.length > 0) {
         return {
           ...result,
@@ -2403,9 +2594,9 @@ async function fetchTencentMeetingBuiltInTranscript(info = {}, durationMs = 0) {
 
     try {
       // 方式b 段落式转写接口
-      logger.info(`[CALL] fetchTencentMeetingBuiltInTranscript: `, {message: `operatorParams: ${JSON.stringify(operatorParams)}`});
+      logger.info("[CALL] fetchTencentMeetingBuiltInTranscript", {message: `operatorParams: ${JSON.stringify(operatorParams)}`});
       const result = await fetchTencentMeetingTranscriptByParagraphs(recordFileId, info, operatorParams, durationMs);
-      logger.info(`[CALL] fetchTencentMeetingBuiltInTranscript: `, {message: `腾讯会议API返回的段落式转写结果 segments?.length: ${result?.segments?.length}`});
+      logger.info("[CALL] fetchTencentMeetingBuiltInTranscript", {message: `腾讯会议API返回的段落式转写结果 segments?.length: ${result?.segments?.length}`});
       if (result?.segments?.length > 0) {
         return {
           ...result,
@@ -2425,7 +2616,7 @@ async function fetchTencentMeetingBuiltInTranscript(info = {}, durationMs = 0) {
     const summaryResult = await fetchTencentMeetingSummaryTranscript(info, durationMs, failureKinds);
     if (summaryResult?.segments?.length > 0) return summaryResult;
   }
-  logger.info(`[CALL] fetchTencentMeetingBuiltInTranscript: `, {message: `未获取到转写内容`});
+  logger.info("[CALL] fetchTencentMeetingBuiltInTranscript", {message: `未获取到转写内容`});
   return {
     segments: [],
     unavailable: true,
@@ -2508,17 +2699,17 @@ async function storeTencentMeetingBuiltInTranscript(recordingId, transcriptResul
 }
 
 async function syncTencentMeetingBuiltInTranscript(recordingId, info = {}) {
-  logger.info(`[CALL] syncTencentMeetingBuiltInTranscript: recordingId: ${recordingId}, info: ${JSON.stringify(info)}`);
+  logger.info("[CALL] syncTencentMeetingBuiltInTranscript", {message: `recordingId: ${recordingId}, info: ${JSON.stringify(info)}`});
   const db = await loadDb();
   const recording = findRecording(db, recordingId);
   if (!recording || recording.deletedAt) return false;
   const existingSegments = findSegments(db, recordingId);
-    logger.info(`[CALL] syncTencentMeetingBuiltInTranscript: `, {message: `transcriptSource: ${recording.transcriptSource}, existingSegments.length: ${existingSegments.length}`});
+  logger.info("[CALL] syncTencentMeetingBuiltInTranscript", {message: `transcriptSource: ${recording.transcriptSource}, existingSegments.length: ${existingSegments.length}`});
   if (existingSegments.length > 0 && recording.transcriptSource === "tencent-meeting") {
-    logger.info(`[CALL] syncTencentMeetingBuiltInTranscript: `, {message: `已有撰写片段，且转写来源是腾讯会议，无需同步转写`});
+    logger.info("[CALL] syncTencentMeetingBuiltInTranscript", {message: `已有撰写片段，且转写来源是腾讯会议，无需同步转写`});
     return true;
   }
-  logger.info(`[CALL] syncTencentMeetingBuiltInTranscript: `, {message: `开始同步转写`});
+  logger.info("[CALL] syncTencentMeetingBuiltInTranscript", {message: `开始同步转写`});
   const transcriptResult = await fetchTencentMeetingBuiltInTranscript(info, recording.durationMs || info.durationMs || 0);
   if (!transcriptResult?.segments?.length) {
     const checkedAt = new Date().toISOString();
@@ -4741,7 +4932,7 @@ async function generateAndStoreMeetingOutline(recordingId, segments = [], option
 async function runTranscriptionJob(recordingId) {
   const db = await loadDb();
   const recording = findRecording(db, recordingId);
-  logger.info({ event: "transcription.job.start", recordingId, source: recording?.source || "unknown" });
+  logger.info("transcription.job.start", {message: `recordingId: ${recordingId}, source: ${recording?.source || "unknown"}`, recordingId, source: recording?.source || "unknown"});
   if (!recording) return;
   if (!isLocalApiTranscriptionRecording(recording)) {
     if (isTencentMeetingRecording(recording)) {
@@ -4813,9 +5004,9 @@ async function runTranscriptionJob(recordingId) {
     });
     await generateAndStoreMeetingOutline(recordingId, segments, { updateTag: true });
     await markDailyBriefDirtyForRecording(recordingId);
-    logger.info({ event: "transcription.job.success", recordingId, segmentCount: segments.length, transcriptSource: recording?.source || "unknown" });
+    logger.info("transcription.job.success", {message: `recordingId: ${recordingId}, segmentCount: ${segments.length}, transcriptSource: ${recording?.source || "unknown"}`, recordingId, segmentCount: segments.length, transcriptSource: recording?.source || "unknown"});
   } catch (error) {
-    logger.error({ event: "transcription.job.failed", recordingId, error: error instanceof Error ? { message: error.message, stack: error.stack } : error });
+    logger.error("transcription.job.failed", {message: `recordingId: ${recordingId}, error: ${error instanceof Error ? error.message : error}`, recordingId, error: error instanceof Error ? { message: error.message, stack: error.stack } : error});
     await updateDb((nextDb) => {
       const target = findRecording(nextDb, recordingId);
       if (target) {
@@ -4902,7 +5093,7 @@ async function queuePendingLocalTranscriptionJobs(reason = "sweep") {
   for (const recording of candidates) {
     if (queueTranscriptionJob(recording.id, recording)) queued += 1;
   }
-  if (queued) logger.info({ event: "transcription.recovered", reason, queued });
+  if (queued) logger.info("transcription.recovered", {message: `reason: ${reason}, queued: ${queued}`, reason, queued});
   return queued;
 }
 
@@ -4914,1616 +5105,6 @@ function schedulePendingLocalTranscriptionSweep(reason = "sweep", options = {}) 
     console.warn("[Transcription] pending local upload sweep failed:", error instanceof Error ? error.message : error);
   });
 }
-
-app.get("/api/tencent-meeting/webhook/status", (_request, response) => {
-  response.json({
-    ok: true,
-    tencentMeetingWebhook: tencentMeetingWebhookStatus(),
-  });
-});
-
-app.post("/api/tencent-meeting/cloud-recordings/sync", async (request, response, next) => {
-  try {
-    logger.info({ event: "tencent_meeting.sync.request", wait: String(request.query?.wait || "") === "1", ip: request.ip });
-    if (String(request.query?.wait || "") !== "1") {
-      const queued = queueTencentMeetingCloudDiscovery();
-      response.json({ ok: true, queued });
-      return;
-    }
-    const imported = await importTencentMeetingCloudRecordingsFromApi();
-    logger.info({ event: "tencent_meeting.sync.completed", imported });
-    response.json({ ok: true, imported });
-  } catch (error) {
-    logError("tencent_meeting.sync.failed", error, { ip: request.ip });
-    next(error);
-  }
-});
-
-app.get("/api/tencent-meeting/webhook", handleTencentMeetingWebhookGet);
-app.post("/api/tencent-meeting/webhook", handleTencentMeetingWebhookPost);
-app.get("/tencent-meeting/webhook", handleTencentMeetingWebhookGet);
-app.post("/tencent-meeting/webhook", handleTencentMeetingWebhookPost);
-
-app.get("/api/health", async (_request, response) => {
-  const diagnostics = getTranscriptionDiagnostics();
-  response.json({
-    ok: true,
-    storage: process.env.DATABASE_URL || process.env.MYSQL_HOST ? "mysql" : "filesystem-json",
-    transcribeMode: diagnostics.mode,
-    transcribeConfigured: diagnostics.configured,
-    transcribeMessage: diagnostics.message,
-    tencentMeetingWebhook: tencentMeetingWebhookStatus(),
-    tts: ttsDiagnostics(),
-    qaMode: process.env.LLM_PROVIDER || process.env.LLM_API_URL || process.env.LLM_API_KEY ? "llm" : "local-transcript",
-  });
-});
-
-app.get("/api/meeting-briefs/today", async (_request, response, next) => {
-  try {
-    const parts = dailyBriefDateParts();
-    const clientId = requestClientId(_request);
-    const clientName = requestClientName(_request);
-    const db = await loadDb();
-    const recordings = recordingsForBriefDate(db, parts.date, clientId, clientName);
-    const existing = findDailyBrief(db, parts.date, clientId);
-
-    if (!recordings.length) {
-      const empty = emptyDailyBrief(parts, recordings, clientId);
-      if (!existing || existing.status !== "empty") {
-        await updateDb((nextDb) => upsertDailyBriefInDb(nextDb, empty));
-      }
-      response.json(publicDailyBrief(empty, parts, recordings, clientId, db));
-      return;
-    }
-
-    if (isOrphanDailyBriefGenerating(existing, parts.date, clientId)) {
-      const queued = await queueDailyBriefGeneration(parts.date, clientId, clientName);
-      response.json(publicDailyBrief(queued, parts, recordings, clientId, db));
-      return;
-    }
-
-    const needsGeneration = shouldGenerateDailyBrief(parts, existing, recordings);
-    if (needsGeneration && (!existing || existing.status !== "ready")) {
-      const queued = await queueDailyBriefGeneration(parts.date, clientId, clientName);
-      response.json(publicDailyBrief(queued, parts, recordings, clientId, db));
-      return;
-    }
-
-    if (needsGeneration) {
-      queueDailyBriefGeneration(parts.date, clientId, clientName).catch((error) =>
-        console.warn("[Daily brief] background refresh failed:", error instanceof Error ? error.message : error),
-      );
-    }
-
-    response.json(publicDailyBrief(existing, parts, recordings, clientId, db));
-  } catch (error) {
-    next(error);
-  }
-});
-
-app.post("/api/meeting-briefs/today", async (_request, response, next) => {
-  try {
-    const parts = dailyBriefDateParts();
-    const clientId = requestClientId(_request);
-    const clientName = requestClientName(_request);
-    const queued = await queueDailyBriefGeneration(parts.date, clientId, clientName);
-    const db = await loadDb();
-    const recordings = recordingsForBriefDate(db, parts.date, clientId, clientName);
-    const latest = findDailyBrief(db, parts.date, clientId) || queued;
-    response.json(publicDailyBrief(latest, parts, recordings, clientId, db));
-  } catch (error) {
-    next(error);
-  }
-});
-
-app.get("/api/meeting-briefs", async (request, response, next) => {
-  try {
-    const clientId = requestClientId(request);
-    const clientName = requestClientName(request);
-    const limit = Math.min(60, Math.max(1, Number(request.query.limit || 30)));
-    const db = await loadDb();
-    const dateKeys = new Set(dailyBriefDateKeysForRecordings(db, clientId, clientName));
-    (db.dailyMeetingBriefs || [])
-      .filter((brief) => dailyBriefOwnerKey(brief.clientId) === dailyBriefOwnerKey(clientId))
-      .forEach((brief) => {
-        if (brief?.date) dateKeys.add(brief.date);
-      });
-
-    const briefs = [...dateKeys]
-      .sort((a, b) => String(b || "").localeCompare(String(a || "")))
-      .slice(0, limit)
-      .map((dateKey) => {
-        const parts = dailyBriefPartsFromDateKey(dateKey);
-        const recordings = recordingsForBriefDate(db, dateKey, clientId, clientName);
-        const existing = findDailyBrief(db, dateKey, clientId);
-        return publicDailyBrief(existing || dailyBriefPlaceholder(parts, recordings, clientId), parts, recordings, clientId, db);
-      })
-      .filter((brief) => brief.status !== "empty" || brief.meetingCount > 0);
-    response.json({ briefs });
-  } catch (error) {
-    next(error);
-  }
-});
-
-app.get("/api/meeting-briefs/:date", async (request, response, next) => {
-  try {
-    const dateKey = normalizeDailyBriefDateParam(request.params.date);
-    if (!dateKey) {
-      response.status(400).json({ error: "日期格式不正确" });
-      return;
-    }
-    const clientId = requestClientId(request);
-    const clientName = requestClientName(request);
-    const parts = dailyBriefPartsFromDateKey(dateKey);
-    const db = await loadDb();
-    const recordings = recordingsForBriefDate(db, dateKey, clientId, clientName);
-    const existing = findDailyBrief(db, dateKey, clientId);
-
-    if (isOrphanDailyBriefGenerating(existing, dateKey, clientId)) {
-      const queued = await queueDailyBriefGeneration(dateKey, clientId, clientName);
-      response.json(publicDailyBrief(queued, parts, recordings, clientId, db));
-      return;
-    }
-
-    response.json(publicDailyBrief(existing || dailyBriefPlaceholder(parts, recordings, clientId), parts, recordings, clientId, db));
-  } catch (error) {
-    next(error);
-  }
-});
-
-app.post("/api/meeting-briefs/:date", async (request, response, next) => {
-  try {
-    const dateKey = normalizeDailyBriefDateParam(request.params.date);
-    if (!dateKey) {
-      response.status(400).json({ error: "日期格式不正确" });
-      return;
-    }
-    const clientId = requestClientId(request);
-    const clientName = requestClientName(request);
-    const parts = dailyBriefPartsFromDateKey(dateKey);
-    const queued = await queueDailyBriefGeneration(dateKey, clientId, clientName);
-    const db = await loadDb();
-    const recordings = recordingsForBriefDate(db, dateKey, clientId, clientName);
-    const latest = findDailyBrief(db, dateKey, clientId) || queued;
-    response.json(publicDailyBrief(latest, parts, recordings, clientId, db));
-  } catch (error) {
-    next(error);
-  }
-});
-
-app.get("/api/meeting-briefs/:date/share.pdf", async (request, response, next) => {
-  try {
-    const clientId = requestClientId(request);
-    const dateKey = normalizeDailyBriefDateParam(request.params.date);
-    if (!dateKey) {
-      response.status(400).json({ error: "日期格式不正确" });
-      return;
-    }
-    const db = await loadDb();
-    const brief = findDailyBrief(db, dateKey, clientId);
-    if (!brief || !brief.summaryMarkdown) {
-      response.status(404).json({ error: "今日总结还没有生成完成" });
-      return;
-    }
-    const pdfBuffer = await renderDailyBriefPdf(brief);
-    const fileName = `${safeDownloadName(brief.title || "今日会议简报")}-${dateKey}.pdf`;
-    response.setHeader("Content-Type", "application/pdf");
-    response.setHeader("Content-Disposition", `attachment; filename*=UTF-8''${encodeURIComponent(fileName)}`);
-    response.send(pdfBuffer);
-  } catch (error) {
-    next(error);
-  }
-});
-
-app.get("/api/transcription/status", async (_request, response) => {
-  response.json({ transcription: getTranscriptionDiagnostics() });
-});
-
-app.post("/api/tts", async (request, response) => {
-  try {
-    const result = await generateQwenTtsAudio(request.body?.text, {
-      voice: request.body?.voice,
-      model: request.body?.model,
-    });
-    response.json(result);
-  } catch (error) {
-    response.status(500).json({ error: error instanceof Error ? error.message : "QWEN-TTS 生成失败" });
-  }
-});
-
-app.get("/api/tts/:id/audio.:ext", async (request, response) => {
-  const id = String(request.params.id || "").replace(/[^a-f0-9]/gi, "").slice(0, 80);
-  const requestedExt = String(request.params.ext || "").replace(/[^a-z0-9]/gi, "").toLowerCase();
-  const requestedPath = requestedExt ? path.join(ttsDir, `${id}.${requestedExt}`) : "";
-  const cachedAudio =
-    id && requestedPath && existsSync(requestedPath)
-      ? { filePath: requestedPath, ...detectTtsAudioFormat(await readFile(requestedPath), requestedExt) }
-      : await findCachedTtsAudio(id);
-
-  if (!id || !cachedAudio?.filePath || !existsSync(cachedAudio.filePath)) {
-    response.status(404).json({ error: "朗读音频不存在" });
-    return;
-  }
-
-  response.sendFile(cachedAudio.filePath, {
-    headers: {
-      "Content-Type": cachedAudio.contentType,
-      "Content-Disposition": `inline; filename*=UTF-8''${encodeURIComponent(`tts-${id}.${cachedAudio.ext}`)}`,
-      "Cache-Control": "public, max-age=31536000, immutable",
-    },
-  });
-});
-
-app.get("/api/wecom/oauth-url", (request, response) => {
-  const config = wecomConfig();
-  if (!config.corpId || !config.corpSecret) {
-    response.json({ configured: false });
-    return;
-  }
-
-  const redirect = String(request.query.redirect || `${request.protocol}://${request.get("host")}/`);
-  const url =
-    `https://open.weixin.qq.com/connect/oauth2/authorize?appid=${encodeURIComponent(config.corpId)}` +
-    `&redirect_uri=${encodeURIComponent(redirect)}` +
-    "&response_type=code&scope=snsapi_base&state=wecom_recorder#wechat_redirect";
-  response.json({ configured: true, url });
-});
-
-app.get("/api/wecom/me", async (request, response, next) => {
-  try {
-    const code = String(request.query.code || "").trim();
-    if (!code || !hasWecomConfig()) {
-      response.json({ configured: hasWecomConfig(), authenticated: false, user: null });
-      return;
-    }
-
-    const user = await getWecomUserByCode(code);
-    response.json({ configured: true, authenticated: Boolean(user?.name), user });
-  } catch (error) {
-    next(error);
-  }
-});
-
-app.get("/api/auth/me", async (request, response) => {
-  const db = await loadDb();
-  const payload = requestAccountPayload(request);
-  const account = payload?.accountId ? (db.accounts || []).find((item) => item.id === payload.accountId) : null;
-  response.json({ authenticated: Boolean(account), account: account ? publicAccount(account) : null, profile: account ? publicAccount(account).profile : null });
-});
-
-app.post("/api/auth/enter", async (request, response) => {
-  const username = normalizeAccountUsername(request.body?.username);
-  const password = String(request.body?.password || "");
-  if (!username) {
-    response.status(400).json({ error: "账号不能为空" });
-    return;
-  }
-  if (password.length < 6) {
-    response.status(400).json({ error: "密码至少需要 6 位" });
-    return;
-  }
-
-  const sourceClientId = requestClientId(request);
-  const profilePatch = profilePatchForClient(request.body?.profile || {});
-  let created = false;
-  let passwordWrong = false;
-  const account = await updateDb((db) => {
-    db.accounts = Array.isArray(db.accounts) ? db.accounts : [];
-    ensureDeleteAllAccount(db);
-    const found = db.accounts.find((item) => normalizeAccountUsername(item.username) === username);
-    if (found) {
-      if (!verifyPassword(password, found)) {
-        passwordWrong = true;
-        return null;
-      }
-      return request.body?.mergeLocal === false ? found : mergeLocalClientDataIntoAccount(db, sourceClientId, found, profilePatch);
-    }
-
-    const id = crypto.randomUUID();
-    const passwordRecord = createPasswordRecord(password);
-    const nextAccount = {
-      id,
-      username,
-      ...passwordRecord,
-      profile: {},
-      createdAt: new Date().toISOString(),
-      updatedAt: new Date().toISOString(),
-    };
-    db.accounts.push(nextAccount);
-    created = true;
-    return mergeLocalClientDataIntoAccount(db, sourceClientId, nextAccount, profilePatch);
-  });
-
-  if (!account) {
-    logger.warn({ event: "auth.enter.failed", username, passwordWrong, sourceClientId, created });
-    response.status(passwordWrong ? 401 : 400).json({ error: passwordWrong ? "密码不正确" : "账号进入失败" });
-    return;
-  }
-  logger.info({ event: "auth.enter.success", username, sourceClientId, created, accountId: account.id });
-  response.status(created ? 201 : 200).json({ ...accountAuthResponse(account), created });
-});
-
-app.post("/api/auth/register", async (request, response) => {
-  const username = normalizeAccountUsername(request.body?.username);
-  const password = String(request.body?.password || "");
-  if (!username) {
-    response.status(400).json({ error: "账号不能为空" });
-    return;
-  }
-  if (password.length < 6) {
-    response.status(400).json({ error: "密码至少需要 6 位" });
-    return;
-  }
-
-  const sourceClientId = requestClientId(request);
-  const profilePatch = profilePatchForClient(request.body?.profile || {});
-  const account = await updateDb((db) => {
-    db.accounts = Array.isArray(db.accounts) ? db.accounts : [];
-    ensureDeleteAllAccount(db);
-    if (db.accounts.some((item) => normalizeAccountUsername(item.username) === username)) {
-      return null;
-    }
-    const id = crypto.randomUUID();
-    const passwordRecord = createPasswordRecord(password);
-    const created = {
-      id,
-      username,
-      ...passwordRecord,
-      profile: {},
-      createdAt: new Date().toISOString(),
-      updatedAt: new Date().toISOString(),
-    };
-    db.accounts.push(created);
-    return mergeLocalClientDataIntoAccount(db, sourceClientId, created, profilePatch);
-  });
-
-  if (!account) {
-    logger.warn({ event: "auth.register.conflict", username, sourceClientId });
-    response.status(409).json({ error: "账号已存在，请使用该注册名和密码进入" });
-    return;
-  }
-  logger.info({ event: "auth.register.success", username, sourceClientId, accountId: account.id });
-  response.status(201).json(accountAuthResponse(account));
-});
-
-app.post("/api/auth/login", async (request, response) => {
-  const username = normalizeAccountUsername(request.body?.username);
-  const password = String(request.body?.password || "");
-  const sourceClientId = requestClientId(request);
-  const profilePatch = profilePatchForClient(request.body?.profile || {});
-  const account = await updateDb((db) => {
-    db.accounts = Array.isArray(db.accounts) ? db.accounts : [];
-    ensureDeleteAllAccount(db);
-    const found = db.accounts.find((item) => normalizeAccountUsername(item.username) === username);
-    if (!found || !verifyPassword(password, found)) return null;
-    return request.body?.mergeLocal === false ? found : mergeLocalClientDataIntoAccount(db, sourceClientId, found, profilePatch);
-  });
-
-  if (!account) {
-    logger.warn({ event: "auth.login.failed", username, sourceClientId });
-    response.status(401).json({ error: "账号或密码不正确" });
-    return;
-  }
-  logger.info({ event: "auth.login.success", username, sourceClientId, accountId: account.id });
-  response.json(accountAuthResponse(account));
-});
-
-app.get("/api/profile", async (request, response) => {
-  const db = await loadDb();
-  response.json({ profile: clientProfileForRequest(db, request) });
-});
-
-app.get("/api/folders", async (_request, response) => {
-  const db = await loadDb();
-  const clientId = requestClientId(_request);
-  const clientName = requestClientName(_request);
-  const canDeleteAllRecordings = requestCanDeleteAllRecordings(_request);
-  const readableRecordings = canDeleteAllRecordings ? db.recordings : db.recordings.filter((recording) => canReadRecording(recording, clientId, clientName));
-  const folders = [...db.folders]
-    .filter((folder) => canReadFolder(folder, clientId))
-    .sort((a, b) => new Date(a.createdAt) - new Date(b.createdAt))
-    .map((folder) => publicFolder(folder, readableRecordings));
-  const activeRecordings = readableRecordings.filter((recording) => !recording.deletedAt);
-  const uncategorizedCount = activeRecordings.filter((recording) => !recording.folderId).length;
-  const favoriteCount = activeRecordings.filter((recording) => recording.favorite).length;
-  const trashCount = db.recordings.filter((recording) => recording.deletedAt).length;
-
-  response.json({ folders, uncategorizedCount, favoriteCount, trashCount, totalCount: activeRecordings.length });
-});
-
-app.post("/api/folders", async (request, response) => {
-  const name = String(request.body?.name || "").trim();
-  const clientId = requestClientId(request);
-  if (!name) {
-    response.status(400).json({ error: "文件夹名称不能为空" });
-    return;
-  }
-
-  const folder = await updateDb((db) => {
-    const now = new Date().toISOString();
-    const item = {
-      id: crypto.randomUUID(),
-      name,
-      ownerClientId: clientId,
-      createdAt: now,
-      updatedAt: now,
-    };
-
-    db.folders.push(item);
-    return publicFolder(item, db.recordings);
-  });
-
-  response.status(201).json({ folder });
-});
-
-app.patch("/api/folders/:id", async (request, response) => {
-  const clientId = requestClientId(request);
-  const updated = await updateDb((db) => {
-    const folder = db.folders.find((item) => item.id === request.params.id);
-    if (!folder || !canReadFolder(folder, clientId)) return null;
-
-    if (typeof request.body.name === "string") {
-      folder.name = request.body.name.trim() || folder.name;
-    }
-    folder.updatedAt = new Date().toISOString();
-    return publicFolder(folder, db.recordings);
-  });
-
-  if (!updated) {
-    response.status(404).json({ error: "文件夹不存在" });
-    return;
-  }
-
-  response.json({ folder: updated });
-});
-
-app.delete("/api/folders/:id", async (request, response) => {
-  const clientId = requestClientId(request);
-  const deleted = await updateDb((db) => {
-    const exists = db.folders.some((folder) => folder.id === request.params.id && canReadFolder(folder, clientId));
-    if (!exists) return false;
-
-    db.folders = db.folders.filter((folder) => folder.id !== request.params.id);
-    db.recordings = db.recordings.map((recording) =>
-      recording.folderId === request.params.id ? { ...recording, folderId: null, updatedAt: new Date().toISOString() } : recording,
-    );
-    return true;
-  });
-
-  if (!deleted) {
-    response.status(404).json({ error: "文件夹不存在" });
-    return;
-  }
-
-  response.json({ ok: true });
-});
-
-app.put("/api/profile", async (request, response) => {
-  const clientId = requestClientId(request);
-  const accountPayload = requestAccountPayload(request);
-  const nextProfile = await updateDb((db) => {
-    const patch = profilePatchForClient(request.body || {});
-    const account = accountPayload?.accountId ? (db.accounts || []).find((item) => item.id === accountPayload.accountId) : null;
-    if (account) {
-      const targetClientId = accountClientId(account.id);
-      account.profile = {
-        ...(account.profile || {}),
-        ...patch,
-        name: account.username,
-        username: account.username,
-        accountId: account.id,
-        clientId: targetClientId,
-        accountLoggedIn: true,
-        updatedAt: new Date().toISOString(),
-      };
-      account.updatedAt = new Date().toISOString();
-      if (!db.clientProfiles || typeof db.clientProfiles !== "object" || Array.isArray(db.clientProfiles)) db.clientProfiles = {};
-      db.clientProfiles[targetClientId] = account.profile;
-      return {
-        ...(db.profile || {}),
-        ...account.profile,
-      };
-    }
-
-    if (!db.clientProfiles || typeof db.clientProfiles !== "object" || Array.isArray(db.clientProfiles)) {
-      db.clientProfiles = {};
-    }
-    db.clientProfiles[clientId] = {
-      ...(db.clientProfiles[clientId] || {}),
-      ...patch,
-      clientId,
-      updatedAt: new Date().toISOString(),
-    };
-    return {
-      ...(db.profile || {}),
-      ...db.clientProfiles[clientId],
-    };
-  });
-
-  response.json({ profile: nextProfile });
-});
-
-app.get("/api/recordings", async (request, response) => {
-  const db = await loadDb();
-  const clientId = requestClientId(request);
-  const clientName = requestClientName(request);
-  const canDeleteAllRecordings = requestCanDeleteAllRecordings(request);
-  const query = String(request.query.q || request.query.search || "").trim().toLowerCase();
-  const folderId = String(request.query.folderId || "all");
-  const recordings = [...db.recordings]
-    .sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt))
-    .filter((recording) => canDeleteAllRecordings || canReadRecording(recording, clientId, clientName))
-    .map((recording) => publicRecording(recording, findSegments(db, recording.id), clientId, clientName, { canDeleteAllRecordings }));
-
-  const folderFiltered =
-    folderId === "all"
-      ? recordings.filter((recording) => !recording.deletedAt)
-      : folderId === "favorites"
-        ? recordings.filter((recording) => recording.favorite && !recording.deletedAt)
-        : folderId === "trash"
-          ? recordings.filter((recording) => recording.deletedAt)
-          : folderId === "uncategorized"
-            ? recordings.filter((recording) => !recording.folderId && !recording.deletedAt)
-            : recordings.filter((recording) => recording.folderId === folderId && !recording.deletedAt);
-
-  const filtered = query
-    ? folderFiltered
-        .map((recording) => ({ recording, score: recordingSearchScore(recording, query) }))
-        .filter((item) => item.score >= 18)
-        .sort((a, b) => b.score - a.score || new Date(b.recording.createdAt) - new Date(a.recording.createdAt))
-        .map((item) => item.recording)
-    : folderFiltered;
-
-  schedulePendingLocalTranscriptionSweep("recordings-list");
-  response.json({ recordings: filtered });
-});
-
-app.post("/api/recordings", upload.single("audio"), async (request, response, next) => {
-  try {
-    if (!request.file) {
-      response.status(400).json({ error: "缺少录音文件" });
-      return;
-    }
-
-    const id = crypto.randomUUID();
-    const fileName = `${id}.mp3`;
-    const storagePath = path.join(audioDir, fileName);
-    const now = new Date().toISOString();
-    const ownerClientId = requestClientId(request);
-    const ownerName = requestClientName(request);
-    await convertAudioFileToMp3(request.file.path, storagePath);
-    await removeFileIfExists(request.file.path);
-    const { storedFile, durationMs } = await verifiedStoredRecording(storagePath, request.body.durationMs);
-
-    const recording = await updateDb((db) => {
-      db.counters.recordingSeq += 1;
-      const seq = db.counters.recordingSeq;
-      const item = {
-        id,
-        seq,
-        name: request.body.name || `录音 ${String(seq).padStart(3, "0")}`,
-        createdAt: now,
-        updatedAt: now,
-        durationMs,
-        mimeType: "audio/mpeg",
-        size: storedFile.size,
-        fileName,
-        storagePath,
-        transcriptPath: "",
-        favorite: false,
-        ownerClientId,
-        ownerName,
-        shared: false,
-        sharedAt: "",
-        speakerName: request.body.speakerName || "说话人 1",
-        speakerMap: {},
-        tag: request.body.tag || "",
-        deletedAt: null,
-        transcriptProvider: getTranscriptionMode(),
-        transcriptSource: "",
-        transcribedAt: "",
-        folderId: request.body.folderId || null,
-        status: "uploaded",
-        source: "wecom-h5",
-        userAgent: request.get("user-agent") || "",
-      };
-
-      db.recordings.push(item);
-      return item;
-    });
-
-    const queued = queueTranscriptionJob(id, recording);
-    const responseRecording = queued ? { ...recording, status: "transcribing", errorMessage: "" } : recording;
-
-    logger.info({ event: "recording.uploaded", recordingId: id, ownerClientId, ownerName, queued, durationMs, fileName });
-    response.status(201).json({ recording: publicRecording(responseRecording, [], ownerClientId, ownerName) });
-  } catch (error) {
-    next(error);
-  }
-});
-
-app.post("/api/recording-upload-sessions", async (request, response, next) => {
-  try {
-    const sessionId = crypto.randomUUID();
-    const dir = uploadSessionPath(sessionId);
-    await mkdir(dir, { recursive: true });
-    const now = new Date().toISOString();
-    const ownerClientId = requestClientId(request);
-    const ownerName = requestClientName(request);
-    const meta = {
-      id: sessionId,
-      createdAt: now,
-      updatedAt: now,
-      ownerClientId,
-      ownerName,
-      name: String(request.body?.name || "").trim(),
-      durationMs: Math.max(0, Number(request.body?.durationMs || 0)),
-      mimeType: String(request.body?.mimeType || "audio/webm").trim() || "audio/webm",
-      folderId: request.body?.folderId || null,
-      userAgent: request.get("user-agent") || "",
-    };
-    await writeFile(path.join(dir, "meta.json"), `${JSON.stringify(meta, null, 2)}\n`, "utf8");
-    response.status(201).json({ sessionId, batchSize: 48 });
-  } catch (error) {
-    next(error);
-  }
-});
-
-app.post("/api/recording-upload-sessions/:sessionId/segments", upload.array("audio", 80), async (request, response, next) => {
-  const files = Array.isArray(request.files) ? request.files : [];
-  try {
-    const sessionId = safeUploadSessionId(request.params.sessionId);
-    const dir = uploadSessionPath(sessionId);
-    const meta = await readUploadSessionMeta(sessionId);
-    if (!dir || !meta || meta.ownerClientId !== requestClientId(request)) {
-      await Promise.all(files.map((file) => removeFileIfExists(file.path)));
-      response.status(404).json({ error: "上传会话不存在" });
-      return;
-    }
-    if (files.length === 0) {
-      response.status(400).json({ error: "缺少录音片段" });
-      return;
-    }
-
-    const startIndex = Math.max(0, Number(request.body.startIndex || 0));
-    await Promise.all(
-      files.map(async (file, index) => {
-        const partIndex = startIndex + index;
-        const targetPath = path.join(dir, `part-${String(partIndex).padStart(6, "0")}.webm`);
-        await rm(targetPath, { force: true }).catch(() => {});
-        await rename(file.path, targetPath);
-      }),
-    );
-
-    const entries = await readdir(dir);
-    const received = entries.filter((entry) => /^part-\d+\.webm$/i.test(entry)).length;
-    await writeFile(path.join(dir, "meta.json"), `${JSON.stringify({ ...meta, updatedAt: new Date().toISOString(), received }, null, 2)}\n`, "utf8");
-    response.json({ ok: true, received });
-  } catch (error) {
-    await Promise.all(files.map((file) => removeFileIfExists(file.path)));
-    next(error);
-  }
-});
-
-app.delete("/api/recording-upload-sessions/:sessionId", async (request, response, next) => {
-  try {
-    const sessionId = safeUploadSessionId(request.params.sessionId);
-    const dir = uploadSessionPath(sessionId);
-    const meta = await readUploadSessionMeta(sessionId);
-    if (!dir || !meta || meta.ownerClientId !== requestClientId(request)) {
-      response.status(404).json({ error: "上传会话不存在" });
-      return;
-    }
-    await rm(dir, { recursive: true, force: true });
-    response.json({ ok: true });
-  } catch (error) {
-    next(error);
-  }
-});
-
-app.post("/api/recording-upload-sessions/:sessionId/finalize", async (request, response, next) => {
-  try {
-    const sessionId = safeUploadSessionId(request.params.sessionId);
-    const dir = uploadSessionPath(sessionId);
-    const meta = await readUploadSessionMeta(sessionId);
-    if (!dir || !meta || meta.ownerClientId !== requestClientId(request)) {
-      response.status(404).json({ error: "上传会话不存在" });
-      return;
-    }
-
-    const partFiles = (await readdir(dir))
-      .filter((entry) => /^part-\d+\.webm$/i.test(entry))
-      .sort((a, b) => Number(a.match(/\d+/)?.[0] || 0) - Number(b.match(/\d+/)?.[0] || 0))
-      .map((entry) => path.join(dir, entry));
-    if (partFiles.length === 0) {
-      response.status(400).json({ error: "缺少录音片段" });
-      return;
-    }
-
-    const id = crypto.randomUUID();
-    const fileName = `${id}.mp3`;
-    const storagePath = path.join(audioDir, fileName);
-    const now = new Date().toISOString();
-    await mergeAudioFilesToMp3(partFiles, storagePath);
-    const { storedFile, durationMs } = await verifiedStoredRecording(storagePath, meta.durationMs || request.body?.durationMs);
-
-    const recording = await updateDb((db) => {
-      db.counters.recordingSeq += 1;
-      const seq = db.counters.recordingSeq;
-      const item = {
-        id,
-        seq,
-        name: meta.name || request.body?.name || `录音 ${String(seq).padStart(3, "0")}`,
-        createdAt: now,
-        updatedAt: now,
-        durationMs,
-        mimeType: "audio/mpeg",
-        size: storedFile.size,
-        fileName,
-        storagePath,
-        transcriptPath: "",
-        favorite: false,
-        ownerClientId: meta.ownerClientId,
-        ownerName: meta.ownerName || "未设置姓名",
-        shared: false,
-        sharedAt: "",
-        speakerName: request.body?.speakerName || "说话人 1",
-        speakerMap: {},
-        tag: request.body?.tag || "",
-        deletedAt: null,
-        transcriptProvider: getTranscriptionMode(),
-        transcriptSource: "",
-        transcribedAt: "",
-        folderId: meta.folderId || request.body?.folderId || null,
-        status: "uploaded",
-        source: "wecom-h5-long-session",
-        userAgent: meta.userAgent || request.get("user-agent") || "",
-      };
-
-      db.recordings.push(item);
-      return item;
-    });
-
-    const queued = queueTranscriptionJob(id, recording);
-    const responseRecording = queued ? { ...recording, status: "transcribing", errorMessage: "" } : recording;
-    await rm(dir, { recursive: true, force: true }).catch(() => {});
-    logger.info({ event: "recording.session.finalized", recordingId: id, sessionId, ownerClientId: meta.ownerClientId, queued, partCount: partFiles.length, fileName });
-    response.status(201).json({ recording: publicRecording(responseRecording, [], meta.ownerClientId, meta.ownerName) });
-  } catch (error) {
-    next(error);
-  }
-});
-
-app.post("/api/recordings/segments", upload.array("audio", 480), async (request, response, next) => {
-  const files = Array.isArray(request.files) ? request.files : [];
-  try {
-    if (files.length === 0) {
-      response.status(400).json({ error: "缺少录音片段" });
-      return;
-    }
-
-    const id = crypto.randomUUID();
-    const fileName = `${id}.mp3`;
-    const storagePath = path.join(audioDir, fileName);
-    const now = new Date().toISOString();
-    const ownerClientId = requestClientId(request);
-    const ownerName = requestClientName(request);
-    await mergeAudioFilesToMp3(
-      files.map((file) => file.path),
-      storagePath,
-    );
-    await Promise.all(files.map((file) => removeFileIfExists(file.path)));
-    const { storedFile, durationMs } = await verifiedStoredRecording(storagePath, request.body.durationMs);
-
-    const recording = await updateDb((db) => {
-      db.counters.recordingSeq += 1;
-      const seq = db.counters.recordingSeq;
-      const item = {
-        id,
-        seq,
-        name: request.body.name || `录音 ${String(seq).padStart(3, "0")}`,
-        createdAt: now,
-        updatedAt: now,
-        durationMs,
-        mimeType: "audio/mpeg",
-        size: storedFile.size,
-        fileName,
-        storagePath,
-        transcriptPath: "",
-        favorite: false,
-        ownerClientId,
-        ownerName,
-        shared: false,
-        sharedAt: "",
-        speakerName: request.body.speakerName || "说话人 1",
-        speakerMap: {},
-        tag: request.body.tag || "",
-        deletedAt: null,
-        transcriptProvider: getTranscriptionMode(),
-        transcriptSource: "",
-        transcribedAt: "",
-        folderId: request.body.folderId || null,
-        status: "uploaded",
-        source: files.length > 1 ? "wecom-h5-resumed" : "wecom-h5",
-        userAgent: request.get("user-agent") || "",
-      };
-
-      db.recordings.push(item);
-      return item;
-    });
-
-    const queued = queueTranscriptionJob(id, recording);
-    const responseRecording = queued ? { ...recording, status: "transcribing", errorMessage: "" } : recording;
-
-    logger.info({ event: "recording.segments.uploaded", recordingId: id, ownerClientId, ownerName, queued, partCount: files.length, fileName });
-    response.status(201).json({ recording: publicRecording(responseRecording, [], ownerClientId, ownerName) });
-  } catch (error) {
-    await Promise.all(files.map((file) => removeFileIfExists(file.path)));
-    next(error);
-  }
-});
-
-app.get("/api/recordings/:id", async (request, response) => {
-  const db = await loadDb();
-  const clientId = requestClientId(request);
-  const clientName = requestClientName(request);
-  const canDeleteAllRecordings = requestCanDeleteAllRecordings(request);
-  const recording = findRecording(db, request.params.id);
-  if (!recording || (!canDeleteAllRecordings && !canReadRecording(recording, clientId, clientName))) {
-    response.status(404).json({ error: "录音不存在" });
-    return;
-  }
-
-  response.json({ recording: publicRecording(recording, findSegments(db, recording.id), clientId, clientName, { canDeleteAllRecordings }) });
-});
-
-app.patch("/api/recordings/:id", async (request, response) => {
-  const clientId = requestClientId(request);
-  const clientName = requestClientName(request);
-  const updated = await updateDb((db) => {
-    const recording = findRecording(db, request.params.id);
-    if (!recording) return null;
-    const keys = Object.keys(request.body || {});
-    const readerOnlyPatch = keys.length > 0 && keys.every((key) => key === "favorite");
-    if (!canManageRecording(recording, clientId, clientName) && !(readerOnlyPatch && canReadRecording(recording, clientId, clientName))) return null;
-    const now = new Date().toISOString();
-
-    if (typeof request.body.name === "string") {
-      recording.name = request.body.name.trim() || recording.name;
-    }
-    if (typeof request.body.speakerName === "string") {
-      recording.speakerName = request.body.speakerName.trim() || "说话人 1";
-    }
-    if (request.body.speakerMap && typeof request.body.speakerMap === "object" && !Array.isArray(request.body.speakerMap)) {
-      recording.speakerMap = Object.fromEntries(
-        Object.entries(request.body.speakerMap)
-          .map(([key, value]) => [String(key).trim(), String(value || "").trim()])
-          .filter(([key, value]) => key && value),
-      );
-      recording.speakerName = recording.speakerMap["speaker-1"] || recording.speakerName || "说话人 1";
-    }
-    if (typeof request.body.tag === "string") {
-      recording.tag = request.body.tag.trim();
-    }
-    if (typeof request.body.favorite === "boolean") {
-      recording.favorite = request.body.favorite;
-    }
-    if (typeof request.body.shared === "boolean") {
-      recording.shared = request.body.shared;
-      if (request.body.shared && !recording.sharedAt) {
-        recording.sharedAt = now;
-      }
-    }
-    if (Object.prototype.hasOwnProperty.call(request.body, "folderId")) {
-      const nextFolderId = request.body.folderId || null;
-      const folderExists = nextFolderId ? db.folders.some((folder) => folder.id === nextFolderId) : true;
-      if (folderExists) {
-        recording.folderId = nextFolderId;
-      }
-    }
-
-    recording.updatedAt = now;
-    return publicRecording(recording, findSegments(db, recording.id), clientId, clientName);
-  });
-
-  if (!updated) {
-    response.status(404).json({ error: "录音不存在" });
-    return;
-  }
-
-  response.json({ recording: updated });
-});
-
-app.delete("/api/recordings/:id", async (request, response) => {
-  const clientId = requestClientId(request);
-  const clientName = requestClientName(request);
-  const canDeleteAllRecordings = requestCanDeleteAllRecordings(request);
-  let filePath = "";
-  let transcriptPath = "";
-  const permanent = request.query.permanent === "true";
-  const deleted = await updateDb((db) => {
-    const recording = findRecording(db, request.params.id);
-    if (!recording) return false;
-    if (!canDeleteAllRecordings && !(permanent ? canManageRecording(recording, clientId, clientName) : canDeleteRecording(recording, clientId, clientName))) return false;
-
-    if (!permanent) {
-      recording.deletedAt = new Date().toISOString();
-      recording.updatedAt = new Date().toISOString();
-      return true;
-    }
-
-    filePath = recording.storagePath;
-    transcriptPath = recording.transcriptPath;
-    db.recordings = db.recordings.filter((item) => item.id !== request.params.id);
-    db.transcriptSegments = db.transcriptSegments.filter((segment) => segment.recordingId !== request.params.id);
-    db.qaMessages = db.qaMessages.filter((message) => !qaMessageRecordingIds(message).includes(request.params.id));
-    return true;
-  });
-
-  if (!deleted) {
-    response.status(404).json({ error: "录音不存在" });
-    return;
-  }
-
-  if (filePath) {
-    await rm(filePath, { force: true });
-  }
-  if (transcriptPath) {
-    await rm(transcriptPath, { force: true });
-  }
-
-  response.json({ ok: true });
-});
-
-function resolveRecordingAudioPath(recording) {
-  const candidates = [
-    recording?.storagePath,
-    recording?.storagePath ? path.resolve(projectRoot, recording.storagePath) : "",
-    recording?.fileName ? path.join(audioDir, recording.fileName) : "",
-    recording?.id ? path.join(audioDir, `${recording.id}.mp3`) : "",
-    recording?.storagePath ? path.join(audioDir, path.basename(recording.storagePath)) : "",
-  ].filter(Boolean);
-
-  for (const candidate of [...new Set(candidates)]) {
-    try {
-      if (existsSync(candidate) && statSync(candidate).isFile()) return candidate;
-    } catch {
-      // Try the next possible location.
-    }
-  }
-  return "";
-}
-
-async function sendRecordingAudio(request, response, disposition = "inline") {
-  const db = await loadDb();
-  const clientId = requestClientId(request);
-  const clientName = requestClientName(request);
-  const recording = findRecording(db, request.params.id);
-  const audioPath = recording ? resolveRecordingAudioPath(recording) : "";
-  const tokenAllowed = recording ? hasValidAudioDownloadToken(request.query?.token, recording.id) : false;
-  if (!recording || (!tokenAllowed && !canReadRecording(recording, clientId, clientName))) {
-    response.status(404).json({ error: "音频文件不存在" });
-    return;
-  }
-
-  if (!audioPath) {
-    if (String(recording.source || "").startsWith(TENCENT_MEETING_SOURCE_PREFIX)) {
-      queueTencentMeetingImportSync(recording.id, tencentMeetingSyncInfoFromRecording(recording));
-      response.setHeader("Retry-After", "15");
-      response.status(202).json({ ok: false, pending: true, message: "腾讯会议音频正在同步，请稍后重试。" });
-      return;
-    }
-    response.status(404).json({ error: "音频文件不存在" });
-    return;
-  }
-
-  const fileName = `${safeDownloadName(recording.name || "recording")}.mp3`;
-  const asciiName = fileName.replace(/[^\x20-\x7E]+/g, "_").replace(/"/g, "_");
-  response.sendFile(audioPath, {
-    headers: {
-      "Content-Type": "audio/mpeg",
-      "Content-Disposition": `${disposition}; filename="${asciiName}"; filename*=UTF-8''${encodeURIComponent(fileName)}`,
-      "Content-Transfer-Encoding": "binary",
-      "Cache-Control": "private, no-store",
-      "X-Content-Type-Options": "nosniff",
-    },
-  });
-}
-
-app.get("/api/recordings/:id/audio", async (request, response) => {
-  const downloadFlag = String(request.query.download || "").toLowerCase();
-  const disposition = ["1", "true", "yes", "download"].includes(downloadFlag) ? "attachment" : "inline";
-  await sendRecordingAudio(request, response, disposition);
-});
-
-app.get("/api/recordings/:id/audio.mp3", async (request, response) => {
-  await sendRecordingAudio(request, response, "attachment");
-});
-
-app.post("/api/recordings/:id/audio-share-url", async (request, response) => {
-  const db = await loadDb();
-  const clientId = requestClientId(request);
-  const clientName = requestClientName(request);
-  const recording = findRecording(db, request.params.id);
-  const audioPath = recording ? resolveRecordingAudioPath(recording) : "";
-  if (!recording || !canReadRecording(recording, clientId, clientName) || !audioPath) {
-    response.status(404).json({ error: "audio file not found" });
-    return;
-  }
-
-  const fileName = `${safeDownloadName(recording.name || "recording")}.mp3`;
-  const token = createAudioDownloadToken(recording.id);
-  response.json({
-    url: `/api/recordings/${encodeURIComponent(recording.id)}/audio.mp3?token=${encodeURIComponent(token)}`,
-    fileName,
-    contentType: "audio/mpeg",
-    size: statSync(audioPath).size,
-    expiresInSeconds: 30 * 60,
-  });
-});
-
-app.post("/api/recordings/:id/wecom-audio-media", async (request, response, next) => {
-  try {
-    const db = await loadDb();
-    const clientId = requestClientId(request);
-    const clientName = requestClientName(request);
-    const recording = findRecording(db, request.params.id);
-    const audioPath = recording ? resolveRecordingAudioPath(recording) : "";
-    if (!recording || !canReadRecording(recording, clientId, clientName) || !audioPath) {
-      response.status(404).json({ error: "音频文件不存在" });
-      return;
-    }
-
-    const fileName = `${safeDownloadName(recording.name || "recording")}.mp3`;
-    const media = await uploadWecomTemporaryFile(audioPath, fileName, "audio/mpeg");
-    response.json({
-      mediaId: media.mediaId,
-      fileName,
-      contentType: "audio/mpeg",
-      size: statSync(audioPath).size,
-      type: media.type,
-      createdAt: media.createdAt,
-    });
-  } catch (error) {
-    next(error);
-  }
-});
-
-app.get("/api/recordings/:id/transcript.txt", async (request, response) => {
-  const db = await loadDb();
-  const clientId = requestClientId(request);
-  const clientName = requestClientName(request);
-  const recording = findRecording(db, request.params.id);
-  if (!recording || !canReadRecording(recording, clientId, clientName) || !recording.transcriptPath || !existsSync(recording.transcriptPath)) {
-    response.status(404).json({ error: "转写 TXT 不存在" });
-    return;
-  }
-
-  response.setHeader("Content-Type", "text/plain; charset=utf-8");
-  response.sendFile(recording.transcriptPath);
-});
-
-async function handleMeetingOutlineRequest(request, response, next) {
-  try {
-    const db = await loadDb();
-    const clientId = requestClientId(request);
-    const clientName = requestClientName(request);
-    const recording = findRecording(db, request.params.id);
-    if (!recording || !canReadRecording(recording, clientId, clientName)) {
-      response.status(404).json({ error: "录音不存在" });
-      return;
-    }
-
-    const forceRefresh = request.method === "POST" || request.query.refresh === "1";
-    if (!forceRefresh && recording.meetingOutline) {
-      response.json({
-        outline: recording.meetingOutline,
-        status: recording.meetingOutlineStatus || "ready",
-        generatedAt: recording.meetingOutlinedAt || recording.meetingOutline.generatedAt || "",
-      });
-      return;
-    }
-
-    if (!forceRefresh && recording.meetingOutlineStatus === "generating") {
-      response.json({ outline: null, status: "generating" });
-      return;
-    }
-
-    const segments = expandTranscriptSegments(findSegments(db, recording.id), recording.durationMs || 0);
-    if (!segments.length) {
-      response.status(409).json({ error: "No transcript is available for meeting outline generation." });
-      return;
-    }
-
-    const outline = await generateAndStoreMeetingOutline(recording.id, segments, {
-      updateTag: canManageRecording(recording, clientId, clientName),
-    });
-    response.json({
-      outline,
-      status: outline ? "ready" : "failed",
-      generatedAt: outline?.generatedAt || "",
-    });
-  } catch (error) {
-    next(error);
-  }
-}
-
-app.get("/api/recordings/:id/meeting-outline", handleMeetingOutlineRequest);
-app.post("/api/recordings/:id/meeting-outline", handleMeetingOutlineRequest);
-
-app.get("/api/recordings/:id/meeting-outline.pdf", async (request, response, next) => {
-  try {
-    const db = await loadDb();
-    const clientId = requestClientId(request);
-    const clientName = requestClientName(request);
-    const recording = findRecording(db, request.params.id);
-    if (!recording || !canReadRecording(recording, clientId, clientName)) {
-      response.status(404).json({ error: "录音不存在" });
-      return;
-    }
-
-    let outline = recording.meetingOutline || null;
-    let pdfRecording = recording;
-    if (!outline) {
-      const segments = expandTranscriptSegments(findSegments(db, recording.id), recording.durationMs || 0);
-      if (!segments.length) {
-        response.status(409).json({ error: "No transcript is available for meeting outline PDF generation." });
-        return;
-      }
-      outline = await generateAndStoreMeetingOutline(recording.id, segments, {
-        updateTag: canManageRecording(recording, clientId, clientName),
-      });
-      const refreshedDb = await loadDb();
-      pdfRecording = findRecording(refreshedDb, recording.id) || recording;
-      outline = pdfRecording.meetingOutline || outline;
-    }
-
-    const pdfBuffer = await renderMeetingOutlinePdf(pdfRecording, outline);
-    const fileName = `${safeDownloadName(pdfRecording.name || "会议提纲")}-会议提纲.pdf`;
-    response.setHeader("Content-Type", "application/pdf");
-    response.setHeader("Content-Disposition", `attachment; filename*=UTF-8''${encodeURIComponent(fileName)}`);
-    response.send(pdfBuffer);
-  } catch (error) {
-    next(error);
-  }
-});
-
-app.post("/api/recordings/:id/transcribe", async (request, response) => {
-  logger.info(`[CALL] /api/recordings/:id/transcribe: request.params.id: ${request.params.id}`);
-  const db = await loadDb();
-  const clientId = requestClientId(request);
-  const clientName = requestClientName(request);
-  const recording = findRecording(db, request.params.id);
-  if (!recording || !canManageRecording(recording, clientId, clientName)) {
-    response.status(404).json({ error: "录音不存在" });
-    return;
-  }
-
-  if (isTencentMeetingRecording(recording)) {
-    const synced = await syncTencentMeetingBuiltInTranscript(recording.id, tencentMeetingSyncInfoFromRecording(recording));
-    response.status(synced ? 200 : 202).json({
-      ok: true,
-      status: synced ? "ready" : "pending",
-      source: "tencent-meeting",
-    });
-    return;
-  }
-
-  if (!isLocalApiTranscriptionRecording(recording)) {
-    response.status(409).json({ error: "该录音来源不使用 API 转写，请使用来源自带的转写同步。" });
-    return;
-  }
-  // 如果未开启录音API转写
-  // 是腾讯会议录音--> 自带转写
-  // 否则--> 409
-  if (!isRecordingApiTranscriptionEnabled()) {
-    if (String(recording.source || "").startsWith(TENCENT_MEETING_SOURCE_PREFIX)) {
-      const synced = await syncTencentMeetingBuiltInTranscript(recording.id, tencentMeetingSyncInfoFromRecording(recording));
-      response.status(synced ? 200 : 202).json({
-        ok: true,
-        status: synced ? "ready" : "pending",
-        source: "tencent-meeting",
-      });
-      return;
-    }
-    response.status(409).json({ error: "录音 API 转写已停用；腾讯会议录音会使用腾讯会议自带转写。" });
-    return;
-  }
-
-  const queued = queueTranscriptionJob(recording.id, recording);
-  if (!queued && transcriptionJobs.has(String(recording.id))) {
-    await markTranscriptionQueued(recording.id).catch((error) => {
-      console.warn("[Transcription] retry state refresh failed:", error instanceof Error ? error.message : error);
-    });
-  }
-  response.status(202).json({ ok: true, status: queued ? "transcribing" : "queued" });
-});
-
-app.post("/api/recordings/:id/restore", async (request, response) => {
-  const clientId = requestClientId(request);
-  const clientName = requestClientName(request);
-  const restored = await updateDb((db) => {
-    const recording = findRecording(db, request.params.id);
-    if (!recording) return null;
-    if (!canManageRecording(recording, clientId, clientName)) return null;
-    recording.deletedAt = null;
-    recording.updatedAt = new Date().toISOString();
-    return publicRecording(recording, findSegments(db, recording.id), clientId, clientName);
-  });
-
-  if (!restored) {
-    response.status(404).json({ error: "录音不存在" });
-    return;
-  }
-
-  response.json({ recording: restored });
-});
-
-app.post("/api/recordings/:id/ask", async (request, response) => {
-  const clientId = requestClientId(request);
-  const clientName = requestClientName(request);
-  const rawQuestion = String(request.body?.question || "").trim();
-  const images = Array.isArray(request.body?.images) ? request.body.images.slice(0, 3) : [];
-  const attachments = Array.isArray(request.body?.attachments)
-    ? request.body.attachments.slice(0, 6).map((item) => ({
-        kind: String(item?.kind || "file").slice(0, 24),
-        name: String(item?.name || "附件").slice(0, 120),
-        type: String(item?.type || "").slice(0, 120),
-        text: String(item?.text || "").slice(0, 6000),
-        url: String(item?.url || "").slice(0, 500),
-        dataUrl: String(item?.dataUrl || ""),
-      }))
-    : [];
-  const question =
-    rawQuestion ||
-    (images.length || attachments.length
-      ? `请结合录音内容分析这些附件：${[
-          ...images.map((item) => `图片 ${String(item?.name || "未命名").slice(0, 80)}`),
-          ...attachments.map((item) => `${item.kind || "附件"} ${item.name || "未命名"}`),
-        ].join("、")}`
-      : "");
-
-  if (!question) {
-    response.status(400).json({ error: "问题不能为空" });
-    return;
-  }
-
-  const db = await loadDb();
-  const recording = findRecording(db, request.params.id);
-  if (!recording || !canReadRecording(recording, clientId, clientName)) {
-    response.status(404).json({ error: "录音不存在" });
-    return;
-  }
-
-  const canReuseQa = images.length === 0 && attachments.length === 0 && request.body?.force !== true && request.body?.regenerate !== true;
-  if (canReuseQa) {
-    const reusable = findReusableQaMessage(db, {
-      clientId,
-      recordingIds: [recording.id],
-      question,
-    });
-    if (reusable) {
-      const recordingMap = new Map(db.recordings.map((item) => [item.id, item]));
-      if (reusable.pending || reusable.status === "pending") scheduleQaJob(reusable.id);
-      response.json({ message: publicQaMessage(reusable, recordingMap), reused: true });
-      return;
-    }
-  }
-
-  const messageId = crypto.randomUUID();
-  const storedAttachments = await persistQaAttachments(messageId, images, attachments);
-  const createdAt = new Date().toISOString();
-
-  const result = cacheQaMessage({
-    id: messageId,
-    recordingId: recording.id,
-    recordingIds: [recording.id],
-    recordingNames: [recording.name].filter(Boolean),
-    clientId,
-    question,
-    answer: "",
-    structuredAnswer: null,
-    jumpToMs: 0,
-    citations: [],
-    provider: "",
-    model: "",
-    reasoningContent: "",
-    thinking: [],
-    attachments: storedAttachments,
-    favorite: false,
-    deletedAt: null,
-    pending: true,
-    status: "pending",
-    createdAt,
-    updatedAt: createdAt,
-  });
-  persistQaMessageSnapshot(result, { removeReadyCache: false });
-
-  const recordingMap = new Map(db.recordings.map((item) => [item.id, item]));
-  scheduleQaJob(messageId);
-  response.json({ message: publicQaMessage(result, recordingMap) });
-});
-
-app.post("/api/voice-input", upload.single("audio"), async (request, response, next) => {
-  let voicePath = "";
-  let convertedPath = "";
-
-  try {
-    if (!request.file) {
-      response.status(400).json({ error: "缺少语音文件" });
-      return;
-    }
-
-    const id = crypto.randomUUID();
-    const sourceExt = path.extname(request.file.originalname || "").toLowerCase();
-    const directExts = new Set([".mp3", ".wav", ".m4a", ".aac", ".amr"]);
-    const directVoice = directExts.has(sourceExt);
-    if (directVoice) {
-      voicePath = request.file.path;
-    } else {
-      convertedPath = path.join(tempDir, `${id}.mp3`);
-      await convertAudioFileToMp3(request.file.path, convertedPath);
-      await removeFileIfExists(request.file.path);
-      voicePath = convertedPath;
-    }
-    const info = await fileInfo(voicePath);
-    const fileName = directVoice ? `voice-${id}${sourceExt}` : `${id}.mp3`;
-    const recording = {
-      id,
-      seq: 0,
-      name: "voice-input",
-      createdAt: new Date().toISOString(),
-      updatedAt: new Date().toISOString(),
-      durationMs: Number(request.body?.durationMs || 0),
-      mimeType: directVoice ? request.file.mimetype || "audio/mpeg" : "audio/mpeg",
-      size: info.size,
-      fileName,
-      storagePath: voicePath,
-      speakerName: "speaker-1",
-      speakerMap: {},
-      tag: "",
-      status: "uploaded",
-      transcriptProvider: getTranscriptionMode(),
-    };
-
-    const segments = expandTranscriptSegments(await transcribeVoiceInputRecording(recording), recording.durationMs || 0);
-    const text = segments.map((segment) => segment.text).join(" ").trim();
-    response.json({ text, segments });
-  } catch (error) {
-    next(error);
-  } finally {
-    await removeFileIfExists(request.file?.path);
-    await removeFileIfExists(convertedPath);
-  }
-});
-
-app.get("/api/qa-messages", async (request, response) => {
-  const clientId = requestClientId(request);
-  const limit = Math.min(100, Math.max(1, Number(request.query.limit || 50)));
-  const favoriteOnly = request.query.favorite === "true";
-  const db = await loadDb();
-  const recordingMap = new Map(db.recordings.map((item) => [item.id, item]));
-  const messagesById = new Map();
-  for (const message of db.qaMessages || []) {
-    if (message?.id) messagesById.set(message.id, message);
-  }
-  for (const message of qaMessageCache.values()) {
-    if (message?.id) messagesById.set(message.id, message);
-  }
-  const messages = [...messagesById.values()]
-    .filter((message) => !message.deletedAt)
-    .filter((message) => canReadQaMessage(message, clientId))
-    .filter((message) => !favoriteOnly || message.favorite)
-    .sort((a, b) => new Date(b.createdAt || 0) - new Date(a.createdAt || 0))
-    .slice(0, limit);
-  schedulePendingQaMessages(messages);
-
-  response.json({ messages: messages.map((message) => publicQaMessage(message, recordingMap)) });
-});
-
-app.get("/api/qa-messages/:id", async (request, response) => {
-  const clientId = requestClientId(request);
-  const cached = cachedQaMessage(request.params.id);
-  if (cached && !cached.deletedAt && canReadQaMessage(cached, clientId)) {
-    if (cached.pending || cached.status === "pending") scheduleQaJob(cached.id);
-    response.json({ message: publicQaMessage(cached) });
-    return;
-  }
-
-  const db = await loadDb();
-  const message = findQaMessage(db, request.params.id);
-  if (!message || message.deletedAt || !canReadQaMessage(message, clientId)) {
-    response.status(404).json({ error: "问答记录不存在" });
-    return;
-  }
-
-  if (message.pending || message.status === "pending") scheduleQaJob(message.id);
-  const recordingMap = new Map(db.recordings.map((item) => [item.id, item]));
-  response.json({ message: publicQaMessage(message, recordingMap) });
-});
-
-app.patch("/api/qa-messages/:id", async (request, response) => {
-  const clientId = requestClientId(request);
-  const updated = await updateDb((db) => {
-    const message = findQaMessage(db, request.params.id);
-    if (!message || message.deletedAt) return null;
-    if (!canReadQaMessage(message, clientId)) return null;
-
-    if (typeof request.body.favorite === "boolean") {
-      message.favorite = request.body.favorite;
-    }
-    message.updatedAt = new Date().toISOString();
-
-    const recordingMap = new Map(db.recordings.map((item) => [item.id, item]));
-    return publicQaMessage(message, recordingMap);
-  });
-
-  if (!updated) {
-    response.status(404).json({ error: "问答记录不存在" });
-    return;
-  }
-
-  response.json({ message: updated });
-});
-
-app.delete("/api/qa-messages/:id", async (request, response) => {
-  const clientId = requestClientId(request);
-  const deleted = await updateDb((db) => {
-    const message = findQaMessage(db, request.params.id);
-    if (!message) return false;
-    if (!canReadQaMessage(message, clientId)) return false;
-    message.deletedAt = new Date().toISOString();
-    message.updatedAt = new Date().toISOString();
-    return true;
-  });
-
-  if (!deleted) {
-    response.status(404).json({ error: "问答记录不存在" });
-    return;
-  }
-
-  response.json({ ok: true });
-});
-
-app.get("/api/qa-messages/:id/share.pdf", async (request, response, next) => {
-  try {
-    const db = await loadDb();
-    const clientId = requestClientId(request);
-    const message = findQaMessage(db, request.params.id);
-    if (!message || message.deletedAt || !canReadQaMessage(message, clientId)) {
-      response.status(404).json({ error: "问答记录不存在" });
-      return;
-    }
-
-    const recordingMap = new Map(db.recordings.map((item) => [item.id, item]));
-    const pdfBuffer = await renderQaMessagePdf(message, recordingMap);
-    const fileName = `${safeDownloadName(message.question)}.pdf`;
-    response.setHeader("Content-Type", "application/pdf");
-    response.setHeader("Content-Disposition", `attachment; filename*=UTF-8''${encodeURIComponent(fileName)}`);
-    response.send(pdfBuffer);
-  } catch (error) {
-    next(error);
-  }
-});
-
-app.get("/api/qa-messages/:id/attachments/:attachmentId", async (request, response) => {
-  const db = await loadDb();
-  const clientId = requestClientId(request);
-  const message = findQaMessage(db, request.params.id);
-  if (!message || message.deletedAt || !canReadQaMessage(message, clientId)) {
-    response.status(404).json({ error: "附件不存在" });
-    return;
-  }
-
-  const attachment = (message.attachments || []).find(
-    (item) => item.fileId === request.params.attachmentId || item.id === request.params.attachmentId,
-  );
-  if (!attachment?.storagePath || !existsSync(attachment.storagePath)) {
-    response.status(404).json({ error: "附件不存在" });
-    return;
-  }
-
-  response.sendFile(attachment.storagePath, {
-    headers: {
-      "Content-Type": attachment.type || "application/octet-stream",
-      "Content-Disposition": `inline; filename*=UTF-8''${encodeURIComponent(attachment.name || "attachment")}`,
-    },
-  });
-});
-
-app.post("/api/ask", async (request, response) => {
-  const clientId = requestClientId(request);
-  const clientName = requestClientName(request);
-  const rawQuestion = String(request.body?.question || "").trim();
-  const recordingId = String(request.body?.recordingId || "").trim();
-  const recordingIds = Array.isArray(request.body?.recordingIds)
-    ? [...new Set(request.body.recordingIds.map((item) => String(item || "").trim()).filter(Boolean))]
-    : [];
-  const images = Array.isArray(request.body?.images) ? request.body.images.slice(0, 3) : [];
-  const attachments = Array.isArray(request.body?.attachments)
-    ? request.body.attachments.slice(0, 6).map((item) => ({
-        kind: String(item?.kind || "file").slice(0, 24),
-        name: String(item?.name || "附件").slice(0, 120),
-        type: String(item?.type || "").slice(0, 120),
-        text: String(item?.text || "").slice(0, 6000),
-        url: String(item?.url || "").slice(0, 500),
-        dataUrl: String(item?.dataUrl || ""),
-      }))
-    : [];
-  const question =
-    rawQuestion ||
-    (images.length > 0 || attachments.length > 0
-      ? `请结合录音内容分析这些附件：${[
-          ...images.map((item) => `图片：${String(item?.name || "未命名图片")}`),
-          ...attachments.map((item) => `${item.kind === "audio" ? "录音" : item.kind === "location" ? "地址" : "文件"}：${item.name}`),
-        ].join("、")}`
-      : "");
-
-  if (!question) {
-    response.status(400).json({ error: "问题不能为空" });
-    return;
-  }
-
-  const db = await loadDb();
-  const activeRecordings = db.recordings.filter((item) => !item.deletedAt && canReadRecording(item, clientId, clientName));
-  const selectedIds = recordingIds.length > 0 ? recordingIds : recordingId ? [recordingId] : [];
-  const targetRecordings =
-    selectedIds.length > 0 ? activeRecordings.filter((item) => selectedIds.includes(item.id)) : activeRecordings;
-  const visibleSelectedIds = selectedIds.length > 0 ? targetRecordings.map((item) => item.id) : [];
-
-  if (selectedIds.length > 0 && targetRecordings.length === 0) {
-    response.status(404).json({ error: "录音不存在" });
-    return;
-  }
-
-  const canReuseQa = images.length === 0 && attachments.length === 0 && request.body?.force !== true && request.body?.regenerate !== true;
-  if (canReuseQa) {
-    const reusable = findReusableQaMessage(db, {
-      clientId,
-      recordingIds: visibleSelectedIds,
-      question,
-    });
-    if (reusable) {
-      const recordingMap = new Map(db.recordings.map((item) => [item.id, item]));
-      if (reusable.pending || reusable.status === "pending") scheduleQaJob(reusable.id);
-      response.json({ message: publicQaMessage(reusable, recordingMap), reused: true });
-      return;
-    }
-  }
-
-  const messageId = crypto.randomUUID();
-  const storedAttachments = await persistQaAttachments(messageId, images, attachments);
-  const createdAt = new Date().toISOString();
-
-  const result = cacheQaMessage({
-    id: messageId,
-    recordingId: visibleSelectedIds.length === 1 ? visibleSelectedIds[0] : null,
-    recordingIds: visibleSelectedIds,
-    recordingNames: targetRecordings.map((item) => item.name).filter(Boolean),
-    clientId,
-    question,
-    answer: "",
-    structuredAnswer: null,
-    jumpToMs: 0,
-    citations: [],
-    provider: "",
-    model: "",
-    reasoningContent: "",
-    thinking: [],
-    attachments: storedAttachments,
-    favorite: false,
-    deletedAt: null,
-    pending: true,
-    status: "pending",
-    createdAt,
-    updatedAt: createdAt,
-  });
-  persistQaMessageSnapshot(result, { removeReadyCache: false });
-
-  const recordingMap = new Map(db.recordings.map((item) => [item.id, item]));
-  scheduleQaJob(messageId);
-  response.json({ message: publicQaMessage(result, recordingMap) });
-});
 
 async function migrateExistingArtifacts() {
   const db = await loadDb();
@@ -6587,7 +5168,7 @@ if (existsSync(distDir)) {
 }
 
 app.use((error, request, response, _next) => {
-  logError("server.unhandled_error", error, { method: request?.method, path: request?.path || request?.originalUrl });
+  logger.error("server.unhandled_error", {message: `method: ${request?.method}, path: ${request?.path}, originalUrl: ${request?.originalUrl}`});
   if (response.headersSent) return;
   const isPayloadTooLarge =
     error?.type === "entity.too.large" ||
@@ -6600,20 +5181,20 @@ app.use((error, request, response, _next) => {
 });
 
 app.listen(port, host, () => {
-  logger.info({ event: "server.started", host, port, httpsPort, nodeEnv: process.env.NODE_ENV || "development" });
+  logger.info("server.started", {host, port, httpsPort, nodeEnv: process.env.NODE_ENV || "development"});
   console.log(`Recorder API listening on http://${host}:${port}`);
 });
 
-if (httpsPort > 0 && process.env.HTTPS_KEY_PATH && process.env.HTTPS_CERT_PATH) {
-  try {
-    const [key, cert] = await Promise.all([readFile(process.env.HTTPS_KEY_PATH), readFile(process.env.HTTPS_CERT_PATH)]);
-    https.createServer({ key, cert }, app).listen(httpsPort, host, () => {
-      console.log(`Recorder HTTPS listening on https://${host}:${httpsPort}`);
-    });
-  } catch (error) {
-    console.error("HTTPS server failed to start", error);
-  }
-}
+// if (httpsPort > 0 && process.env.HTTPS_KEY_PATH && process.env.HTTPS_CERT_PATH) {
+//   try {
+//     const [key, cert] = await Promise.all([readFile(process.env.HTTPS_KEY_PATH), readFile(process.env.HTTPS_CERT_PATH)]);
+//     https.createServer({ key, cert }, app).listen(httpsPort, host, () => {
+//       console.log(`Recorder HTTPS listening on https://${host}:${httpsPort}`);
+//     });
+//   } catch (error) {
+//     console.error("HTTPS server failed to start", error);
+//   }
+// }
 
 scheduleDailyBriefGeneration();
 
