@@ -2320,6 +2320,7 @@ export function App() {
       await clearRecordingRecoveryManifest(manifest);
       return true;
     } catch (error) {
+      console.error("call recoverSingleRecordingManifest failed: "+ error.message)
       showToast(recordingUploadErrorMessage(error));
       return false;
     }
@@ -2479,6 +2480,7 @@ export function App() {
       uploaded = true;
       setRecordingError("");
     } catch (error) {
+      console.error("call uploadStoppedRecordingSnapshot: ", error.message)
       setRecordingError("");
       showToast(recordingUploadErrorMessage(error));
     } finally {
@@ -2509,6 +2511,7 @@ export function App() {
       autosavedSegmentCountRef.current = endIndex;
       autosavedDurationMsRef.current += durationMs;
     } catch (error) {
+      console.error('call recordingUploadErrorMessage failed: ', error.message)
       setRecordingError("");
       showToast(recordingUploadErrorMessage(error));
     }
@@ -2667,6 +2670,7 @@ export function App() {
       uploaded = true;
       setRecordingError("");
     } catch (error) {
+      console.error("call finishRecordingSession failed: ", error.message)
       setRecordingError("");
       showToast(recordingUploadErrorMessage(error));
     } finally {
@@ -2934,6 +2938,7 @@ export function App() {
       refreshRecordings(query, selectedFolderId).catch(() => {});
       refreshFolders().catch(() => {});
     } catch (error) {
+      console.error("call handleUploadFile failed: ", error.message)
       failUploadCard(uploadId);
       showToast(recordingUploadErrorMessage(error));
     }
