@@ -8,7 +8,7 @@ const server0 = {
   port: 7000,
   host: host0,
   proxy: {
-    "/api": `http://${host0}`,
+    "/api": `http://${host0}:8787`,
   },
   warmup: {
     clientFiles: ["./src/main.jsx"],
@@ -21,7 +21,7 @@ const server1 = {
   // allowedHosts: ["f9ebb12.r34.cpolar.top"],
   allowedHosts: true,
   proxy: {
-    "/api": `http://${host1}`,
+    "/api": `http://${host1}:8787`,
   },
   warmup: {
     clientFiles: ["./src/main.jsx"],
