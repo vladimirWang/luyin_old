@@ -46,3 +46,13 @@ export function getAudioFileDuration(file) {
     };
   });
 }
+
+export function isUploadableMediaFile(file) {
+  const name = String(file?.name || "").toLowerCase();
+  const type = String(file?.type || "").toLowerCase();
+  return (
+    type.startsWith("audio/") ||
+    type.startsWith("video/") ||
+    /\.(mp3|m4a|wav|webm|aac|mp4|mov|m4v)$/i.test(name)
+  );
+}

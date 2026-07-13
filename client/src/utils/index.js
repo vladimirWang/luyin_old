@@ -193,16 +193,6 @@ export function openDownloadUrl(url, fileName = "") {
   link.remove();
 }
 
-export function isUploadableMediaFile(file) {
-  const name = String(file?.name || "").toLowerCase();
-  const type = String(file?.type || "").toLowerCase();
-  return (
-    type.startsWith("audio/") ||
-    type.startsWith("video/") ||
-    /\.(mp3|m4a|wav|webm|aac|mp4|mov|m4v)$/i.test(name)
-  );
-}
-
 export function isImageFile(file) {
   const type = String(file?.type || "").toLowerCase();
   const name = String(file?.name || "").toLowerCase();

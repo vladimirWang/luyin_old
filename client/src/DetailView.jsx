@@ -48,6 +48,7 @@ import { dateKeyFromRecording, todayDisplayDateFallback, displayDateFromDateKey 
 import { DailyMeetingBriefCard } from './DetailView/components/DailyMeetingBriefCard.jsx'
 import { requestMicrophoneStream } from './utils/audio.js'
 import {DailyMeetingBriefMessage} from './DetailView/components/DailyMeetingBriefMessage.jsx'
+import {getAudioFileDuration} from './utils/audio.js'
 
 export function DetailView({ recording, recordings = [], onBack, onToast, language, onSelectRecording }) {
   const audioRef = useRef(null);

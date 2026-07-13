@@ -35,7 +35,7 @@ import {
   X,
 } from "lucide-react";
 import { RecorderView } from './RecorderView.jsx'
-import {RecordsView} from './RecordsView.jsx'
+import {RecordsView} from './pages/Records/RecordsView.jsx'
 import {DetailView} from './DetailView.jsx'
 import {IconButton} from './IconButton.jsx'
 import { RecordCard } from './RecordCard.jsx'
@@ -79,7 +79,6 @@ import {
   recordingListSignature,
   isFreshUploadLikeRecording,
   mergeFreshUploadRecordings,
-  isUploadableMediaFile,
   isImageFile,
   canvasToBlob,
   blobToDataUrl,
@@ -125,6 +124,7 @@ import {
 } from './utils/index.js'
 import {requestMicrophoneStream, getAudioFileDuration} from './utils/audio.js'
 import {loadImageSource, compressAvatarImage} from './utils/image.js'
+import {useUploadManager} from './hooks/useUploadManager.js'
 
 const cardColors = ["coral", "indigo", "violet", "teal", "clay", "ink"];
 const RECORDING_DATA_SLICE_MS = 60 * 1000;
@@ -1141,9 +1141,8 @@ function BottomNav({ activeView, onNavigate, language, hidden = false }) {
 }
 
 export function App() {
-  const [activeView, setActiveView] = useState("record");
+  const [activeView, setActiveView] = useState("records");
   const [recordings, setRecordings] = useState([]);
-  const [uploadingRecords, setUploadingRecords] = useState([]);
   const [folders, setFolders] = useState([]);
   const [folderStats, setFolderStats] = useState({ totalCount: 0, favoriteCount: 0, uncategorizedCount: 0, trashCount: 0 });
   const [transcriptionStatus, setTranscriptionStatus] = useState(null);
@@ -1168,7 +1167,6 @@ export function App() {
   const chunksRef = useRef([]);
   const sessionSegmentsRef = useRef([]);
   const sessionDurationsRef = useRef([]);
-  const uploadInputRef = useRef(null);
   const streamRef = useRef(null);
   const audioContextRef = useRef(null);
   const analyserRafRef = useRef(0);
@@ -1181,6 +1179,27 @@ export function App() {
   const autosaveTimerRef = useRef(0);
   const recordingWatchdogTimerRef = useRef(0);
   const activeViewRef = useRef(activeView);
+
+  const {
+    uploadingRecords,
+    uploadBusy,
+    createUploadCard,
+    updateUploadCard,
+    failUploadCard,
+    finishUploadCard,
+    // uploadRecording,
+    uploadRecordingSegments,
+  } = useUploadManager({
+    onRecordingCreated: (recording) => {
+      setRecordings((current) => [recording, ...current.filter((item) => item.id !== recording.id)]);
+    },
+    onRefresh: () => {
+      refreshRecordings(query, selectedFolderId).catch(() => {});
+      refreshFolders().catch(() => {});
+    },
+    activeViewRef,
+  });
+
   const resumeAvailableRef = useRef(false);
   const isRecordingRef = useRef(false);
   const manualStopRequestedRef = useRef(false);
@@ -1224,41 +1243,6 @@ export function App() {
     },
     [],
   );
-
-  function createUploadCard({ name = "新录音", durationMs = 0, message = "正在上传服务器" } = {}) {
-    const item = {
-      id: `upload-${Date.now()}-${Math.random().toString(16).slice(2)}`,
-      name,
-      createdAt: new Date().toISOString(),
-      durationMs,
-      status: "uploading",
-      message,
-    };
-    setUploadingRecords((current) => {
-      const next = current.filter((existing) => {
-        if (existing.id === item.id) return false;
-        return existing.name !== item.name || existing.message !== item.message;
-      });
-      return [item, ...next].slice(0, 6);
-    });
-    return item.id;
-  }
-
-  function finishUploadCard(uploadId, recording) {
-    if (uploadId) setUploadingRecords((current) => current.filter((item) => item.id !== uploadId));
-    if (recording) {
-      setRecordings((current) => [recording, ...current.filter((item) => item.id !== recording.id)]);
-    }
-  }
-
-  function updateUploadCard(uploadId, patch) {
-    if (!uploadId) return;
-    setUploadingRecords((current) => current.map((item) => (item.id === uploadId ? { ...item, ...patch } : item)));
-  }
-
-  function failUploadCard(uploadId) {
-    if (uploadId) setUploadingRecords((current) => current.filter((item) => item.id !== uploadId));
-  }
 
   async function refreshFolders() {
     const payload = await api("/api/folders");
@@ -1701,139 +1685,6 @@ export function App() {
     tick();
   }
 
-  async function uploadRecording(blob, durationMs, options = {}) {
-    const loadingMsg = options.uploadMessage || "正在上传录音并准备转写"
-    const uploadId = options.uploadId || (options.showUploadCard === false || options.silent
-      ? ""
-      : createUploadCard({
-          name: options.name || "新录音",
-          durationMs,
-          message: loadingMsg + ` call uploadRecording 1`,
-        }));
-    updateUploadCard(uploadId, {
-      name: options.name || "新录音",
-      durationMs,
-      message: loadingMsg + ` call uploadRecording 2`,
-    });
-    const formData = new FormData();
-    formData.append("audio", blob, options.fileName || `recording-${Date.now()}.webm`);
-    formData.append("durationMs", String(durationMs));
-    formData.append("mimeType", blob.type || "audio/webm");
-    if (options.name) formData.append("name", options.name);
-    if (options.folderId) formData.append("folderId", options.folderId);
-
-    try {
-      const payload = await api("/api/recordings", {
-        method: "POST",
-        body: formData,
-      });
-
-      finishUploadCard(uploadId, payload.recording);
-      if (!options.keepSelection && activeViewRef.current !== "detail") setSelectedId(payload.recording.id);
-      if (options.toastMessage) {
-        showToast(options.toastMessage);
-      } else if (!options.silent) {
-        showToast("录音已上传服务器，可在记录里查看");
-      }
-      window.setTimeout(() => {
-        refreshRecordings(query, selectedFolderId).catch(() => {});
-        refreshFolders().catch(() => {});
-      }, 2600);
-    } catch (error) {
-      failUploadCard(uploadId);
-      throw error;
-    }
-  }
-
-  async function uploadRecordingSegments(segments, durationMs, options = {}) {
-    const loadingMsg = options.uploadMessage || "正在上传录音并准备转写"
-    const uploadId = options.uploadId || (options.showUploadCard === false || options.silent
-      ? ""
-      : createUploadCard({
-          name: options.name || (segments.length > 1 ? "上传录音" : "新录音"),
-          durationMs,
-          message: loadingMsg + ' call uploadRecordingSegments 1',
-        }));
-    console.log("[call] uploadRecordingSegments: ", uploadId)
-    updateUploadCard(uploadId, {
-      name: options.name || (segments.length > 1 ? "上传录音" : "新录音"),
-      durationMs,
-      message: loadingMsg + ' call uploadRecordingSegments 2',
-    });
-    console.log("[call] uploadRecordingSegments 前端乐观更新结束")
-    let longUploadSessionId = "";
-    try {
-      let payload;
-      if (segments.length > LONG_RECORDING_DIRECT_UPLOAD_LIMIT) {
-        console.log(`[CALL] uploadRecordingSegments: , segments.length: ${segments.length}, LONG_RECORDING_DIRECT_UPLOAD_LIMIT: ${LONG_RECORDING_DIRECT_UPLOAD_LIMIT}`)
-        const session = await api("/api/recording-upload-sessions", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            name: options.name || (segments.length > 1 ? "上传录音" : "新录音"),
-            durationMs,
-            mimeType: segments[0]?.type || "audio/webm",
-            folderId: options.folderId || null,
-          }),
-        });
-        longUploadSessionId = session.sessionId || "";
-        const batchSize = Math.max(1, Number(session.batchSize || LONG_RECORDING_UPLOAD_BATCH_SIZE));
-        for (let start = 0; start < segments.length; start += batchSize) {
-          const batch = segments.slice(start, start + batchSize);
-          const batchForm = new FormData();
-          batchForm.append("startIndex", String(start));
-          batch.forEach((blob, index) => {
-            batchForm.append("audio", blob, `recording-${Date.now()}-${start + index + 1}.webm`);
-          });
-          updateUploadCard(uploadId, {
-            message: `正在后台上传 ${Math.min(start + batch.length, segments.length)}/${segments.length} 段`,
-          });
-          await api(`/api/recording-upload-sessions/${session.sessionId}/segments`, {
-            method: "POST",
-            body: batchForm,
-          });
-        }
-        updateUploadCard(uploadId, { message: "正在合并录音并准备转写" });
-        payload = await api(`/api/recording-upload-sessions/${session.sessionId}/finalize`, {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ durationMs }),
-        });
-      } else {
-        const formData = new FormData();
-        segments.forEach((blob, index) => {
-          formData.append("audio", blob, options.fileName || `recording-${Date.now()}-${index + 1}.webm`);
-        });
-        formData.append("durationMs", String(durationMs));
-        formData.append("mimeType", segments[0]?.type || "audio/webm");
-        if (options.name) formData.append("name", options.name);
-        if (options.folderId) formData.append("folderId", options.folderId);
-        payload = await api("/api/recordings/segments", {
-          method: "POST",
-          body: formData,
-        });
-      }
-
-      finishUploadCard(uploadId, payload.recording);
-      if (!options.keepSelection && activeViewRef.current !== "detail") setSelectedId(payload.recording.id);
-      if (options.toastMessage) {
-        showToast(options.toastMessage);
-      } else if (!options.silent) {
-        showToast("录音已上传服务器，可在记录里查看");
-      }
-      window.setTimeout(() => {
-        refreshRecordings(query, selectedFolderId).catch(() => {});
-        refreshFolders().catch(() => {});
-      }, 2600);
-    } catch (error) {
-      if (longUploadSessionId) {
-        api(`/api/recording-upload-sessions/${longUploadSessionId}`, { method: "DELETE" }).catch(() => {});
-      }
-      failUploadCard(uploadId);
-      throw error;
-    }
-  }
-
   function ensureRecordingSessionManifest() {
     if (recordingSessionIdRef.current) {
       return {
@@ -2019,7 +1870,7 @@ export function App() {
         message: "正在恢复上次中断前的录音",
       });
       console.log(`[call] recoverSingleRecordingManifest  rows.length: ${rows.length}`)
-      await uploadRecordingSegments(
+      const recording = await uploadRecordingSegments(
         rows.map((row) => row.blob),
         durationMs,
         {
@@ -2028,6 +1879,7 @@ export function App() {
           toastMessage: "上次中断前的录音已自动恢复上传",
         },
       );
+      if (recording && activeViewRef.current !== "detail") setSelectedId(recording.id);
       await clearRecordingRecoveryManifest(manifest);
       return true;
     } catch (error) {
@@ -2377,7 +2229,8 @@ export function App() {
 
     let uploaded = false;
     try {
-      await uploadRecordingSegments(segments, durationMs);
+      const recording = await uploadRecordingSegments(segments, durationMs);
+      if (recording && activeViewRef.current !== "detail") setSelectedId(recording.id);
       uploaded = true;
       setRecordingError("");
     } catch (error) {
@@ -2590,69 +2443,6 @@ export function App() {
     const recorder = mediaRecorderRef.current;
     if (isRecordingRef.current || recorder?.state === "recording") stopRecording();
     else beginRecording();
-  }
-
-  async function handleUploadFile(event) {
-    const files = Array.from(event.target.files || []);
-    event.target.value = "";
-    if (files.length === 0) return;
-
-    const mediaFiles = files.filter(isUploadableMediaFile);
-    if (mediaFiles.length === 0) {
-      showToast("请选择音频或视频文件");
-      return;
-    }
-    if (mediaFiles.length !== files.length) {
-      showToast("已跳过不支持的文件");
-    } else if (mediaFiles.length > 1) {
-      showToast(`正在上传 ${mediaFiles.length} 个录音文件`);
-    }
-
-    const folderId =
-      selectedFolderId !== "all" &&
-      selectedFolderId !== "uncategorized" &&
-      selectedFolderId !== "favorites" &&
-      selectedFolderId !== "trash"
-        ? selectedFolderId
-        : undefined;
-
-    const firstDisplayName = mediaFiles[0]?.name?.replace(/\.[^.]+$/, "") || "新录音";
-    const uploadId = createUploadCard({
-      name: mediaFiles.length > 1 ? "上传录音" : firstDisplayName,
-      durationMs: 0,
-      message: "正在读取文件，准备上传",
-    });
-
-    try {
-      if (mediaFiles.length === 1) {
-        const file = mediaFiles[0];
-        const durationMs = await getAudioFileDuration(file);
-        const rawName = file.name.replace(/\.[^.]+$/, "");
-        await uploadRecording(file, durationMs, {
-          name: rawName || undefined,
-          fileName: file.name,
-          folderId,
-          uploadId,
-        });
-        showToast("录音已上传并开始转写");
-        return;
-      }
-
-      const durations = await Promise.all(mediaFiles.map((file) => getAudioFileDuration(file)));
-      const durationMs = durations.reduce((total, value) => total + Math.max(0, value || 0), 0);
-      await uploadRecordingSegments(mediaFiles, durationMs, {
-        name: "上传录音",
-        folderId,
-        uploadId,
-        toastMessage: `${mediaFiles.length} 个录音文件已上传并开始转写`,
-      });
-      refreshRecordings(query, selectedFolderId).catch(() => {});
-      refreshFolders().catch(() => {});
-    } catch (error) {
-      console.error("call handleUploadFile failed: ", error.message)
-      failUploadCard(uploadId);
-      showToast(`调用 handleUploadFile failed: ${error.message}`, 4000);
-    }
   }
 
   async function createFolder(name) {
@@ -3277,9 +3067,12 @@ export function App() {
       <div className={`h5-app view-${activeView}`}>
         <div className="view-stack">
           {/* <div style={{fontSize: 30, color: 'red'}}>1232</div> */}
-
+          {activeView === 'record' ? (
+            <RecorderView />
+          ): null}
           {activeView === "records" ? (
             <RecordsView
+              finishUploadCard={finishUploadCard}
               recordings={recordsForView}
               folders={folders}
               folderStats={folderStats}
@@ -3292,7 +3085,10 @@ export function App() {
               uploadBusy={uploadingRecords.length > 0}
               onOpenSettings={() => setSettingsOpen(true)}
               onStartRecording={() => setActiveView("record")}
-              onUploadFile={() => uploadInputRef.current?.click()}
+              createUploadCard={createUploadCard}
+              updateUploadCard={updateUploadCard}
+              failUploadCard={failUploadCard}
+              uploadRecordingSegments={uploadRecordingSegments}
               onCreateFolder={createFolder}
               onRenameFolder={renameFolder}
               onDeleteFolder={deleteFolder}
@@ -3340,15 +3136,6 @@ export function App() {
 
         <BottomNav activeView={activeView} onNavigate={navigate} language={profile.language} hidden={keyboardVisible} />
       </div>
-
-      <input
-        ref={uploadInputRef}
-        className="upload-input"
-        type="file"
-        accept="audio/*,video/*,.mp3,.m4a,.wav,.webm,.aac,.mp4,.mov,.m4v"
-        multiple
-        onChange={handleUploadFile}
-      />
 
       <SettingsDrawer
         open={settingsOpen}
