@@ -14,11 +14,8 @@ services:
       HTTPS_PORT: 0
       FFMPEG_PATH: /usr/bin/ffmpeg
       FFPROBE_PATH: /usr/bin/ffprobe
-    volumes:
-      - .:/app
-      - /app/node_modules
-      - /app/.next
-      - /app/dist
+      MYSQL_HOST: mysql
+      MYSQL_PORT: 3306
     restart: unless-stopped
     extra_hosts:
       - "host.docker.internal:host-gateway"

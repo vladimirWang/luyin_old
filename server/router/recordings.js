@@ -156,7 +156,7 @@ router.post("/", upload.single("audio"), async (request, response, next) => {
       response.status(400).json({ error: "缺少录音文件" });
       return;
     }
-
+    
     const id = crypto.randomUUID();
     const fileName = `${id}.mp3`;
     const storagePath = path.join(audioDir, fileName);
@@ -166,7 +166,6 @@ router.post("/", upload.single("audio"), async (request, response, next) => {
     await convertAudioFileToMp3(request.file.path, storagePath);
     await removeFileIfExists(request.file.path);
     const { storedFile, durationMs } = await verifiedStoredRecording(storagePath, request.body.durationMs);
-
     const recording = await updateDb((db) => {
       db.counters.recordingSeq += 1;
       const seq = db.counters.recordingSeq;

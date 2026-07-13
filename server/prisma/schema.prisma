@@ -1,0 +1,160 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "mysql"
+}
+
+model AppUser {
+  id             String   @id @db.VarChar(64)
+  wecomUserId    String?  @unique @db.VarChar(128)
+  name           String   @db.VarChar(100)
+  company        String?  @db.VarChar(160)
+  department     String?  @db.VarChar(160)
+  phone          String?  @db.VarChar(40)
+  language       String   @default("中文") @db.VarChar(32)
+  recordsTitle   String   @default("我的录音") @db.VarChar(200)
+  createdAt      DateTime @default(now()) @db.Timestamp(6)
+  updatedAt      DateTime @default(now()) @db.Timestamp(6)
+
+  recordings     Recording[]
+  folders        RecordingFolder[]
+  questions      RecordingQuestion[]
+
+  @@map("app_users")
+}
+
+model Recording {
+  id                   String               @id @db.VarChar(64)
+  seq                  BigInt               @unique
+  userId               String?              @db.VarChar(64)
+  folderId             String?              @db.VarChar(64)
+  name                 String               @db.VarChar(200)
+  speakerName          String               @default("说话人 1") @db.VarChar(120)
+  speakerMapJson       String?              @db.Text
+  ownerClientId        String?              @db.VarChar(160)
+  ownerName            String?              @db.VarChar(120)
+  shared               Boolean              @default(true)
+  detectedLanguage     String?              @db.VarChar(24)
+  translationText      String?              @db.MediumText
+  tag                  String?              @db.VarChar(120)
+  durationMs           BigInt               @default(0)
+  mimeType             String               @db.VarChar(100)
+  fileSize             BigInt               @default(0)
+  fileName             String?              @db.VarChar(260)
+  storageProvider      String               @default("local") @db.VarChar(40)
+  storageKey           String               @db.VarChar(500)
+  transcriptPath       String?              @db.VarChar(500)
+  transcriptRawPath    String?              @db.VarChar(500)
+  transcriptCorrectedPath String?           @db.VarChar(500)
+  transcriptionMetaPath String?             @db.VarChar(500)
+  audioUrl             String?              @db.VarChar(1000)
+  status               String               @default("uploaded") @db.VarChar(32)
+  favorite             Boolean              @default(false)
+  deletedAt            DateTime?            @db.Timestamp(6)
+  transcriptProvider   String?              @db.VarChar(80)
+  transcriptSource     String?              @db.VarChar(80)
+  transcribedAt        DateTime?            @db.Timestamp(6)
+  meetingOutlineJson   String?              @db.LongText
+  meetingOutlineStatus String?              @db.VarChar(32)
+  meetingOutlineError  String?              @db.Text
+  meetingOutlinedAt    DateTime?            @db.Timestamp(6)
+  source               String               @default("wecom-h5") @db.VarChar(80)
+  userAgent            String?              @db.Text
+  errorMessage         String?              @db.Text
+  createdAt            DateTime             @default(now()) @db.Timestamp(6)
+  updatedAt            DateTime             @default(now()) @db.Timestamp(6)
+
+  user                 AppUser?             @relation(fields: [userId], references: [id])
+  folder               RecordingFolder?     @relation(fields: [folderId], references: [id])
+  segments             TranscriptSegment[]
+  questions            RecordingQuestion[]
+  transcriptionJobs    TranscriptionJob[]
+
+  @@index([userId, createdAt], map: "idx_recordings_user_created")
+  @@index([ownerClientId, shared, createdAt], map: "idx_recordings_owner_shared")
+  @@index([status], map: "idx_recordings_status")
+  @@index([folderId, createdAt], map: "idx_recordings_folder_created")
+  @@index([deletedAt], map: "idx_recordings_deleted")
+
+  @@map("recordings")
+}
+
+model RecordingFolder {
+  id        String     @id @db.VarChar(64)
+  userId    String?    @db.VarChar(64)
+  name      String     @db.VarChar(160)
+  createdAt DateTime   @default(now()) @db.Timestamp(6)
+  updatedAt DateTime   @default(now()) @db.Timestamp(6)
+
+  user      AppUser?   @relation(fields: [userId], references: [id])
+  recordings Recording[]
+
+  @@index([userId, createdAt], map: "idx_folders_user_created")
+
+  @@map("recording_folders")
+}
+
+model TranscriptSegment {
+  id            String   @id @db.VarChar(64)
+  recordingId   String   @db.VarChar(64)
+  startMs       BigInt
+  endMs         BigInt
+  text          String   @db.Text
+  confidence    Decimal? @db.Decimal(5, 4)
+  speakerLabel  String?  @db.VarChar(80)
+  createdAt     DateTime @default(now()) @db.Timestamp(6)
+
+  recording     Recording @relation(fields: [recordingId], references: [id], onDelete: Cascade)
+
+  @@index([recordingId, startMs], map: "idx_segments_recording_time")
+
+  @@map("transcript_segments")
+}
+
+model RecordingQuestion {
+  id              String   @id @db.VarChar(64)
+  recordingId     String?  @db.VarChar(64)
+  recordingIdsJson String? @db.Text
+  userId          String?  @db.VarChar(64)
+  clientId        String?  @db.VarChar(160)
+  question        String   @db.Text
+  answer          String   @db.Text
+  qaStatus        String?  @db.VarChar(32)
+  jumpToMs        BigInt   @default(0)
+  citationsJson   String?  @db.Text
+  attachmentsJson String?  @db.Text
+  favorite        Boolean  @default(false)
+  deletedAt       DateTime? @db.Timestamp(6)
+  createdAt       DateTime @default(now()) @db.Timestamp(6)
+  updatedAt       DateTime @default(now()) @db.Timestamp(6)
+
+  recording       Recording? @relation(fields: [recordingId], references: [id], onDelete: SetNull)
+  user            AppUser?   @relation(fields: [userId], references: [id])
+
+  @@index([recordingId, createdAt], map: "idx_questions_recording_created")
+  @@index([clientId, createdAt], map: "idx_questions_client_created")
+  @@index([favorite, createdAt], map: "idx_questions_favorite_created")
+  @@index([deletedAt, createdAt], map: "idx_questions_deleted_created")
+
+  @@map("recording_questions")
+}
+
+model TranscriptionJob {
+  id            String   @id @db.VarChar(64)
+  recordingId   String   @db.VarChar(64)
+  provider      String   @db.VarChar(80)
+  status        String   @default("queued") @db.VarChar(32)
+  requestId     String?  @db.VarChar(160)
+  errorMessage  String?  @db.Text
+  startedAt     DateTime? @db.Timestamp(6)
+  finishedAt    DateTime? @db.Timestamp(6)
+  createdAt     DateTime @default(now()) @db.Timestamp(6)
+
+  recording     Recording @relation(fields: [recordingId], references: [id], onDelete: Cascade)
+
+  @@index([recordingId, createdAt], map: "idx_jobs_recording_created")
+
+  @@map("transcription_jobs")
+}

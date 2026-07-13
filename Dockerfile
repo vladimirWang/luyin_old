@@ -12,14 +12,19 @@ RUN sed -i \
   && rm -rf /var/lib/apt/lists/*
 
 COPY package.json pnpm-lock.yaml .npmrc ./
-RUN corepack enable && corepack prepare pnpm@9.15.9 --activate && pnpm install --prod --frozen-lockfile
+COPY server/package.json server/pnpm-lock.yaml ./server/
+RUN corepack enable && corepack prepare pnpm@9.15.9 --activate \
+  && pnpm install --prod --frozen-lockfile \
+  && pnpm --dir server install --prod --frozen-lockfile
 
 COPY . .
 
-RUN mkdir -p /app/logs /app/server/storage && chown -R node:node /app/logs /app/server/storage
+RUN chmod +x ./docker-entrypoint.sh && mkdir -p /app/logs /app/server/storage && chown -R node:node /app/logs /app/server/storage
 
 USER node
 
 EXPOSE 8787
+
+ENTRYPOINT ["./docker-entrypoint.sh"]
 
 CMD ["npm", "run", "start:prod"]

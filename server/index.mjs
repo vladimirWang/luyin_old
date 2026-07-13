@@ -45,7 +45,7 @@ import transcriptionRouter, { configure as configureTranscriptionRouter } from "
 import authRouter, { configure as configureAuthRouter } from "./router/auth.js";
 import foldersRouter, { configure as configureFoldersRouter } from "./router/folders.js";
 import { resolveRecordingAudioPath } from "./utils/recordings.js";
-
+import prisma from './plugins/prisma.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const projectRoot = path.resolve(__dirname, "..");
@@ -766,8 +766,43 @@ app.use((request, response, next) => {
   next();
 });
 
-app.get("/api/ping", (req, res) => {
-  res.json({ ping: `pong ${Date.now()}` })
+app.get("/api/prisma-connected", async (req, res) => {
+  
+  let dbConnected = false;
+  let dbError = null;
+  try {
+    await prisma.$connect();
+    res.json({ ping: `pong ${Date.now()}`, connected: true, error: null });
+  } catch (error) {
+    res.json({ ping: `pong ${Date.now()}`, connected: false, error: error.message });
+  }
+
+});
+
+app.get("/api/ping", async (req, res) => {
+  await prisma.$connect();
+  let dbConnected = false;
+  let dbError = null;
+  try {
+    const mariadb = await import("mysql2/promise");
+    logger.debug('/api/ping step 0')
+    const conn = await mariadb.createConnection({
+      host: process.env.MYSQL_HOST || "mysql",
+      port: parseInt(process.env.MYSQL_PORT) || 3306,
+      user: process.env.MYSQL_USER || "root",
+      password: process.env.MYSQL_PASSWORD || "123456",
+      database: process.env.MYSQL_DATABASE || "wecom_recorder",
+    });
+    logger.debug('/api/ping step 1')
+    const [rows] = await conn.execute('SELECT 1');
+    logger.debug('/api/ping step 2')
+    dbConnected = true;
+    await conn.end();
+    logger.debug('/api/ping step 3')
+  } catch (error) {
+    dbError = error.message;
+  }
+  res.json({ ping: `pong ${Date.now()}`, dbConnected, dbError })
 });
 
 configureRecordingsRouter(projectRoot, {
@@ -1368,7 +1403,9 @@ function isTencentMeetingRecording(recording = {}) {
 }
 
 function isLocalApiTranscriptionRecording(recording = {}) {
-  return LOCAL_API_TRANSCRIPTION_SOURCES.has(String(recording.source || "").trim());
+  const result = LOCAL_API_TRANSCRIPTION_SOURCES.has(String(recording.source || "").trim());
+  logger.debug(`call isLocalApiTranscriptionRecording: LOCAL_API_TRANSCRIPTION_SOURCES: ${LOCAL_API_TRANSCRIPTION_SOURCES}, recording.source: ${recording.source}`)
+  return result
 }
 
 function findTencentMeetingContainerDuplicate(db, info = {}) {
@@ -5031,9 +5068,14 @@ async function markTranscriptionQueued(recordingId) {
 }
 
 function queueTranscriptionJob(recordingId, recordingForSource = null) {
+  logger.debug(`call queueTranscriptionJob: recordingId: ${recordingId}, recordingForSource: ${recordingForSource}`)
   const id = String(recordingId || "").trim();
   if (!id) return false;
-  if (recordingForSource && !isLocalApiTranscriptionRecording(recordingForSource)) return false;
+
+  // 如果传入了 recordingForSource ，但该录音的来源 不支持本地 API 转写 ，则直接返回 false ， 不加入转写队列
+  if (recordingForSource && !isLocalApiTranscriptionRecording(recordingForSource)) {
+    return false;
+  }
   if (!isRecordingApiTranscriptionEnabled()) return false;
   if (transcriptionJobs.has(id)) return false;
 
