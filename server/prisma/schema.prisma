@@ -8,15 +8,15 @@ datasource db {
 
 model AppUser {
   id             String   @id @db.VarChar(64)
-  wecomUserId    String?  @unique @db.VarChar(128)
+  wecomUserId    String?  @unique @map("wecom_user_id") @db.VarChar(128)
   name           String   @db.VarChar(100)
   company        String?  @db.VarChar(160)
   department     String?  @db.VarChar(160)
   phone          String?  @db.VarChar(40)
   language       String   @default("中文") @db.VarChar(32)
-  recordsTitle   String   @default("我的录音") @db.VarChar(200)
-  createdAt      DateTime @default(now()) @db.Timestamp(6)
-  updatedAt      DateTime @default(now()) @db.Timestamp(6)
+  recordsTitle   String   @default("我的录音") @map("records_title") @db.VarChar(200)
+  createdAt      DateTime @default(now()) @map("created_at") @db.Timestamp(6)
+  updatedAt      DateTime @default(now()) @map("updated_at") @db.Timestamp(6)
 
   recordings     Recording[]
   folders        RecordingFolder[]
@@ -27,44 +27,49 @@ model AppUser {
 
 model Recording {
   id                   String               @id @db.VarChar(64)
-  seq                  BigInt               @unique
-  userId               String?              @db.VarChar(64)
-  folderId             String?              @db.VarChar(64)
+  seq                  Int
+  userId               String?              @map("user_id") @db.VarChar(64)
+  folderId             String?              @map("folder_id") @db.VarChar(64)
   name                 String               @db.VarChar(200)
-  speakerName          String               @default("说话人 1") @db.VarChar(120)
-  speakerMapJson       String?              @db.Text
-  ownerClientId        String?              @db.VarChar(160)
-  ownerName            String?              @db.VarChar(120)
+  speakerName          String               @default("说话人 1") @map("speaker_name") @db.VarChar(120)
+  speakerMapJson       String?              @map("speaker_map_json") @db.Text
+  ownerClientId        String?              @map("owner_client_id") @db.VarChar(160)
+  ownerName            String?              @map("owner_name") @db.VarChar(120)
   shared               Boolean              @default(true)
-  detectedLanguage     String?              @db.VarChar(24)
-  translationText      String?              @db.MediumText
+  sharedAt             DateTime?            @map("shared_at") @db.Timestamp(0)
+  detectedLanguage     String?              @map("detected_language") @db.VarChar(24)
+  translationText      String?              @map("translation_text") @db.MediumText
   tag                  String?              @db.VarChar(120)
-  durationMs           BigInt               @default(0)
-  mimeType             String               @db.VarChar(100)
-  fileSize             BigInt               @default(0)
-  fileName             String?              @db.VarChar(260)
-  storageProvider      String               @default("local") @db.VarChar(40)
-  storageKey           String               @db.VarChar(500)
-  transcriptPath       String?              @db.VarChar(500)
-  transcriptRawPath    String?              @db.VarChar(500)
-  transcriptCorrectedPath String?           @db.VarChar(500)
-  transcriptionMetaPath String?             @db.VarChar(500)
-  audioUrl             String?              @db.VarChar(1000)
+  durationMs           BigInt               @default(0) @map("duration_ms")
+  mimeType             String               @map("mime_type") @db.VarChar(100)
+  fileSize             BigInt               @default(0) @map("file_size")
+  fileName             String?              @map("file_name") @db.VarChar(260)
+  storageProvider      String               @default("local") @map("storage_provider") @db.VarChar(40)
+  storageKey           String               @map("storage_key") @db.VarChar(500)
+  transcriptPath       String?              @map("transcript_path") @db.VarChar(500)
+  transcriptRawPath    String?              @map("transcript_raw_path") @db.VarChar(500)
+  transcriptCorrectedPath String?           @map("transcript_corrected_path") @db.VarChar(500)
+  transcriptionMetaPath String?             @map("transcription_meta_path") @db.VarChar(500)
   status               String               @default("uploaded") @db.VarChar(32)
   favorite             Boolean              @default(false)
-  deletedAt            DateTime?            @db.Timestamp(6)
-  transcriptProvider   String?              @db.VarChar(80)
-  transcriptSource     String?              @db.VarChar(80)
-  transcribedAt        DateTime?            @db.Timestamp(6)
-  meetingOutlineJson   String?              @db.LongText
-  meetingOutlineStatus String?              @db.VarChar(32)
-  meetingOutlineError  String?              @db.Text
-  meetingOutlinedAt    DateTime?            @db.Timestamp(6)
+  deletedAt            DateTime?            @map("deleted_at") @db.Timestamp(6)
+  transcriptProvider   String?              @map("transcript_provider") @db.VarChar(80)
+  transcriptSource     String?              @map("transcript_source") @db.VarChar(80)
+  transcribedAt        DateTime?            @map("transcribed_at") @db.Timestamp(6)
+  meetingOutlineJson   String?              @map("meeting_outline_json") @db.LongText
+  meetingOutlineStatus String?              @map("meeting_outline_status") @db.VarChar(32)
+  meetingOutlineError  String?              @map("meeting_outline_error") @db.Text
+  meetingOutlinedAt    DateTime?            @map("meeting_outlined_at") @db.Timestamp(6)
   source               String               @default("wecom-h5") @db.VarChar(80)
-  userAgent            String?              @db.Text
-  errorMessage         String?              @db.Text
-  createdAt            DateTime             @default(now()) @db.Timestamp(6)
-  updatedAt            DateTime             @default(now()) @db.Timestamp(6)
+  tencentMeetingCreatorUserid String?        @map("tencent_meeting_creator_userid") @db.VarChar(160)
+  tencentMeetingMeetingId String?            @map("tencent_meeting_meeting_id") @db.VarChar(160)
+  tencentMeetingMeetingCode String?          @map("tencent_meeting_meeting_code") @db.VarChar(160)
+  tencentMeetingMeetingRecordId String?      @map("tencent_meeting_meeting_record_id") @db.VarChar(160)
+  tencentMeetingSourceKind String?           @map("tencent_meeting_source_kind") @db.VarChar(40)
+  userAgent            String?              @map("user_agent") @db.Text
+  errorMessage         String?              @map("error_message") @db.Text
+  createdAt            DateTime             @default(now()) @map("created_at") @db.Timestamp(6)
+  updatedAt            DateTime             @default(now()) @map("updated_at") @db.Timestamp(6)
 
   user                 AppUser?             @relation(fields: [userId], references: [id])
   folder               RecordingFolder?     @relation(fields: [folderId], references: [id])
@@ -83,10 +88,11 @@ model Recording {
 
 model RecordingFolder {
   id        String     @id @db.VarChar(64)
-  userId    String?    @db.VarChar(64)
+  userId    String?    @map("user_id") @db.VarChar(64)
   name      String     @db.VarChar(160)
-  createdAt DateTime   @default(now()) @db.Timestamp(6)
-  updatedAt DateTime   @default(now()) @db.Timestamp(6)
+  ownerClientId String? @map("owner_client_id") @db.VarChar(160)
+  createdAt DateTime   @default(now()) @map("created_at") @db.Timestamp(6)
+  updatedAt DateTime   @default(now()) @map("updated_at") @db.Timestamp(6)
 
   user      AppUser?   @relation(fields: [userId], references: [id])
   recordings Recording[]
@@ -98,13 +104,13 @@ model RecordingFolder {
 
 model TranscriptSegment {
   id            String   @id @db.VarChar(64)
-  recordingId   String   @db.VarChar(64)
-  startMs       BigInt
-  endMs         BigInt
+  recordingId   String   @map("recording_id") @db.VarChar(64)
+  startMs       BigInt   @map("start_ms")
+  endMs         BigInt   @map("end_ms")
   text          String   @db.Text
   confidence    Decimal? @db.Decimal(5, 4)
-  speakerLabel  String?  @db.VarChar(80)
-  createdAt     DateTime @default(now()) @db.Timestamp(6)
+  speakerLabel  String?  @map("speaker_label") @db.VarChar(80)
+  createdAt     DateTime @default(now()) @map("created_at") @db.Timestamp(6)
 
   recording     Recording @relation(fields: [recordingId], references: [id], onDelete: Cascade)
 
@@ -115,20 +121,25 @@ model TranscriptSegment {
 
 model RecordingQuestion {
   id              String   @id @db.VarChar(64)
-  recordingId     String?  @db.VarChar(64)
-  recordingIdsJson String? @db.Text
-  userId          String?  @db.VarChar(64)
-  clientId        String?  @db.VarChar(160)
+  recordingId     String?  @map("recording_id") @db.VarChar(64)
+  recordingIdsJson String? @map("recording_ids_json") @db.Text
+  userId          String?  @map("user_id") @db.VarChar(64)
+  clientId        String?  @map("client_id") @db.VarChar(160)
   question        String   @db.Text
   answer          String   @db.Text
-  qaStatus        String?  @db.VarChar(32)
-  jumpToMs        BigInt   @default(0)
-  citationsJson   String?  @db.Text
-  attachmentsJson String?  @db.Text
+  structuredAnswerJson String? @map("structured_answer_json") @db.Text
+  qaStatus        String?  @map("qa_status") @db.VarChar(32)
+  jumpToMs        BigInt   @default(0) @map("jump_to_ms")
+  citationsJson   String?  @map("citations_json") @db.Text
+  attachmentsJson String?  @map("attachments_json") @db.Text
+  provider        String?  @db.VarChar(64)
+  model           String?  @db.VarChar(160)
+  reasoningContent String? @map("reasoning_content") @db.Text
+  thinkingJson    String?  @map("thinking_json") @db.Text
   favorite        Boolean  @default(false)
-  deletedAt       DateTime? @db.Timestamp(6)
-  createdAt       DateTime @default(now()) @db.Timestamp(6)
-  updatedAt       DateTime @default(now()) @db.Timestamp(6)
+  deletedAt       DateTime? @map("deleted_at") @db.Timestamp(6)
+  createdAt       DateTime @default(now()) @map("created_at") @db.Timestamp(6)
+  updatedAt       DateTime @default(now()) @map("updated_at") @db.Timestamp(6)
 
   recording       Recording? @relation(fields: [recordingId], references: [id], onDelete: SetNull)
   user            AppUser?   @relation(fields: [userId], references: [id])
@@ -143,14 +154,14 @@ model RecordingQuestion {
 
 model TranscriptionJob {
   id            String   @id @db.VarChar(64)
-  recordingId   String   @db.VarChar(64)
+  recordingId   String   @map("recording_id") @db.VarChar(64)
   provider      String   @db.VarChar(80)
   status        String   @default("queued") @db.VarChar(32)
-  requestId     String?  @db.VarChar(160)
-  errorMessage  String?  @db.Text
-  startedAt     DateTime? @db.Timestamp(6)
-  finishedAt    DateTime? @db.Timestamp(6)
-  createdAt     DateTime @default(now()) @db.Timestamp(6)
+  requestId     String?  @map("request_id") @db.VarChar(160)
+  errorMessage  String?  @map("error_message") @db.Text
+  startedAt     DateTime? @map("started_at") @db.Timestamp(6)
+  finishedAt    DateTime? @map("finished_at") @db.Timestamp(6)
+  createdAt     DateTime @default(now()) @map("created_at") @db.Timestamp(6)
 
   recording     Recording @relation(fields: [recordingId], references: [id], onDelete: Cascade)
 

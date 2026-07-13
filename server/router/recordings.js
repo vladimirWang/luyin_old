@@ -16,7 +16,7 @@ import {
   safeDownloadName,
   recordingSearchScore,
 } from "../utils/recordings.js";
-
+import prisma from "../plugins/prisma.js";
 const router = express.Router();
 const upload = multer({ dest: tempDir });
 
@@ -237,41 +237,72 @@ router.post("/segments", upload.array("audio", 480), async (request, response, n
     await Promise.all(files.map((file) => removeFileIfExists(file.path)));
     const { storedFile, durationMs } = await verifiedStoredRecording(storagePath, request.body.durationMs);
 
-    const recording = await updateDb((db) => {
-      db.counters.recordingSeq += 1;
-      const seq = db.counters.recordingSeq;
-      const item = {
-        id,
-        seq,
-        name: request.body.name || `录音 ${String(seq).padStart(3, "0")}`,
-        createdAt: now,
-        updatedAt: now,
-        durationMs,
-        mimeType: "audio/mpeg",
-        size: storedFile.size,
-        fileName,
-        storagePath,
-        transcriptPath: "",
-        favorite: false,
-        ownerClientId,
-        ownerName,
-        shared: false,
-        sharedAt: "",
-        speakerName: request.body.speakerName || "说话人 1",
-        speakerMap: {},
-        tag: request.body.tag || "",
-        deletedAt: null,
-        transcriptProvider: getTranscriptionMode(),
-        transcriptSource: "",
-        transcribedAt: "",
-        folderId: request.body.folderId || null,
-        status: "uploaded",
-        source: files.length > 1 ? "wecom-h5-resumed" : "wecom-h5",
-        userAgent: request.get("user-agent") || "",
-      };
+    const latestRecording = await prisma.recording.findFirst({
+      orderBy: { seq: "desc" },
+      select: { seq: true },
+    });
+    const seq = (latestRecording?.seq || 0) + 1;
+    const recording = {
+      id,
+      seq,
+      name: request.body.name || `录音 ${String(seq).padStart(3, "0")}`,
+      createdAt: now,
+      updatedAt: now,
+      durationMs,
+      mimeType: "audio/mpeg",
+      size: storedFile.size,
+      fileName,
+      storagePath,
+      transcriptPath: "",
+      favorite: false,
+      ownerClientId,
+      ownerName,
+      shared: false,
+      sharedAt: "",
+      speakerName: request.body.speakerName || "说话人 1",
+      speakerMap: {},
+      tag: request.body.tag || "",
+      deletedAt: null,
+      transcriptProvider: getTranscriptionMode(),
+      transcriptSource: "",
+      transcribedAt: "",
+      folderId: request.body.folderId || null,
+      status: "uploaded",
+      source: files.length > 1 ? "wecom-h5-resumed" : "wecom-h5",
+      userAgent: request.get("user-agent") || "",
+    };
 
-      db.recordings.push(item);
-      return item;
+    await prisma.recording.create({
+      data: {
+        id: recording.id,
+        seq: recording.seq,
+        name: recording.name,
+        createdAt: recording.createdAt,
+        updatedAt: recording.updatedAt,
+        durationMs: BigInt(recording.durationMs),
+        mimeType: recording.mimeType,
+        fileSize: BigInt(recording.size),
+        fileName: recording.fileName,
+        storageProvider: "local",
+        storageKey: recording.storagePath,
+        transcriptPath: recording.transcriptPath,
+        favorite: recording.favorite,
+        ownerClientId: recording.ownerClientId,
+        ownerName: recording.ownerName,
+        shared: recording.shared,
+        sharedAt: null,
+        speakerName: recording.speakerName,
+        speakerMapJson: JSON.stringify(recording.speakerMap),
+        tag: recording.tag,
+        deletedAt: recording.deletedAt,
+        transcriptProvider: recording.transcriptProvider,
+        transcriptSource: recording.transcriptSource,
+        transcribedAt: null,
+        folderId: recording.folderId,
+        status: recording.status,
+        source: recording.source,
+        userAgent: recording.userAgent,
+      },
     });
 
     const queued = queueTranscriptionJob(id, recording);
