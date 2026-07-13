@@ -5147,7 +5147,18 @@ function schedulePendingLocalTranscriptionSweep(reason = "sweep", options = {}) 
     console.warn("[Transcription] pending local upload sweep failed:", error instanceof Error ? error.message : error);
   });
 }
-
+/**
+ *  1. 转写文件迁移
+    遍历所有录音记录
+    检查是否有转写文本段（segments）但 转写文件不存在或路径为空
+    如果检测到这种情况，重新生成并保存转写 TXT 文件
+    更新录音记录的 transcriptPath 指向新的转写文件位置
+    2. 音频格式标准化
+    检查录音文件是否为 MP3 格式（mimeType !== "audio/mpeg" 且后缀不是 .mp3）
+    如果不是，自动转换原音频文件为 MP3 格式
+    将新的 MP3 路径、文件名、大小等信息更新到录音记录
+ * @returns 
+ */
 async function migrateExistingArtifacts() {
   const db = await loadDb();
   const updates = [];
@@ -5240,9 +5251,10 @@ app.listen(port, host, () => {
 
 scheduleDailyBriefGeneration();
 
-migrateExistingArtifacts().catch((error) => {
-  console.error("Artifact migration failed", error);
-});
+// 暂时停用存量转写文件处理
+// migrateExistingArtifacts().catch((error) => {
+//   console.error("Artifact migration failed", error);
+// });
 
 queueTencentMeetingPendingImports().catch((error) => {
   console.error("Tencent Meeting pending import scan failed", error);

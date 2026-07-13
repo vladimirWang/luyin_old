@@ -1,8 +1,6 @@
-import PrismaClientModule from "@prisma/client";
-import PrismaMariaDbModule from "@prisma/adapter-mariadb";
+import { PrismaClient } from "@prisma/client";
+import { PrismaMariaDb } from "@prisma/adapter-mariadb";
 
-const PrismaClient = PrismaClientModule.PrismaClient || PrismaClientModule;
-const PrismaMariaDb = PrismaMariaDbModule.PrismaMariaDb || PrismaMariaDbModule;
 
 const { DATABASE_URL } = process.env;
 
