@@ -14,7 +14,7 @@
     "build": "vite build",
     "package:release": "node scripts/package-release.mjs",
     "start": "node server/index.mjs",
-    "start:prod": "pm2-runtime ecosystem.config.cjs",
+    "start:prod": "node server/index.mjs",
     "preview": "node server/index.mjs"
   },
   "dependencies": {
@@ -26,7 +26,6 @@
     "multer": "^2.2.0",
     "mysql2": "^3.22.5",
     "pdfkit": "^0.19.1",
-    "pm2": "^5.4.0",
     "react": "19.2.0",
     "react-dom": "19.2.0",
     "vite": "6.4.2",

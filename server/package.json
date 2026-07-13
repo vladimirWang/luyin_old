@@ -6,7 +6,7 @@
   "type": "module",
   "scripts": {
     "dev": "dotenv -e ../.env.dev nodemon index.mjs",
-    "start:prod": "pm2-runtime ecosystem.config.cjs"
+    "start:prod": "node index.mjs"
   },
   "dependencies": {
     "@prisma/adapter-mariadb": "^7.8.0",
@@ -16,7 +16,6 @@
     "multer": "^2.2.0",
     "mysql2": "^3.22.5",
     "pdfkit": "^0.19.1",
-    "pm2": "^5.4.0",
     "winston": "^3.19.0",
     "winston-daily-rotate-file": "^5.0.0"
   },
