@@ -5040,12 +5040,12 @@ async function runTranscriptionJob(recordingId) {
       newRecording.tag = autoTag
     }
     logger.debug("typeof prisma.Recording: ", {message: `${prisma.Recording}, ${prisma.Recording.update}`})
-    await prisma.Recording.update({
-      where: {
-        id: recordingId
-      },
-      data: newRecording
-    })
+    // await prisma.Recording.update({
+    //   where: {
+    //     id: recordingId
+    //   },
+    //   data: newRecording
+    // })
     await generateAndStoreMeetingOutline(recordingId, segments, { updateTag: true });
     await markDailyBriefDirtyForRecording(recordingId);
     logger.info("transcription.job.success", {message: `recordingId: ${recordingId}, segmentCount: ${segments.length}, transcriptSource: ${recording?.source || "unknown"}`, recordingId, segmentCount: segments.length, transcriptSource: recording?.source || "unknown"});
@@ -5077,21 +5077,21 @@ async function queueTranscriptionJob(recordingId, recordingForSource = null) {
 
   transcriptionJobs.add(id);
 
-  await prisma.Recording.update({
-    where: {
-      id: recordingId
-    },
-    data: {
-      status:  "transcribing",
-      updatedAt:  new Date().toISOString(),
-      errorMessage:  "",
-      transcriptProvider:  getTranscriptionMode(),
-      meetingOutline:  null,
-      meetingOutlineStatus:  "",
-      meetingOutlineError:  "",
-      meetingOutlinedAt:  "",
-    }
-  })
+  // await prisma.Recording.update({
+  //   where: {
+  //     id: recordingId
+  //   },
+  //   data: {
+  //     status:  "transcribing",
+  //     updatedAt:  new Date().toISOString(),
+  //     errorMessage:  "",
+  //     transcriptProvider:  getTranscriptionMode(),
+  //     // meetingOutline:  null,
+  //     meetingOutlineStatus:  "",
+  //     meetingOutlineError:  "",
+  //     meetingOutlinedAt:  "",
+  //   }
+  // })
 
   transcriptionJobChain = transcriptionJobChain
     .catch(() => {})
@@ -5213,6 +5213,10 @@ async function migrateExistingArtifacts() {
     }
   });
 }
+
+app.get("/", (req, res) => {
+  res.send('ok')
+})
 
 const publicDir = path.resolve(import.meta.dirname, "../public");
 if (existsSync(publicDir)) {
