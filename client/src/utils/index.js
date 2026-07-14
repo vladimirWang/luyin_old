@@ -17,6 +17,7 @@ export function mergeRequestHeaders(headers = {}, body = null) {
   if (!(body instanceof FormData)) {
     next.set("Content-Type", "application/json");
   }
+  next.set("X-Client-Id", getClientId());
   const auth = getStoredAuth();
   if (auth?.token) next.set("Authorization", `Bearer ${auth.token}`);
   const wecomName = getDetectedWecomName();

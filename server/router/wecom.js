@@ -20,7 +20,9 @@ router.get("/oauth-url", (request, response) => {
   const url =
     `https://open.weixin.qq.com/connect/oauth2/authorize?appid=${encodeURIComponent(config.corpId)}` +
     `&redirect_uri=${encodeURIComponent(redirect)}` +
-    "&response_type=code&scope=snsapi_base&state=wecom_recorder#wechat_redirect";
+    "&response_type=code&scope=snsapi_base&state=wecom_recorder" +
+    (config.agentId ? `&agentid=${encodeURIComponent(config.agentId)}` : "") +
+    "#wechat_redirect";
   response.json({ configured: true, url });
 });
 
