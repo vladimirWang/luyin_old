@@ -11,12 +11,16 @@ import {
   isRecordingApiTranscriptionEnabled,
 } from "../transcription.mjs";
 import { audioDir, loadDb, tempDir, updateDb } from "../db.mjs";
-import { convertAudioFileToMp3, fileInfo, mergeAudioFilesToMp3, removeFileIfExists } from "../media.mjs";
+import { convertAudioFileToMp3, fileInfo, mergeAudioFilesToMp3 } from "../media.mjs";
 import {
   safeDownloadName,
   recordingSearchScore,
 } from "../utils/recordings.js";
 import prisma from "../plugins/prisma.js";
+import {removeFileIfExists} from '../utils/file.js'
+
+logger.debug("show prisma.Recording: ", {message: `${prisma.Recording}, ${prisma.Recording.update}`})
+
 const router = express.Router();
 const upload = multer({ dest: tempDir });
 
@@ -203,7 +207,7 @@ router.post("/", upload.single("audio"), async (request, response, next) => {
       return item;
     });
 
-    const queued = queueTranscriptionJob(id, recording);
+    const queued = await queueTranscriptionJob(id, recording);
     const responseRecording = queued ? { ...recording, status: "transcribing", errorMessage: "" } : recording;
 
     logger.info("recording.uploaded", {message: `recordingId: ${id}, ownerClientId: ${ownerClientId}, ownerName: ${ownerName}, queued: ${queued}, durationMs: ${durationMs}, fileName: ${fileName}`, recordingId: id, ownerClientId, ownerName, queued, durationMs, fileName});
@@ -237,7 +241,7 @@ router.post("/segments", upload.array("audio", 480), async (request, response, n
     await Promise.all(files.map((file) => removeFileIfExists(file.path)));
     const { storedFile, durationMs } = await verifiedStoredRecording(storagePath, request.body.durationMs);
 
-    const latestRecording = await prisma.recording.findFirst({
+    const latestRecording = await prisma.Recording.findFirst({
       orderBy: { seq: "desc" },
       select: { seq: true },
     });
@@ -271,17 +275,17 @@ router.post("/segments", upload.array("audio", 480), async (request, response, n
       source: files.length > 1 ? "wecom-h5-resumed" : "wecom-h5",
       userAgent: request.get("user-agent") || "",
     };
-
-    await prisma.recording.create({
+    logger.debug('request segements: ', {message: `request /segments lastSeq: ${latestRecording.seq}, durationMs: ${durationMs}`})
+    await prisma.Recording.create({
       data: {
         id: recording.id,
         seq: recording.seq,
         name: recording.name,
         createdAt: recording.createdAt,
         updatedAt: recording.updatedAt,
-        durationMs: BigInt(recording.durationMs),
+        durationMs: recording.durationMs,
         mimeType: recording.mimeType,
-        fileSize: BigInt(recording.size),
+        fileSize: recording.size,
         fileName: recording.fileName,
         storageProvider: "local",
         storageKey: recording.storagePath,
@@ -589,12 +593,8 @@ router.post("/:id/transcribe", async (request, response) => {
     return;
   }
 
-  const queued = queueTranscriptionJob(recording.id, recording);
-  if (!queued && false) {
-    await Promise.resolve().catch((error) => {
-      console.warn("[Transcription] retry state refresh failed:", error instanceof Error ? error.message : error);
-    });
-  }
+  const queued = await queueTranscriptionJob(recording.id, recording);
+
   response.status(202).json({ ok: true, status: queued ? "transcribing" : "queued" });
 });
 

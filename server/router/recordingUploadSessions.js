@@ -6,12 +6,13 @@ import { mkdir, readdir, rename, rm, writeFile } from "node:fs/promises";
 import logger from "../utils/log.js";
 import { getTranscriptionMode } from "../transcription.mjs";
 import { audioDir, loadDb, tempDir, updateDb } from "../db.mjs";
-import { mergeAudioFilesToMp3, removeFileIfExists } from "../media.mjs";
+import { mergeAudioFilesToMp3 } from "../media.mjs";
 import {
   safeUploadSessionId,
   uploadSessionPath,
   readUploadSessionMeta,
 } from "../utils/recordings.js";
+import {removeFileIfExists} from '../utils/file.js'
 
 const router = express.Router();
 const upload = multer({ dest: tempDir });
@@ -170,7 +171,7 @@ router.post("/:sessionId/finalize", async (request, response, next) => {
       return item;
     });
 
-    const queued = queueTranscriptionJob(id, recording);
+    const queued = await queueTranscriptionJob(id, recording);
     const responseRecording = queued ? { ...recording, status: "transcribing", errorMessage: "" } : recording;
     await rm(dir, { recursive: true, force: true }).catch(() => {});
     logger.info("recording.session.finalized", {recordingId: id, sessionId, ownerClientId: meta.ownerClientId, queued, partCount: partFiles.length, fileName});

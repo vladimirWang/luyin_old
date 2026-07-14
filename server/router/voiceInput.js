@@ -1,6 +1,7 @@
 import express from "express";
 import multer from "multer";
 import path from "node:path";
+import {removeFileIfExists} from '../utils/file.js'
 
 const router = express.Router();
 
@@ -32,7 +33,7 @@ router.post("/", (request, response, next) => {
 });
 
 async function handleVoiceInput(request, response, next) {
-  const { crypto, tempDir, convertAudioFileToMp3, removeFileIfExists, fileInfo, getTranscriptionMode, expandTranscriptSegments, transcribeVoiceInputRecording } = dependencies;
+  const { crypto, tempDir, convertAudioFileToMp3, fileInfo, getTranscriptionMode, expandTranscriptSegments, transcribeVoiceInputRecording } = dependencies;
   
   let voicePath = "";
   let convertedPath = "";

@@ -244,6 +244,11 @@ export async function mergeAudioFilesToMp3(sourcePaths, targetPath) {
   }
 }
 
+/**
+ * 用来读取音频文件的实际时长，并统一返回毫秒数
+ * @param {*} filePath 
+ * @returns number
+ */
 export async function probeAudioDurationMs(filePath) {
   try {
     const output = await runProcess(
@@ -275,11 +280,6 @@ export async function probeAudioDurationMs(filePath) {
     // Keep the upload path resilient when ffmpeg cannot inspect duration.
   }
   return 0;
-}
-
-export async function removeFileIfExists(filePath) {
-  if (!filePath) return;
-  await rm(filePath, { force: true }).catch(() => {});
 }
 
 export async function fileInfo(filePath) {

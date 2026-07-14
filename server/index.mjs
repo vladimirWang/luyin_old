@@ -28,7 +28,7 @@ import {
   transcribeVoiceInputRecording,
 } from "./transcription.mjs";
 import { attachmentDir, audioDir, loadDb, tempDir, transcriptDir, ttsDir, updateDb } from "./db.mjs";
-import { convertAudioFileToMp3, fileInfo, mergeAudioFilesToMp3, probeAudioDurationMs, removeFileIfExists, writeTranscriptTextFile } from "./media.mjs";
+import { convertAudioFileToMp3, fileInfo, mergeAudioFilesToMp3, probeAudioDurationMs, writeTranscriptTextFile } from "./media.mjs";
 import {init} from "./init.mjs";
 import recordingsRouter, { configure as configureRecordingsRouter } from "./router/recordings.js";
 import recordingUploadSessionsRouter, { configure as configureRecordingUploadSessionsRouter } from "./router/recordingUploadSessions.js";
@@ -46,6 +46,7 @@ import authRouter, { configure as configureAuthRouter } from "./router/auth.js";
 import foldersRouter, { configure as configureFoldersRouter } from "./router/folders.js";
 import { resolveRecordingAudioPath } from "./utils/recordings.js";
 import prisma from './plugins/prisma.js';
+import {removeFileIfExists} from './utils/file.js'
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const projectRoot = path.resolve(__dirname, "..");
@@ -941,7 +942,6 @@ configureVoiceInputRouter({
   crypto,
   tempDir,
   convertAudioFileToMp3,
-  removeFileIfExists,
   fileInfo,
   getTranscriptionMode,
   expandTranscriptSegments,
@@ -2671,8 +2671,7 @@ async function storeTencentMeetingBuiltInTranscript(recordingId, transcriptResul
   const segments = expandTranscriptSegments(transcriptResult.segments, recording.durationMs || 0);
   if (!segments.length) return false;
 
-  const { transcriptPath, transcriptRawPath, transcriptCorrectedPath, transcriptionMetaPath } =
-    await transcriptStoragePaths(recordingId, recording);
+  const { transcriptPath, transcriptRawPath, transcriptCorrectedPath, transcriptionMetaPath } = await transcriptStoragePaths(recordingId, recording);
   await writeTranscriptTextFile(recording, segments, transcriptPath);
   const rawText = transcriptResult.rawText || segments.map((segment) => segment.rawText || segment.text || "").join("\n");
   const correctedText = transcriptResult.correctedText || segments.map((segment) => segment.correctedText || segment.text || "").join("\n");
@@ -3585,6 +3584,13 @@ function recordingReferenceDate(recording, clientId = "") {
   );
 }
 
+/**
+ * 
+ * @param {*} recording 
+ * @param {*} timeZone 
+ * @param {*} clientId 
+ * @returns string // "YYYY-MM-DD"
+ */
 function recordingDateKey(recording, timeZone = DAILY_BRIEF_TIMEZONE, clientId = "") {
   const referenceDate = recordingReferenceDate(recording, clientId);
   return dailyBriefDateParts(referenceDate, timeZone).date;
@@ -4912,6 +4918,7 @@ async function setMeetingOutlineState(recordingId, patch) {
   });
 }
 
+// 用于根据录音转写内容生成并保存会议大纲/会议提纲
 async function generateAndStoreMeetingOutline(recordingId, segments = [], options = {}) {
   const db = await loadDb();
   const recording = findRecording(db, recordingId);
@@ -4967,8 +4974,13 @@ async function generateAndStoreMeetingOutline(recordingId, segments = [], option
 }
 
 async function runTranscriptionJob(recordingId) {
-  const db = await loadDb();
-  const recording = findRecording(db, recordingId);
+  // const db = await loadDb();
+  // const recording = findRecording(db, recordingId);
+  const recording = await prisma.Recording.findUnique({
+    where: {
+      id: recordingId
+    }
+  })
   logger.info("transcription.job.start", {message: `recordingId: ${recordingId}, source: ${recording?.source || "unknown"}`, recordingId, source: recording?.source || "unknown"});
   if (!recording) return;
   if (!isLocalApiTranscriptionRecording(recording)) {
@@ -4981,20 +4993,6 @@ async function runTranscriptionJob(recordingId) {
   }
   if (!isRecordingApiTranscriptionEnabled()) return;
 
-  await updateDb((nextDb) => {
-    const target = findRecording(nextDb, recordingId);
-      if (target) {
-        target.status = "transcribing";
-        target.updatedAt = new Date().toISOString();
-        target.errorMessage = "";
-        target.transcriptProvider = getTranscriptionMode();
-        target.meetingOutline = null;
-        target.meetingOutlineStatus = "";
-        target.meetingOutlineError = "";
-        target.meetingOutlinedAt = "";
-      }
-  });
-
   try {
     const segments = await transcribeRecording({
       ...recording,
@@ -5002,8 +5000,7 @@ async function runTranscriptionJob(recordingId) {
     });
     const translation = await translateTranscriptToChinese(recording, segments);
     const autoTag = "";
-    const { transcriptPath, transcriptRawPath, transcriptCorrectedPath, transcriptionMetaPath } =
-      await transcriptStoragePaths(recordingId, recording);
+    const { transcriptPath, transcriptRawPath, transcriptCorrectedPath, transcriptionMetaPath } = await transcriptStoragePaths(recordingId, recording);
     await writeTranscriptTextFile(recording, segments, transcriptPath);
     if (segments.rawText) await writeFile(transcriptRawPath, `${segments.rawText.trim()}\n`, "utf8");
     if (segments.correctedText) await writeFile(transcriptCorrectedPath, `${segments.correctedText.trim()}\n`, "utf8");
@@ -5021,24 +5018,34 @@ async function runTranscriptionJob(recordingId) {
         })),
       );
 
-      const target = findRecording(nextDb, recordingId);
-      if (target) {
-        target.status = "ready";
-        target.updatedAt = new Date().toISOString();
-        target.transcribedAt = new Date().toISOString();
-        target.transcriptProvider = getTranscriptionMode();
-        target.transcriptSource = isFallbackTranscript(segments) ? "local-fallback" : getTranscriptionMode();
-        target.transcriptPath = transcriptPath;
-        target.transcriptRawPath = segments.rawText ? transcriptRawPath : "";
-        target.transcriptCorrectedPath = segments.correctedText ? transcriptCorrectedPath : "";
-        target.transcriptionMetaPath = segments.transcriptionMeta ? transcriptionMetaPath : "";
-        target.detectedLanguage = translation.detectedLanguage || "";
-        target.translationText = translation.translationText || "";
-        target.meetingOutlineStatus = "generating";
-        target.meetingOutlineError = "";
-        if (!target.tag && autoTag) target.tag = autoTag;
-      }
     });
+    // 更新recording状态为 "ready"
+    const newRecording = {
+      status: "ready",
+      updatedAt: new Date().toISOString(),
+      transcribedAt: new Date().toISOString(),
+      transcriptProvider: getTranscriptionMode(),
+      transcriptSource: isFallbackTranscript(segments) ? "local-fallback" : getTranscriptionMode(),
+      transcriptPath: transcriptPath,
+      transcriptRawPath: segments.rawText ? transcriptRawPath : "",
+      transcriptCorrectedPath: segments.correctedText ? transcriptCorrectedPath : "",
+      transcriptionMetaPath: segments.transcriptionMeta ? transcriptionMetaPath : "",
+      detectedLanguage: translation.detectedLanguage || "",
+      translationText: translation.translationText || "",
+      meetingOutlineStatus: "generating",
+      meetingOutlineError: "",
+      // if (!target.tag && autoTag) target.tag = autoTag;
+    }
+    if (autoTag) {
+      newRecording.tag = autoTag
+    }
+    logger.debug("typeof prisma.Recording: ", {message: `${prisma.Recording}, ${prisma.Recording.update}`})
+    await prisma.Recording.update({
+      where: {
+        id: recordingId
+      },
+      data: newRecording
+    })
     await generateAndStoreMeetingOutline(recordingId, segments, { updateTag: true });
     await markDailyBriefDirtyForRecording(recordingId);
     logger.info("transcription.job.success", {message: `recordingId: ${recordingId}, segmentCount: ${segments.length}, transcriptSource: ${recording?.source || "unknown"}`, recordingId, segmentCount: segments.length, transcriptSource: recording?.source || "unknown"});
@@ -5056,18 +5063,7 @@ async function runTranscriptionJob(recordingId) {
   }
 }
 
-async function markTranscriptionQueued(recordingId) {
-  await updateDb((nextDb) => {
-    const target = findRecording(nextDb, recordingId);
-    if (!target) return;
-    target.status = "transcribing";
-    target.updatedAt = new Date().toISOString();
-    target.errorMessage = "";
-    target.transcriptProvider = getTranscriptionMode();
-  });
-}
-
-function queueTranscriptionJob(recordingId, recordingForSource = null) {
+async function queueTranscriptionJob(recordingId, recordingForSource = null) {
   logger.debug(`call queueTranscriptionJob: recordingId: ${recordingId}, recordingForSource: ${recordingForSource}`)
   const id = String(recordingId || "").trim();
   if (!id) return false;
@@ -5080,9 +5076,23 @@ function queueTranscriptionJob(recordingId, recordingForSource = null) {
   if (transcriptionJobs.has(id)) return false;
 
   transcriptionJobs.add(id);
-  markTranscriptionQueued(id).catch((error) => {
-    console.warn("[Transcription] queue state update failed:", error instanceof Error ? error.message : error);
-  });
+
+  await prisma.Recording.update({
+    where: {
+      id: recordingId
+    },
+    data: {
+      status:  "transcribing",
+      updatedAt:  new Date().toISOString(),
+      errorMessage:  "",
+      transcriptProvider:  getTranscriptionMode(),
+      meetingOutline:  null,
+      meetingOutlineStatus:  "",
+      meetingOutlineError:  "",
+      meetingOutlinedAt:  "",
+    }
+  })
+
   transcriptionJobChain = transcriptionJobChain
     .catch(() => {})
     .then(() => runTranscriptionJob(id))
@@ -5133,7 +5143,7 @@ async function queuePendingLocalTranscriptionJobs(reason = "sweep") {
 
   let queued = 0;
   for (const recording of candidates) {
-    if (queueTranscriptionJob(recording.id, recording)) queued += 1;
+    if (await queueTranscriptionJob(recording.id, recording)) queued += 1;
   }
   if (queued) logger.info("transcription.recovered", {message: `reason: ${reason}, queued: ${queued}`, reason, queued});
   return queued;

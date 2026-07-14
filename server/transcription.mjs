@@ -348,6 +348,26 @@ export function expandTranscriptSegments(segments = [], durationMs = 0) {
   });
 }
 
+/**
+ * [
+    {
+      id: "随机 UUID",
+      startMs: 0,
+      endMs: 8000,
+      text: "标准化后的转写文字",
+      speakerKey: "speaker-1",
+      confidence: 0.9,
+
+      // 原接口返回了分段且该段没有被再次拆分时，可能包含：
+      rawText: "原始文字",
+      correctedText: "纠正后的文字",
+      apiRaw: null
+    }
+  ]
+ * @param {*} payload 
+ * @param {*} durationMs 
+ * @returns 
+ */
 function normalizeSegments(payload, durationMs) {
   const rawSegments =
     payload?.segments ||
