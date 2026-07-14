@@ -11,15 +11,13 @@ services:
       PORT: 7000
       HOST: 0.0.0.0
       HTTPS_PORT: 0
-      MYSQL_HOST: host.docker.internal
+      MYSQL_HOST: mysql
       FFMPEG_PATH: /usr/bin/ffmpeg
       FFPROBE_PATH: /usr/bin/ffprobe
     volumes:
       - test-app-logs:/app/logs
       - test-app-storage:/app/server/storage
-    restart: unless-stopped
-    extra_hosts:
-      - "host.docker.internal:host-gateway"
+    restart: unless-stopped  
 
   nginx:
     build:

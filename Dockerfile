@@ -19,7 +19,10 @@ RUN corepack enable && corepack prepare pnpm@9.15.9 --activate \
 
 COPY . .
 
-RUN chmod +x ./docker-entrypoint.sh && mkdir -p /app/logs /app/server/storage && chown -R node:node /app/logs /app/server/storage
+RUN pnpm --dir server exec prisma generate \
+  && chmod +x ./docker-entrypoint.sh \
+  && mkdir -p /app/logs /app/server/storage \
+  && chown -R node:node /app/logs /app/server/storage
 
 
 EXPOSE 8787
