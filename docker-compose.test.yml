@@ -6,7 +6,7 @@ services:
     ports:
       - "7000:7000"
     env_file:
-      - .env.dev
+      - .env.test
     environment:
       PORT: 7000
       HOST: 0.0.0.0
