@@ -45,8 +45,9 @@ import transcriptionRouter, { configure as configureTranscriptionRouter } from "
 import authRouter, { configure as configureAuthRouter } from "./router/auth.js";
 import foldersRouter, { configure as configureFoldersRouter } from "./router/folders.js";
 import { resolveRecordingAudioPath } from "./utils/recordings.js";
-import prisma from './plugins/prisma.js';
+// import prisma from './plugins/prisma.js';
 import {removeFileIfExists} from './utils/file.js'
+const prisma = await import('./plugins/prisma.cjs').then(m => m.default || m);
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const projectRoot = path.resolve(__dirname, "..");
