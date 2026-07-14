@@ -1,5 +1,7 @@
-import { PrismaClient } from "@prisma/client";
-import { PrismaMariaDb } from "@prisma/adapter-mariadb";
+import pkg from "@prisma/client";
+const { PrismaClient } = pkg;
+import pkgAdapter from "@prisma/adapter-mariadb";
+const { PrismaMariaDb } = pkgAdapter;
 
 
 const { DATABASE_URL } = process.env;
