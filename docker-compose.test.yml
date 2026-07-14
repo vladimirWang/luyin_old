@@ -8,7 +8,7 @@ services:
     env_file:
       - .env.test
     environment:
-      PORT: 7000
+      PORT: 8787
       HOST: 0.0.0.0
       HTTPS_PORT: 0
       MYSQL_HOST: mysql
