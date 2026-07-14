@@ -24,7 +24,7 @@ services:
       context: ./client
       dockerfile: Dockerfile.test
     ports:
-      - "5173:80"
+      - "7000:443"
     depends_on:
       - app
     volumes:
