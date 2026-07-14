@@ -2,14 +2,14 @@ FROM node:22-bookworm
 
 WORKDIR /app
 
-# RUN sed -i \
-#     -e 's|http://deb.debian.org/debian|https://mirrors.aliyun.com/debian|g' \
-#     -e 's|http://deb.debian.org/debian-security|https://mirrors.aliyun.com/debian-security|g' \
-#     -e 's|http://security.debian.org/debian-security|https://mirrors.aliyun.com/debian-security|g' \
-#     /etc/apt/sources.list.d/debian.sources \
-#   && apt-get update \
-#   && apt-get install -y --no-install-recommends ffmpeg \
-#   && rm -rf /var/lib/apt/lists/*
+RUN sed -i \
+    -e 's|http://deb.debian.org/debian|https://mirrors.aliyun.com/debian|g' \
+    -e 's|http://deb.debian.org/debian-security|https://mirrors.aliyun.com/debian-security|g' \
+    -e 's|http://security.debian.org/debian-security|https://mirrors.aliyun.com/debian-security|g' \
+    /etc/apt/sources.list.d/debian.sources \
+  && apt-get update \
+  && apt-get install -y --no-install-recommends ffmpeg \
+  && rm -rf /var/lib/apt/lists/*
 
 COPY package.json pnpm-lock.yaml .npmrc ./
 COPY server/package.json server/pnpm-lock.yaml ./server/
