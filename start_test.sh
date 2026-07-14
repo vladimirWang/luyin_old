@@ -29,7 +29,7 @@ docker compose -f docker-compose.test.yml up -d --build
 
 echo ""
 echo "[3/3] 启动服务..."
-docker compose -f docker-compose.test.yml logs -f --tail=20
+docker compose --env-file .env.test -f docker-compose.test.yml logs -f --tail=20
 
 echo ""
 echo "=========================================="
