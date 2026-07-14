@@ -14,9 +14,8 @@ RUN sed -i \
 COPY package.json pnpm-lock.yaml .npmrc ./
 COPY server/package.json server/pnpm-lock.yaml ./server/
 RUN corepack enable && corepack prepare pnpm@9.15.9 --activate \
-  && pnpm install --prod --frozen-lockfile \
-  && pnpm --dir server install --prod --frozen-lockfile \
-  && pnpm --dir server add prisma@7.8.0
+  && pnpm install --prod \
+  && pnpm --dir server install --prod
 
 COPY . .
 
