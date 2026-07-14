@@ -1,8 +1,18 @@
 import React from "react";
 import { createRoot } from "react-dom/client";
+import { HashRouter, Route, Routes } from "react-router-dom";
 import { App } from "./App.jsx";
+import Login from "./pages/Login/Login.jsx";
+import User from "./pages/User/User.jsx";
 import "./styles.css";
 import "./card-polish.css";
+
+// Enterprise WeChat returns OAuth parameters before the URL hash. Ensure the
+// callback is handled by the login route when HashRouter is in use.
+const oauthCallbackParams = new URLSearchParams(window.location.search);
+if (oauthCallbackParams.has("code") && !window.location.hash.includes("/login")) {
+  window.location.hash = "/login";
+}
 
 const isProd = process.env.NODE_ENV === "prod"
 if (true) {
@@ -13,6 +23,12 @@ if (true) {
 
 createRoot(document.getElementById("root")).render(
   <React.StrictMode>
-    <App />
+    <HashRouter>
+      <Routes>
+        <Route path="/login" element={<Login />} />
+        <Route path="/user" element={<User />} />
+        <Route path="*" element={<App />} />
+      </Routes>
+    </HashRouter>
   </React.StrictMode>,
 );

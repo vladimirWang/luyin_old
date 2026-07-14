@@ -105,14 +105,16 @@ const app = express();
 let wecomTokenCache = { value: "", expiresAt: 0 };
 
 function wecomConfig() {
+  const WECOM_CORP_ID = process.env.WECOM_CORP_ID
+  const WECOM_APP_SECRET = process.env.WECOM_APP_SECRET
+  const WECOM_AGENT_ID = process.env.WECOM_AGENT_ID
+  if (!WECOM_CORP_ID || !WECOM_APP_SECRET) {
+    throw new Error('WECOM_CORP_ID and WECOM_APP_SECRET must be set in .env for WeCom integration.');
+  }
   return {
-    corpId: process.env.WECOM_CORP_ID || process.env.WW_CORP_ID || "",
-    corpSecret:
-      process.env.WECOM_APP_SECRET ||
-      process.env.WECOM_CORP_SECRET ||
-      process.env.WECOM_CONTACT_SECRET ||
-      process.env.WW_CORP_SECRET ||
-      "",
+    corpId: WECOM_CORP_ID,
+    agentId: WECOM_AGENT_ID,
+    corpSecret: WECOM_APP_SECRET
   };
 }
 
