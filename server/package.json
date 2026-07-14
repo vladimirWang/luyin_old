@@ -7,7 +7,8 @@
   "scripts": {
     "dev": "dotenv -e ../.env.dev nodemon index.mjs",
     "start:prod": "node index.mjs",
-    "migrate:dev": "dotenv -e ../.env.dev -- prisma migrate dev"
+    "migrate:dev": "dotenv -e ../.env.dev -- prisma migrate dev",
+    "generate:dev": "dotenv -e ../.env.dev -- prisma generate dev"
   },
   "dependencies": {
     "@prisma/adapter-mariadb": "^7.8.0",
