@@ -16,7 +16,7 @@ if ! command -v docker &> /dev/null; then
     exit 1
 fi
 
-if ! command -v docker compose &> /dev/null; then
+if ! docker compose version &> /dev/null; then
     echo "❌ Docker Compose 未安装"
     exit 1
 fi
@@ -28,10 +28,6 @@ echo "[2/3] 构建镜像..."
 docker compose --env-file .env.test -f docker-compose.test.yml up -d --build
 
 echo ""
-echo "[3/3] 启动服务..."
-docker compose --env-file .env.test -f docker-compose.test.yml logs -f --tail=20
-
-echo ""
 echo "=========================================="
 echo "  测试环境已启动"
 echo "=========================================="
@@ -40,3 +36,6 @@ echo "前端访问: http://localhost:5173"
 echo "API地址: http://localhost:5173/api"
 echo ""
 echo "停止服务: docker compose -f docker-compose.test.yml down"
+echo ""
+echo "[3/3] 输出服务日志（Ctrl+C 退出日志跟踪，服务会继续运行）..."
+docker compose --env-file .env.test -f docker-compose.test.yml logs -f --tail=20

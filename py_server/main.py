@@ -20,13 +20,8 @@ from pydantic import BaseModel, Field
 # from module_order.order_controller import order_router
 # from module_admin_user.admin_user_controller import admin_user_router
 
-# try:
-#     # 自动保证目录一定存在
-#     Path(UPLOAD_DIR).mkdir(parents=True, exist_ok=True)
-#     print(f"创建目录成功: {UPLOAD_DIR}")
-# except Exception as e:
-#     print(f"创建目录失败: {e}")
-#     raise HTTPException(status_code=500, detail=f"创建目录失败: {e}")
+# UPLOAD_DIR 当前未启用（它的 config 导入也已注释）。
+# 启用上传功能时，再与 `from config import UPLOAD_DIR` 一起恢复。
 
 # @asynccontextmanager
 # async def lifespan(app: FastAPI):
@@ -39,9 +34,7 @@ from pydantic import BaseModel, Field
 #     grpc_server.stop(grace=5)
 
 
-app = FastAPI(
-    # lifespan=lifespan
-)
+app = FastAPI()
 
 # @app.middleware("http")
 # async def global_exception_middleware(request: Request, call_next):
@@ -72,7 +65,13 @@ def response():
     return Response(status_code=201, content=json.dumps({"success": "ok"}))
 
 # 在创建 app 和 include_router 之后添加
-app.mount("/statics", StaticFiles(directory="statics"), name="static")
+
+STATIC_DIR = Path(__file__).resolve().parent / "statics"
+try:
+    STATIC_DIR.mkdir(parents=True, exist_ok=True)
+except Exception as e:
+    print(f"创建静态目录失败: {e}")
+app.mount("/statics", StaticFiles(directory=STATIC_DIR), name="static")
 
 if __name__ == "__main__":
     import uvicorn
