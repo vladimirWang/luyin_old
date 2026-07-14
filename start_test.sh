@@ -25,7 +25,7 @@ echo "✅ Docker 环境就绪"
 
 echo ""
 echo "[2/3] 构建镜像..."
-docker compose -f docker-compose.test.yml up -d --build
+docker compose --env-file .env.test -f docker-compose.test.yml up -d --build
 
 echo ""
 echo "[3/3] 启动服务..."
