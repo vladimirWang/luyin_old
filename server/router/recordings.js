@@ -19,7 +19,7 @@ import {
 // import prisma from "../plugins/prisma.js";
 import {removeFileIfExists} from '../utils/file.js'
 
-const prisma = await import('./plugins/prisma.cjs').then(m => m.default || m);
+const prisma = await import('../plugins/prisma.cjs').then(m => m.default || m);
 
 const router = express.Router();
 const upload = multer({ dest: tempDir });
