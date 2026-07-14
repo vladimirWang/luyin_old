@@ -19,7 +19,7 @@ RUN corepack enable && corepack prepare pnpm@9.15.9 --activate \
 
 COPY . .
 
-RUN pnpm --dir server exec prisma generate \
+RUN DATABASE_URL="mysql://prisma:prisma@localhost:3306/prisma" pnpm --dir server exec prisma generate \
   && chmod +x ./docker-entrypoint.sh \
   && mkdir -p /app/logs /app/server/storage \
   && chown -R node:node /app/logs /app/server/storage
