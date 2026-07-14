@@ -48,8 +48,8 @@ services:
     depends_on:
       - app
     volumes:
-      - ./client/dist:/usr/share/nginx/html
-      - ./client/ssl:/etc/nginx/ssl
+      - ./client/dist:/usr/share/nginx/html:ro
+      - ./client/ssl:/etc/nginx/ssl:ro
     restart: unless-stopped
     
   mysql:
