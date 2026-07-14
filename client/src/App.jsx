@@ -1141,7 +1141,7 @@ function BottomNav({ activeView, onNavigate, language, hidden = false }) {
 }
 
 export function App() {
-  const [activeView, setActiveView] = useState("records");
+  const [activeView, setActiveView] = useState("record");
   const [recordings, setRecordings] = useState([]);
   const [folders, setFolders] = useState([]);
   const [folderStats, setFolderStats] = useState({ totalCount: 0, favoriteCount: 0, uncategorizedCount: 0, trashCount: 0 });
@@ -2274,6 +2274,7 @@ export function App() {
         ensureRecordingSessionManifest();
         await requestPersistentRecordingStorage();
       }
+      // 请求麦克风权限
       const stream = await requestMicrophoneStream();
       await requestRecordingWakeLock();
       const mimeType = getSupportedMimeType();
@@ -3067,9 +3068,15 @@ export function App() {
       <div className={`h5-app view-${activeView}`}>
         <div className="view-stack">
           {/* <div style={{fontSize: 30, color: 'red'}}>1232</div> */}
-          {activeView === 'record' ? (
-            <RecorderView />
-          ): null}
+          {activeView === "record" ? (
+            <RecorderView
+              elapsedMs={elapsedMs}
+              isRecording={isRecording}
+              level={level}
+              recordingError={recordingError}
+              onToggleRecording={toggleRecording}
+            />
+          ) : null}
           {activeView === "records" ? (
             <RecordsView
               finishUploadCard={finishUploadCard}
