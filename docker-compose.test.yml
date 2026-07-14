@@ -27,6 +27,9 @@ services:
       - "5173:80"
     depends_on:
       - app
+    volumes:
+      - ./client/dist:/usr/share/nginx/html
+      - ./client/ssl:/etc/nginx/ssl
     restart: unless-stopped
     
   mysql:
