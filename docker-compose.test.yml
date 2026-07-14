@@ -1,0 +1,36 @@
+services:
+  app:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    ports:
+      - "7000:7000"
+    env_file:
+      - .env.dev
+    environment:
+      PORT: 7000
+      HOST: 0.0.0.0
+      HTTPS_PORT: 0
+      MYSQL_HOST: host.docker.internal
+      FFMPEG_PATH: /usr/bin/ffmpeg
+      FFPROBE_PATH: /usr/bin/ffprobe
+    volumes:
+      - test-app-logs:/app/logs
+      - test-app-storage:/app/server/storage
+    restart: unless-stopped
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+
+  nginx:
+    build:
+      context: ./client
+      dockerfile: Dockerfile.test
+    ports:
+      - "5173:80"
+    depends_on:
+      - app
+    restart: unless-stopped
+
+volumes:
+  test-app-logs:
+  test-app-storage:
