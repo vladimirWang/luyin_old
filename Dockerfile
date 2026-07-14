@@ -21,7 +21,6 @@ COPY . .
 
 RUN chmod +x ./docker-entrypoint.sh && mkdir -p /app/logs /app/server/storage && chown -R node:node /app/logs /app/server/storage
 
-USER node
 
 EXPOSE 8787
 
