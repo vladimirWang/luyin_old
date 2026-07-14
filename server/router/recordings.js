@@ -19,7 +19,6 @@ import {
 import prisma from "../plugins/prisma.js";
 import {removeFileIfExists} from '../utils/file.js'
 
-logger.debug("show prisma.Recording: ", {message: `${prisma.Recording}, ${prisma.Recording.update}`})
 
 const router = express.Router();
 const upload = multer({ dest: tempDir });
@@ -160,7 +159,7 @@ router.post("/", upload.single("audio"), async (request, response, next) => {
       response.status(400).json({ error: "缺少录音文件" });
       return;
     }
-    
+
     const id = crypto.randomUUID();
     const fileName = `${id}.mp3`;
     const storagePath = path.join(audioDir, fileName);

@@ -1128,10 +1128,10 @@ function BottomNav({ activeView, onNavigate, language, hidden = false }) {
         <Home size={21} />
         <span>{uiText(language, "记录", "Records")}</span>
       </button>
-      {/* <button className={activeView === "record" ? "active center" : "center"} type="button" onClick={() => onNavigate("record")}>
+      <button className={activeView === "record" ? "active center" : "center"} type="button" onClick={() => onNavigate("record")}>
         <Mic size={24} />
         <span>{uiText(language, "录音", "Record")}</span>
-      </button>*/}
+      </button>
       <button className={activeView === "detail" ? "active" : ""} type="button" onClick={() => onNavigate("detail")}>
         <ListMusic size={21} />
         <span>{uiText(language, "问答", "QA")}</span>
