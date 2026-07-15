@@ -80,8 +80,9 @@ export default function WeComLogin() {
     async function mountLoginPanel() {
       try {
         let config = await api("/api/wecom/login-config");
+        console.log("wecom login config: ", config)
         if (cancelled) return;
-        if (!config.configured || !config.corpId || !config.agentId) {
+        if (!config.configured || !config.appid || !config.agentid) {
           throw new Error("服务端尚未完整配置企业微信 CorpID、AgentID 和 Secret");
         }
         // config= {
@@ -89,12 +90,9 @@ export default function WeComLogin() {
         //   agentid: '1000066',
         //   redirect_uri: 'https://huabu.hyp-arch.com:4173/project'
         // }
-
         const state = createOAuthState();
-        window.sessionStorage.setItem(OAUTH_STATE_KEY, state);
-        panelRef.current = createWWLoginPanel({
-          el: "#wecom-login-panel",
-          params: {
+
+        const params = {
             login_type: "CorpApp",
             appid: config.appid,
             agentid: String(config.agentid),
@@ -105,7 +103,12 @@ export default function WeComLogin() {
             state,
             lang: "zh",
             color_scheme: "light",
-          },
+          }
+        console.log("二维码入参: ", params)
+        window.sessionStorage.setItem(OAUTH_STATE_KEY, state);
+        panelRef.current = createWWLoginPanel({
+          el: "#wecom-login-panel",
+          params,
           onLoginSuccess({ code }) {
             console.log("ww login success: ", code)
             finishLogin(code);

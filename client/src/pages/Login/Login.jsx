@@ -3,6 +3,7 @@ import { useNavigate } from "react-router-dom";
 import { api, saveLocalProfile } from "../../utils/index.js";
 
 const CORP_ID = "ww0854a981ec186692";
+const REDIRECT_URI = "https://luyin.hyperspace.cn/";
 const AGENT_ID = "1000058";
 const OAUTH_STATE_KEY = "wecomLoginOAuthState";
 
@@ -26,7 +27,7 @@ function getCallbackParams() {
     : searchParams;
 }
 
-function getAuthorizeUrl() {
+function createWWLoginPanelgetAuthorizeUrl() {
   const state = createOAuthState();
   window.sessionStorage.setItem(OAUTH_STATE_KEY, state);
 
@@ -43,6 +44,7 @@ function getAuthorizeUrl() {
   url.searchParams.set("redirect_uri", callbackUrl);
   url.searchParams.set("state", state);
   url.searchParams.set("agentid", AGENT_ID);
+  url.searchParams.set("redirect_uri", REDIRECT_URI);
   if (inWeCom) {
     url.searchParams.set("response_type", "code");
     url.searchParams.set("scope", "snsapi_base");
