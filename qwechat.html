@@ -1,0 +1,62 @@
+<!DOCTYPE html>
+<html lang="en">
+ 
+<head>
+    <meta charset="UTF-8">
+    <meta http-equiv="X-UA-Compatible" content="IE=edge">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>企业微信扫码登录demo</title>
+    <!-- 生产环境版本，优化了尺寸和速度 -->
+    <script src="https://cdn.jsdelivr.net/npm/vue@2"></script>
+    <script src="http://wwcdn.weixin.qq.com/node/wework/wwopen/js/wwLogin-1.2.7.js"></script>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+        }
+ 
+        body {
+            width: 100%;
+            background: #fff;
+        }
+ 
+    </style>
+</head>
+ 
+<body>
+    <div id="app">
+        <div id="wx_reg" style="height: 400px; width: 400px; border: 1px solid red;">
+ 
+        </div>
+    </div>
+</body>
+ 
+<script>
+    var app = new Vue({
+        el: '#app',
+        data: {
+            message: 'Hello Vue!'
+        },
+        methods: {
+            createCode() {
+            const ID='ww0854a981ec186692'
+const AGENT_ID='1000058'
+// 应用 Secret 只能由服务端读取，不能写进浏览器页面。
+                var wwLogin = new WwLogin({
+                    "id": "wx_reg",
+                    "appid": ID, // 填你的企业微信企业id
+                    "agentid": AGENT_ID,// 填你的自建应用id
+                    "redirect_uri": "http://", // 填你的可信域名里的跳转链接，一定要有http或者https
+                    "state": "",
+                    "href": "",
+                    "lang": "zh",
+                });
+            },
+        },
+        created: function () {
+            this.createCode()
+        }
+    })
+</script>
+ 
+</html>

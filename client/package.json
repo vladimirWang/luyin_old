@@ -9,6 +9,7 @@
     "build": "vite build"
   },
   "dependencies": {
+    "@wecom/jssdk": "^2.4.2",
     "antd-mobile": "^5.42.3",
     "lucide-react": "^1.18.0",
     "react": "19.2.0",

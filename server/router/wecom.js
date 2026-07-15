@@ -8,20 +8,30 @@ export function configure(deps) {
   dependencies = deps;
 }
 
+router.get("/login-config", (request, response) => {
+  const { wecomConfig } = dependencies;
+  const config = wecomConfig();
+  response.json({
+    configured: Boolean(config.appid && config.agentid && config.corpSecret),
+    appid: config.appid || "",
+    agentid: config.agentid || "",
+  });
+});
+
 router.get("/oauth-url", (request, response) => {
   const { wecomConfig } = dependencies;
   const config = wecomConfig();
-  if (!config.corpId || !config.corpSecret) {
+  if (!config.appid || !config.corpSecret) {
     response.json({ configured: false });
     return;
   }
 
   const redirect = String(request.query.redirect || `${request.protocol}://${request.get("host")}/`);
   const url =
-    `https://open.weixin.qq.com/connect/oauth2/authorize?appid=${encodeURIComponent(config.corpId)}` +
+    `https://open.weixin.qq.com/connect/oauth2/authorize?appid=${encodeURIComponent(config.appid)}` +
     `&redirect_uri=${encodeURIComponent(redirect)}` +
     "&response_type=code&scope=snsapi_base&state=wecom_recorder" +
-    (config.agentId ? `&agentid=${encodeURIComponent(config.agentId)}` : "") +
+    (config.agentid ? `&agentid=${encodeURIComponent(config.agentid)}` : "") +
     "#wechat_redirect";
   response.json({ configured: true, url });
 });
