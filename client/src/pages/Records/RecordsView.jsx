@@ -28,8 +28,6 @@ export function RecordsView({
   folderStats,
   recordsTitle,
   selectedFolderId,
-  query,
-  setQuery,
   loading,
   deletingRecordIds = [],
   uploadBusy,
@@ -532,8 +530,8 @@ export function RecordsView({
             <div className="empty-icon">
               <Mic size={40} />
             </div>
-            <h2>{query ? "没有匹配的录音" : "还没有录音"}</h2>
-            <p>{query ? "换一个关键词试试。" : "点击下方录音按钮，完成后会上传服务器并生成卡片。"}</p>
+            <h2>还没有录音</h2>
+            <p>点击下方录音按钮，完成后会上传服务器并生成卡片。</p>
             <button className="primary-pill" type="button" onClick={onStartRecording}>
               <Mic size={18} />
               录音

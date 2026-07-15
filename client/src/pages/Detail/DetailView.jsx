@@ -42,14 +42,16 @@ import {
   stripQaInternalIndexMarkers,
   dailyBriefMeetingCount,
   api,
-  fetchWithClient
+  fetchWithClient,
+  showToast
 } from "../../utils/index.js";
 import { dateKeyFromRecording, todayDisplayDateFallback, displayDateFromDateKey } from '../../utils/date.js'
 import { DailyMeetingBriefCard } from './components/DailyMeetingBriefCard.jsx'
 import { requestMicrophoneStream, getAudioFileDuration } from '../../utils/audio.js'
 import {DailyMeetingBriefMessage} from './components/DailyMeetingBriefMessage.jsx'
 
-export function DetailView({ recording, recordings = [], onBack, onToast, language, onSelectRecording }) {
+export function DetailView({ recording, recordings = [], onBack, language, onSelectRecording }) {
+  const onToast = showToast;
   const audioRef = useRef(null);
   const audioSourceRef = useRef("");
   const imageInputRef = useRef(null);
@@ -496,11 +498,9 @@ export function DetailView({ recording, recordings = [], onBack, onToast, langua
   }, [latestAnswerKey]);
 
   useEffect(() => {
-    if (Array.isArray(answers)) {
-      return
-    }
+    if (!Array.isArray(answers)) return;
     answers.filter((item) => item.pending).forEach((item) => {
-      pollQaMessage(item.id, 0, messageScopeFromKnown(item, activeScopeIdsRef.current, answers))
+      pollQaMessage(item.id, 0, messageScopeFromKnown(item, activeScopeIdsRef.current, answers));
     });
   }, [answers]);
 

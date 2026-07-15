@@ -24,6 +24,11 @@ export function WaveCanvas({ active, level }) {
       const width = canvas.clientWidth * ratio;
       const height = canvas.clientHeight * ratio;
 
+      if (width <= 0 || height <= 0) {
+        rafId = requestAnimationFrame(draw);
+        return;
+      }
+
       if (canvas.width !== width || canvas.height !== height) {
         canvas.width = width;
         canvas.height = height;
