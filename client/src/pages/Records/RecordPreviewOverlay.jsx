@@ -8,7 +8,7 @@ import {
   meetingReportBlocks,
   api,
   mediaRequestUrl,
-} from "./utils/index.js";
+} from "../../utils/index.js";
 
 export function RecordPreviewOverlay({ recording, onClose, onAsk, onShare, onRetranscribe }) {
   const audioRef = useRef(null);

@@ -1,4 +1,4 @@
-import {dailyBriefDisplayDate} from '../../utils/index.js'
+import {dailyBriefDisplayDate} from '../../../utils/index.js'
 export function DailyMeetingBriefCard({ brief, loading, meetingCount, onOpen }) {
 
 

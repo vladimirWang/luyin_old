@@ -43,12 +43,11 @@ import {
   dailyBriefMeetingCount,
   api,
   fetchWithClient
-} from "./utils/index.js";
-import { dateKeyFromRecording, todayDisplayDateFallback, displayDateFromDateKey } from './utils/date.js'
-import { DailyMeetingBriefCard } from './DetailView/components/DailyMeetingBriefCard.jsx'
-import { requestMicrophoneStream } from './utils/audio.js'
-import {DailyMeetingBriefMessage} from './DetailView/components/DailyMeetingBriefMessage.jsx'
-import {getAudioFileDuration} from './utils/audio.js'
+} from "../../utils/index.js";
+import { dateKeyFromRecording, todayDisplayDateFallback, displayDateFromDateKey } from '../../utils/date.js'
+import { DailyMeetingBriefCard } from './components/DailyMeetingBriefCard.jsx'
+import { requestMicrophoneStream, getAudioFileDuration } from '../../utils/audio.js'
+import {DailyMeetingBriefMessage} from './components/DailyMeetingBriefMessage.jsx'
 
 export function DetailView({ recording, recordings = [], onBack, onToast, language, onSelectRecording }) {
   const audioRef = useRef(null);

@@ -15,10 +15,10 @@ import {
   Mic,
 } from "lucide-react";
 import { uiText, api } from "../../utils/index.js";
-import { IconButton } from "../../IconButton.jsx";
-import { UploadingRecordCard } from "../../UploadingRecordCard.jsx";
-import { RecordCard } from "../../RecordCard.jsx";
-import { RecordPreviewOverlay } from "../../RecordPreviewOverlay.jsx";
+import { IconButton } from "../../components/IconButton.jsx";
+import { UploadingRecordCard } from "./UploadingRecordCard.jsx";
+import { RecordCard } from "./RecordCard.jsx";
+import { RecordPreviewOverlay } from "./RecordPreviewOverlay.jsx";
 import {isUploadableMediaFile, getAudioFileDuration} from '../../utils/audio.js'
 import {showToast} from '../../utils/index.js'
 

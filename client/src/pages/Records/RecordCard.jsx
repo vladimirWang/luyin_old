@@ -11,8 +11,8 @@ import {
   recordingStatusLabel,
   getClientName,
   cardColors,
-} from "./utils/index.js";
-import {IconButton} from './IconButton.jsx'
+} from "../../utils/index.js";
+import {IconButton} from '../../components/IconButton.jsx'
 
 export function RecordCard({
   recording,

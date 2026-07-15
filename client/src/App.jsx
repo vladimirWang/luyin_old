@@ -34,13 +34,13 @@ import {
   Volume2,
   X,
 } from "lucide-react";
-import { RecorderView } from './RecorderView.jsx'
+import { RecorderView } from './pages/Recorder/RecorderView.jsx'
 import {RecordsView} from './pages/Records/RecordsView.jsx'
-import {DetailView} from './DetailView.jsx'
-import {IconButton} from './IconButton.jsx'
-import { RecordCard } from './RecordCard.jsx'
-import { UploadingRecordCard } from './UploadingRecordCard.jsx'
-import { RecordPreviewOverlay } from './RecordPreviewOverlay.jsx'
+import {DetailView} from './pages/Detail/DetailView.jsx'
+import {IconButton} from './components/IconButton.jsx'
+import { RecordCard } from './pages/Records/RecordCard.jsx'
+import { UploadingRecordCard } from './pages/Records/UploadingRecordCard.jsx'
+import { RecordPreviewOverlay } from './pages/Records/RecordPreviewOverlay.jsx'
 import {
   formatDuration,
   formatShortDate,

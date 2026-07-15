@@ -1,4 +1,4 @@
-import {dailyBriefDisplayDate} from '../../utils/index.js'
+import {dailyBriefDisplayDate} from '../../../utils/index.js'
 
 function dailyBriefFallbackContent(brief, meetingCount) {
   const displayDate = dailyBriefDisplayDate(brief);

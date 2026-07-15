@@ -1,5 +1,5 @@
 import { Mic } from "lucide-react";
-import { formatDuration } from "./utils/index.js";
+import { formatDuration } from "../../utils/index.js";
 import { WaveCanvas } from "./WaveCanvas.jsx";
 
 export function RecorderView({ elapsedMs, isRecording, level, recordingError, onToggleRecording }) {

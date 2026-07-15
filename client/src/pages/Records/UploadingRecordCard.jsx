@@ -1,5 +1,5 @@
 import { LoaderCircle } from "lucide-react";
-import { formatCardDateParts, formatClockTime, formatDuration } from "./utils/index.js";
+import { formatCardDateParts, formatClockTime, formatDuration } from "../../utils/index.js";
 
 export function UploadingRecordCard({ item }) {
   const dateParts = formatCardDateParts(item.createdAt);
