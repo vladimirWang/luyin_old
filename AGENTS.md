@@ -18,6 +18,8 @@ Router ownership decisions: `client/src/AppRouter.jsx` owns `BrowserRouter`, rou
 
 Shared constant decisions: keep cross-route persistence keys and storage identifiers in `client/src/constant.js` and import them explicitly after moving code between route components. Page-only tuning values may remain in their owning module.
 
+Database startup decisions: `docker-entrypoint.sh` selects the Prisma schema strategy with `PRISMA_SCHEMA_MODE`. Use `push` for development schema synchronization and `migrate` for checked-in production migrations; missing or unknown values must fall back to `prisma migrate deploy`, never to a destructive push option.
+
 Records menu decisions: the avatar dropdown uses a compact, content-driven width with mobile viewport bounds instead of a fixed width, and its icon-only action buttons center their icons.
 
 Visual direction: login and not-found screens follow the recording-list reference style—cool gray-blue atmospheric background, oversized heavy black display type, translucent white cards with generous radii, near-black primary actions, coral secondary accents, circular outline-icon controls, and soft low-contrast shadows.
