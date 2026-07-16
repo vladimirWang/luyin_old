@@ -20,6 +20,9 @@ services:
     extra_hosts:
       - "host.docker.internal:host-gateway"
     command: ["npx", "nodemon", "--inspect=0.0.0.0:9229", "server/index.mjs"]
+    volumes:
+      - ./server/logs:/app/logs
+      - ./server/storage:/app/server/storage
 
   nginx:
     image: nginx:1.27-alpine
@@ -51,3 +54,5 @@ services:
 
 volumes:
   mysql-data:
+  app-logs-dev:
+  app-storage-dev:

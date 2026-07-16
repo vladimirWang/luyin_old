@@ -10,10 +10,10 @@ import "./card-polish.css";
 
 // Enterprise WeChat returns OAuth parameters before the URL hash. Ensure the
 // callback is handled by the login route when HashRouter is in use.
-const oauthCallbackParams = new URLSearchParams(window.location.search);
-if (oauthCallbackParams.has("code") && !window.location.hash.includes("/login")) {
-  window.location.hash = "/login";
-}
+// const oauthCallbackParams = new URLSearchParams(window.location.search);
+// if (oauthCallbackParams.has("code") && !window.location.hash.includes("/login")) {
+//   window.location.hash = "/login";
+// }
 
 const isProd = process.env.NODE_ENV === "prod"
 if (true) {
@@ -33,3 +33,5 @@ createRoot(document.getElementById("root")).render(
     </HashRouter>
   </React.StrictMode>,
 );
+
+// createRoot(document.getElementById("root")).render(<App />);

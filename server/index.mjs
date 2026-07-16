@@ -164,11 +164,12 @@ async function getWecomAccessToken() {
 async function getWecomUserByCode(code) {
   const token = await getWecomAccessToken();
   if (!token || !code) return null;
-
+  console.log("call getWecomUserByCode: ", `token: ${token}, code: ${code}`)
   const identityResponse = await fetch(
-    `https://qyapi.weixin.qq.com/cgi-bin/user/getuserinfo?access_token=${encodeURIComponent(token)}&code=${encodeURIComponent(code)}`,
+    `https://qyapi.weixin.qq.com/cgi-bin/auth/getuserinfo?access_token=${encodeURIComponent(token)}&code=${encodeURIComponent(code)}`,
   );
   const identity = await identityResponse.json();
+  console.log("call getWecomUserByCode success: ", identity)
   if (identity.errcode) throw new Error(identity.errmsg || "企业微信用户身份获取失败");
 
   const userId = identity.UserId || identity.userid || "";
@@ -180,7 +181,7 @@ async function getWecomUserByCode(code) {
       department: "",
     };
   }
-
+  console.log("call getWecomUserByCode success userId:  ", userId)
   const userResponse = await fetch(
     `https://qyapi.weixin.qq.com/cgi-bin/user/get?access_token=${encodeURIComponent(token)}&userid=${encodeURIComponent(userId)}`,
   );
