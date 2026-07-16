@@ -15,6 +15,7 @@ router.get("/login-config", (request, response) => {
     configured: Boolean(config.appid && config.agentid && config.corpSecret),
     appid: config.appid || "",
     agentid: config.agentid || "",
+    redirectUri: config.redirectUri
   });
 });
 

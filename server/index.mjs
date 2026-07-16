@@ -111,7 +111,8 @@ function wecomConfig() {
   return {
     appid: WECOM_CORP_ID || "",
     agentid: WECOM_AGENT_ID || "",
-    corpSecret: WECOM_APP_SECRET || ""
+    corpSecret: WECOM_APP_SECRET || "",
+    redirectUri: 'http://tluyin.hyp-arch.com:7000/#/home'
   };
 }
 
