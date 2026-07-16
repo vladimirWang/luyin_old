@@ -16,6 +16,7 @@ import {
   safeDownloadName,
   recordingSearchScore,
 } from "../utils/recordings.js";
+import { uploadWecomTemporaryFile } from "../utils/wecom.js";
 // import prisma from "../plugins/prisma.js";
 import {removeFileIfExists} from '../utils/file.js'
 
@@ -469,7 +470,7 @@ router.post("/:id/audio-share-url", async (request, response) => {
 });
 
 router.post("/:id/wecom-audio-media", async (request, response, next) => {
-  const { uploadWecomTemporaryFile, requestClientId, requestClientName, findRecording, resolveRecordingAudioPath, canReadRecording } = dependencies;
+  const { requestClientId, requestClientName, findRecording, resolveRecordingAudioPath, canReadRecording } = dependencies;
   try {
     const db = await loadDb();
     const clientId = requestClientId(request);
