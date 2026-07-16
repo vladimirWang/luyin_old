@@ -27,10 +27,66 @@ const server1 = {
     clientFiles: ["./src/main.jsx"],
   },
 }
+
+const vendorChunkGroups = [
+  {
+    name: "vendor-react",
+    test: /node_modules[\\/](?:react|react-dom|scheduler)[\\/]/,
+    priority: 100,
+  },
+  {
+    name: "vendor-router",
+    test: /node_modules[\\/](?:react-router|react-router-dom)[\\/]/,
+    priority: 90,
+  },
+  {
+    name: "vendor-state",
+    test: /node_modules[\\/](?:zustand|use-sync-external-store)[\\/]/,
+    priority: 80,
+  },
+  {
+    name: "vendor-icons",
+    test: /node_modules[\\/]lucide-react[\\/]/,
+    priority: 70,
+  },
+  {
+    name: "vendor-mobile-ui",
+    test: /node_modules[\\/](?:antd-mobile|antd-mobile-icons|@react-spring|@use-gesture|ahooks|rc-util|classnames)[\\/]/,
+    priority: 60,
+  },
+  {
+    name: "vendor-wecom",
+    test: /node_modules[\\/]@wecom[\\/]jssdk[\\/]/,
+    priority: 50,
+  },
+  {
+    name: "vendor-vconsole",
+    test: /node_modules[\\/]vconsole[\\/]/,
+    priority: 40,
+  },
+  {
+    name: "vendor-common",
+    test: /node_modules[\\/]/,
+    priority: 1,
+  },
+];
+
 export default defineConfig({
   optimizeDeps: {
     include: ["react", "react-dom/client"],
   },
   server: server0,
   plugins: [react()],
+  build: {
+    rolldownOptions: {
+      output: {
+        codeSplitting: {
+          groups: vendorChunkGroups,
+        },
+        chunkFileNames: "assets/[name]-[hash].js",
+        entryFileNames: "assets/[name]-[hash].js",
+        assetFileNames: "assets/[name]-[hash][extname]",
+      },
+    },
+  },
 });

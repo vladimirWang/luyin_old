@@ -1,4 +1,4 @@
-import { Toast } from "antd-mobile";
+import Toast from "antd-mobile/es/components/toast";
 import {displayDateFromDateKey} from './date.js'
 
 export const cardColors = ["coral", "indigo", "violet", "teal", "clay", "ink"];
