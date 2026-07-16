@@ -2,6 +2,37 @@ import crypto from "node:crypto";
 import logger from "./log.js";
 import { normalizeTencentMeetingEncryptedData, tencentMeetingDecryptData } from "./tencentMeetingCrypto.mjs";
 import { splitEnvList } from "./common.mjs";
+import { decodedTencentMeetingAesKeyLength } from "./algo.js";
+
+export function expandTencentMeetingKeyCandidates(keys) {
+  const output = [];
+  const seen = new Set();
+  const add = (value) => {
+    const key = String(value || "").trim();
+    if (!key || seen.has(key) || decodedTencentMeetingAesKeyLength(key) !== 32) return;
+    seen.add(key);
+    output.push(key);
+  };
+
+  for (const original of keys) {
+    const key = String(original || "").trim();
+    add(key);
+    let variants = [""];
+    for (const char of key) {
+      const alternatives = ["I", "l", "L"].includes(char) ? ["I", "l", "L"] : [char];
+      const next = [];
+      for (const variant of variants) {
+        for (const alternative of alternatives) {
+          next.push(`${variant}${alternative}`);
+        }
+      }
+      variants = [...new Set(next)].slice(0, 512);
+    }
+    variants.forEach(add);
+  }
+
+  return output.slice(0, 512);
+}
 
 // 说明：对外部输入或模型输出做规整与安全清理。
 function safeEqualText(actual, expected) {

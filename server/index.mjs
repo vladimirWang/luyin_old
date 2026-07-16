@@ -46,6 +46,7 @@ import authRouter, { configure as configureAuthRouter } from "./router/auth.js";
 import foldersRouter, { configure as configureFoldersRouter } from "./router/folders.js";
 import { resolveRecordingAudioPath } from "./utils/recordings.js";
 import { wecomConfig } from "./utils/wecom.js";
+import { expandTencentMeetingKeyCandidates } from "./utils/tencentMeeting.mjs";
 // import prisma from './plugins/prisma.js';
 import {removeFileIfExists} from './utils/file.js'
 const prisma = await import('./plugins/prisma.cjs').then(m => m.default || m);
@@ -901,44 +902,6 @@ configureFoldersRouter({
   crypto,
 });
 app.use("/api/folders", foldersRouter);
-
-function decodedTencentMeetingAesKeyLength(encodingAesKey) {
-  try {
-    return Buffer.from(`${encodingAesKey}=`, "base64").length;
-  } catch {
-    return 0;
-  }
-}
-
-function expandTencentMeetingKeyCandidates(keys) {
-  const output = [];
-  const seen = new Set();
-  const add = (value) => {
-    const key = String(value || "").trim();
-    if (!key || seen.has(key) || decodedTencentMeetingAesKeyLength(key) !== 32) return;
-    seen.add(key);
-    output.push(key);
-  };
-
-  for (const original of keys) {
-    const key = String(original || "").trim();
-    add(key);
-    let variants = [""];
-    for (const char of key) {
-      const alternatives = ["I", "l", "L"].includes(char) ? ["I", "l", "L"] : [char];
-      const next = [];
-      for (const variant of variants) {
-        for (const alternative of alternatives) {
-          next.push(`${variant}${alternative}`);
-        }
-      }
-      variants = [...new Set(next)].slice(0, 512);
-    }
-    variants.forEach(add);
-  }
-
-  return output.slice(0, 512);
-}
 
 function tencentMeetingWebhookConfig() {
   const tokens = [
