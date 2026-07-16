@@ -85,19 +85,18 @@ export default function WeComLogin() {
         if (!config.configured || !config.appid || !config.agentid) {
           throw new Error("服务端尚未完整配置企业微信 CorpID、AgentID 和 Secret");
         }
-        // config= {
-        //   appid: "ww0854a981ec186692",
-        //   agentid: '1000066',
-        //   redirect_uri: 'https://huabu.hyp-arch.com:4173/project'
-        // }
+        const redirectUri = String(config.redirectUri || "").trim();
+        const parsedRedirectUri = new URL(redirectUri);
+        if (parsedRedirectUri.protocol !== "https:" || parsedRedirectUri.hash) {
+          throw new Error("企业微信回调地址必须是无 # 片段的 HTTPS URL");
+        }
         const state = createOAuthState();
 
         const params = {
             login_type: "CorpApp",
             appid: config.appid,
             agentid: String(config.agentid),
-            // redirect_uri: `${window.location.origin}/`,
-            redirect_uri: config.redirect_uri,
+            redirect_uri: parsedRedirectUri.toString(),
             redirect_type: "callback",
             panel_size: window.matchMedia("(max-width: 520px)").matches ? "small" : "middle",
             state,

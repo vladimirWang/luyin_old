@@ -4,7 +4,7 @@ import { HashRouter, Route, Routes } from "react-router-dom";
 import App from "./App.jsx";
 import User from "./pages/User/User.jsx";
 import WeComLogin from "./pages/WeComLogin/WeComLogin.jsx";
-import Login from "./pages/Login/Login.jsx";
+// import Login from "./pages/Login/Login.jsx";
 import "./styles.css";
 import "./card-polish.css";
 

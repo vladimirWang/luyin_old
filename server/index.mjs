@@ -105,20 +105,21 @@ const app = express();
 let wecomTokenCache = { value: "", expiresAt: 0 };
 
 function wecomConfig() {
-  const WECOM_CORP_ID = process.env.WECOM_CORP_ID
-  const WECOM_APP_SECRET = process.env.WECOM_APP_SECRET
-  const WECOM_AGENT_ID = process.env.WECOM_AGENT_ID
+  const WECOM_CORP_ID = process.env.WECOM_CORP_ID;
+  const WECOM_APP_SECRET = process.env.WECOM_APP_SECRET;
+  const WECOM_AGENT_ID = process.env.WECOM_AGENT_ID;
+  const WECOM_REDIRECT_URI = process.env.WECOM_REDIRECT_URI;
   return {
     appid: WECOM_CORP_ID || "",
     agentid: WECOM_AGENT_ID || "",
     corpSecret: WECOM_APP_SECRET || "",
-    redirectUri: 'http://tluyin.hyp-arch.com:7000/#/home'
+    redirectUri: String(WECOM_REDIRECT_URI || "https://tluyin.hyp-arch.com:7000/").trim(),
   };
 }
 
 function hasWecomConfig() {
   const config = wecomConfig();
-  return Boolean(config.agentid && config.corpSecret);
+  return Boolean(config.appid && config.agentid && config.corpSecret && config.redirectUri);
 }
 
 function userSafeErrorMessage(error, fallback = "操作失败，请稍后重试。") {

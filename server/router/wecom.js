@@ -8,14 +8,26 @@ export function configure(deps) {
   dependencies = deps;
 }
 
+function normalizeRedirectUri(value) {
+  try {
+    const url = new URL(String(value || "").trim());
+    if (url.protocol !== "https:") return "";
+    url.hash = "";
+    return url.toString();
+  } catch {
+    return "";
+  }
+}
+
 router.get("/login-config", (request, response) => {
   const { wecomConfig } = dependencies;
   const config = wecomConfig();
+  const redirectUri = normalizeRedirectUri(config.redirectUri);
   response.json({
-    configured: Boolean(config.appid && config.agentid && config.corpSecret),
+    configured: Boolean(config.appid && config.agentid && config.corpSecret && redirectUri),
     appid: config.appid || "",
     agentid: config.agentid || "",
-    redirectUri: config.redirectUri
+    redirectUri,
   });
 });
 
@@ -27,7 +39,11 @@ router.get("/oauth-url", (request, response) => {
     return;
   }
 
-  const redirect = String(request.query.redirect || `${request.protocol}://${request.get("host")}/`);
+  const redirect = normalizeRedirectUri(config.redirectUri || request.query.redirect);
+  if (!redirect) {
+    response.status(500).json({ configured: false, error: "企业微信回调地址必须是无 # 片段的 HTTPS URL" });
+    return;
+  }
   const url =
     `https://open.weixin.qq.com/connect/oauth2/authorize?appid=${encodeURIComponent(config.appid)}` +
     `&redirect_uri=${encodeURIComponent(redirect)}` +
