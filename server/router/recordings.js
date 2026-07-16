@@ -150,7 +150,8 @@ router.get("/", async (request, response) => {
         .map((item) => item.recording)
     : folderFiltered;
 
-  schedulePendingLocalTranscriptionSweep("recordings-list");
+  // 改为定时扫描
+  // schedulePendingLocalTranscriptionSweep("recordings-list");
   response.json({ recordings: filtered });
 });
 
