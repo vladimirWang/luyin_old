@@ -18,14 +18,14 @@ export function RecorderView({ active, activeView, createUploadCard, uploadRecor
   return (
     <section className="screen recorder-screen" aria-label="录音" style={active ? undefined : { display: "none" }}>
       <div className="zustand-user-query">
-        <button
+        {/* <button
           className="zustand-user-query-button"
           type="button"
           onClick={() => setQueriedUser(useWecomAuthStore.getState().user || {})}
         >
           <UserRound size={16} />
           查询 Zustand 用户
-        </button>
+        </button> */}
         {queriedUser ? (
           <div className="zustand-user-result" role="status">
             <button type="button" aria-label="关闭用户信息" onClick={() => setQueriedUser(null)}>
