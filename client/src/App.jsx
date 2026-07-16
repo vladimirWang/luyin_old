@@ -114,7 +114,7 @@ import {
 import {loadImageSource, compressAvatarImage} from './utils/image.js'
 import {useUploadManager} from './hooks/useUploadManager.js'
 import { useWecomAuthStore } from './stores/useWecomAuthStore.js'
-
+import {QA_ACTIVE_MESSAGE_KEY} from './constant.js'
 const cardColors = ["coral", "indigo", "violet", "teal", "clay", "ink"];
 
 const VIEW_ROUTES = {

@@ -17,14 +17,33 @@ function createOAuthState() {
   return crypto.randomUUID?.() || `${Date.now()}-${Math.random().toString(36).slice(2)}`;
 }
 
-function getCallbackParams() {
+function getCallbackParams(fallbackSearch = "", fallbackHash = "") {
   const searchParams = new URLSearchParams(window.location.search);
   if (searchParams.has("code") || searchParams.has("state")) return searchParams;
 
   const hashQueryIndex = window.location.hash.indexOf("?");
-  return hashQueryIndex >= 0
-    ? new URLSearchParams(window.location.hash.slice(hashQueryIndex + 1))
+  if (hashQueryIndex >= 0) {
+    const hashParams = new URLSearchParams(window.location.hash.slice(hashQueryIndex + 1));
+    if (hashParams.has("code") || hashParams.has("state")) return hashParams;
+  }
+
+  const fallbackParams = new URLSearchParams(fallbackSearch);
+  if (fallbackParams.has("code") || fallbackParams.has("state")) return fallbackParams;
+
+  const fallbackHashQueryIndex = fallbackHash.indexOf("?");
+  return fallbackHashQueryIndex >= 0
+    ? new URLSearchParams(fallbackHash.slice(fallbackHashQueryIndex + 1))
     : searchParams;
+}
+
+function returnPathWithoutOAuthParams(locationLike) {
+  const pathname = String(locationLike?.pathname || "");
+  const params = new URLSearchParams(locationLike?.search || "");
+  params.delete("code");
+  params.delete("state");
+  const search = params.toString();
+  const hash = String(locationLike?.hash || "").split("?")[0];
+  return `${pathname}${search ? `?${search}` : ""}${hash}`;
 }
 
 function errorMessage(error, fallback = "企业微信登录失败，请稍后重试") {
@@ -38,14 +57,15 @@ function isWecomBrowser() {
 
 function requestEmbeddedLoginUrl() {
   if (embeddedLoginRequest) return embeddedLoginRequest;
-  if (window.sessionStorage.getItem(AUTO_LOGIN_STARTED_KEY)) {
-    return Promise.reject(new Error("企业微信自动登录未完成，请刷新页面重试"));
+  const previousAttempts = Number(window.sessionStorage.getItem(AUTO_LOGIN_STARTED_KEY) || 0);
+  if (previousAttempts >= 2) {
+    return Promise.reject(new Error("未能获得企业微信授权码，请确认应用可信域名和回调地址配置"));
   }
 
   const state = createOAuthState();
   const redirectUri = `${window.location.origin}${window.location.pathname}`;
   window.sessionStorage.setItem(OAUTH_STATE_KEY, state);
-  window.sessionStorage.setItem(AUTO_LOGIN_STARTED_KEY, "1");
+  window.sessionStorage.setItem(AUTO_LOGIN_STARTED_KEY, String(previousAttempts + 1));
   embeddedLoginRequest = api(
     `/api/wecom/oauth-url?redirect=${encodeURIComponent(redirectUri)}&state=${encodeURIComponent(state)}`,
   );
@@ -196,9 +216,9 @@ export default function WeComLogin() {
       }
     }
 
-    const callbackParams = getCallbackParams();
+    const callbackParams = getCallbackParams(location.state?.from?.search, location.state?.from?.hash);
     const callbackCode = callbackParams.get("code");
-    const returnPath = `${location.state?.from?.pathname || ""}${location.state?.from?.search || ""}`;
+    const returnPath = returnPathWithoutOAuthParams(location.state?.from);
     if (returnPath && !returnPath.startsWith("/login")) {
       window.sessionStorage.setItem(LOGIN_RETURN_TO_KEY, returnPath);
     }

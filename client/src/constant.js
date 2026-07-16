@@ -1,0 +1,1 @@
+export const QA_ACTIVE_MESSAGE_KEY = "wecomRecorderActiveQaMessage";
