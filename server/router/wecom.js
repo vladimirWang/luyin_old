@@ -44,17 +44,19 @@ router.get("/oauth-url", (request, response) => {
     response.status(500).json({ configured: false, error: "企业微信回调地址必须是无 # 片段的 HTTPS URL" });
     return;
   }
+  const requestedState = String(request.query.state || "").trim();
+  const state = /^[A-Za-z0-9._~-]{8,200}$/.test(requestedState) ? requestedState : "wecom_recorder";
   const url =
     `https://open.weixin.qq.com/connect/oauth2/authorize?appid=${encodeURIComponent(config.appid)}` +
     `&redirect_uri=${encodeURIComponent(redirect)}` +
-    "&response_type=code&scope=snsapi_base&state=wecom_recorder" +
+    `&response_type=code&scope=snsapi_base&state=${encodeURIComponent(state)}` +
     (config.agentid ? `&agentid=${encodeURIComponent(config.agentid)}` : "") +
     "#wechat_redirect";
   response.json({ configured: true, url });
 });
 
 router.get("/me", async (request, response, next) => {
-  logger.info("request /wecom/me", {message: `code: ${request.query.code}`})
+  logger.info("request /wecom/me", { message: "start" });
   const { hasWecomConfig } = dependencies;
   try {
     const code = String(request.query.code || "").trim();

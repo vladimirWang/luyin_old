@@ -96,7 +96,6 @@ import {
   isTencentMeetingWaitingTranscript,
   getClientId,
   getStoredAuth,
-  saveStoredAuth,
   clearStoredAuth,
   readStoredJson,
   getLocalProfile,
@@ -113,6 +112,7 @@ import {
 } from './utils/index.js'
 import {loadImageSource, compressAvatarImage} from './utils/image.js'
 import {useUploadManager} from './hooks/useUploadManager.js'
+import { useWecomAuthStore } from './stores/useWecomAuthStore.js'
 
 const cardColors = ["coral", "indigo", "violet", "teal", "clay", "ink"];
 
@@ -148,24 +148,6 @@ function mediaRequestUrl(url, version = "") {
 
 function isWecomWebView() {
   return /wxwork|wecom|micromessenger/i.test(navigator.userAgent);
-}
-
-function readWecomNameHintFromUrl() {
-  const params = new URLSearchParams(window.location.search);
-  return [
-    params.get("wecomName"),
-    params.get("wwName"),
-    params.get("userName"),
-    params.get("user_name"),
-    params.get("realName"),
-    params.get("realname"),
-    params.get("memberName"),
-    params.get("wxworkName"),
-    params.get("nickname"),
-    params.get("name"),
-  ]
-    .map((value) => String(value || "").trim())
-    .find(Boolean);
 }
 
 function normalizeDailyBriefTitle(value = "") {
@@ -849,47 +831,14 @@ function ShareSheet({ share, onCopy, onClose }) {
   );
 }
 
-function SettingsDrawer({ open, profile, auth, setProfile, onAccountEnter, onAccountLogout, onClose }) {
+function SettingsDrawer({ open, profile, wecomUser, setProfile, onLogout, onClose }) {
   const language = profile.language || "中文";
-  const detectedName = String(profile.wecomName || "").trim();
-  const loggedIn = Boolean(auth?.account?.username);
-  const loggedInName = String(auth?.account?.username || auth?.profile?.username || profile.username || "").trim();
   const avatarInputRef = useRef(null);
   const [avatarBusy, setAvatarBusy] = useState(false);
-  const [accountName, setAccountName] = useState(auth?.account?.username || profile.username || "");
-  const [accountPassword, setAccountPassword] = useState("");
-  const [accountMode, setAccountMode] = useState("register");
-  const [accountBusy, setAccountBusy] = useState(false);
-  const accountDisplayName = loggedIn ? loggedInName || accountName.trim() : "";
-  const displayName = loggedIn
-    ? accountDisplayName || detectedName || String(profile.name || "").trim() || uiText(language, "未设置姓名", "Name not set")
-    : uiText(language, "未登录", "Signed out");
-  const displaySubline = loggedIn
-    ? avatarBusy
-      ? uiText(language, "正在压缩头像...", "Compressing avatar...")
-      : profile.company || uiText(language, "企业微信", "WeCom")
-    : uiText(language, "登录账号后同步个人资料", "Sign in to sync profile");
-
-  useEffect(() => {
-    if (auth?.account?.username) setAccountName(auth.account.username);
-    else if (profile.username) setAccountName(profile.username);
-    else setAccountName("");
-  }, [auth?.account?.username, profile.username]);
-
-  async function submitAccount() {
-    const username = accountName.trim();
-    const password = accountPassword;
-    if (loggedIn || !username || !password || accountBusy) return;
-    setAccountBusy(true);
-    try {
-      await onAccountEnter?.({ username, password, mode: accountMode });
-      setAccountPassword("");
-    } catch (error) {
-      window.alert(error instanceof Error ? error.message : uiText(language, accountMode === "login" ? "登录失败" : "注册账号失败", "Account failed"));
-    } finally {
-      setAccountBusy(false);
-    }
-  }
+  const displayName = String(wecomUser?.name || profile.wecomName || profile.name || "").trim() || uiText(language, "未设置姓名", "Name not set");
+  const displaySubline = avatarBusy
+    ? uiText(language, "正在压缩头像...", "Compressing avatar...")
+    : wecomUser?.position || profile.department || profile.company || uiText(language, "企业微信", "WeCom");
 
   async function handleAvatarChange(event) {
     event.preventDefault?.();
@@ -926,7 +875,7 @@ function SettingsDrawer({ open, profile, auth, setProfile, onAccountEnter, onAcc
   return (
     <div className={open ? "drawer-layer open" : "drawer-layer"} aria-hidden={!open}>
       <button className="drawer-scrim" type="button" onClick={onClose} aria-label={uiText(language, "关闭设置遮罩", "Close settings")} tabIndex={open ? 0 : -1} />
-      <aside className={loggedIn ? "settings-drawer settings-drawer-signed-in" : "settings-drawer"} inert={open ? undefined : true}>
+      <aside className="settings-drawer settings-drawer-signed-in" inert={open ? undefined : true}>
         <header>
           <div>
             <p className="eyebrow">Settings</p>
@@ -957,58 +906,11 @@ function SettingsDrawer({ open, profile, auth, setProfile, onAccountEnter, onAcc
           </div>
         </div>
 
-        {loggedIn ? (
-          <div className="settings-logout-footer">
-            <button className="account-logout-button" type="button" onClick={onAccountLogout}>
-              {uiText(language, "退出登录", "Sign out")}
-            </button>
-          </div>
-        ) : (
-          <section className="account-card" aria-label={uiText(language, "账号", "Account")}>
-            <div className="account-card-header">
-              <strong>{uiText(language, "账号管理", "Account")}</strong>
-            </div>
-            <div className="account-tabs" role="tablist" aria-label={uiText(language, "账号操作", "Account action")}>
-              <button className={accountMode === "register" ? "active" : ""} type="button" onClick={() => setAccountMode("register")}>
-                {uiText(language, "注册账号", "Register")}
-              </button>
-              <button className={accountMode === "login" ? "active" : ""} type="button" onClick={() => setAccountMode("login")}>
-                {uiText(language, "登录账号", "Login")}
-              </button>
-            </div>
-            <div className="account-form">
-              <label>
-                {uiText(language, accountMode === "login" ? "账号" : "注册名", "Account name")}
-                <input value={accountName} autoComplete="username" onChange={(event) => setAccountName(event.target.value)} />
-              </label>
-              <label>
-                {uiText(language, "密码", "Password")}
-                <input
-                  value={accountPassword}
-                  type="password"
-                  autoComplete={accountMode === "login" ? "current-password" : "new-password"}
-                  onChange={(event) => setAccountPassword(event.target.value)}
-                />
-              </label>
-              <div className="account-actions">
-                <button type="button" onClick={submitAccount} disabled={accountBusy}>
-                  {accountBusy
-                    ? uiText(language, accountMode === "login" ? "登录中" : "注册中", "Working")
-                    : uiText(language, accountMode === "login" ? "登录进入" : "注册并进入", accountMode === "login" ? "Login" : "Register")}
-                </button>
-              </div>
-              <p className="account-note">
-                {uiText(
-                  language,
-                  accountMode === "login"
-                    ? "登录后会同步这个账号下的录音、问答和搜索记录。"
-                    : "每个注册账号的录音、问答、搜索记录独立保存；共享录音可查看，基于录音的问答只属于当前账号。",
-                  "Each account keeps recordings, Q&A, and search history separate.",
-                )}
-              </p>
-            </div>
-          </section>
-        )}
+        <div className="settings-logout-footer">
+          <button className="account-logout-button" type="button" onClick={onLogout}>
+            {uiText(language, "退出企业微信登录", "Sign out of WeCom")}
+          </button>
+        </div>
       </aside>
     </div>
   );
@@ -1037,6 +939,8 @@ function BottomNav({ activeView, onNavigate, language, hidden = false }) {
 }
 
 export default function App() {
+  const wecomUser = useWecomAuthStore((state) => state.user);
+  const clearWecomUser = useWecomAuthStore((state) => state.clearUser);
   const [activeView, setActiveView] = useState("record");
   const [recordings, setRecordings] = useState([]);
   const [folders, setFolders] = useState([]);
@@ -1044,7 +948,6 @@ export default function App() {
   const [selectedFolderId, setSelectedFolderId] = useState("all");
   const [selectedId, setSelectedId] = useState("");
   const [profile, setProfile] = useState({});
-  const [auth, setAuth] = useState(() => getStoredAuth());
   const [loading, setLoading] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [shareSheet, setShareSheet] = useState(null);
@@ -1188,72 +1091,6 @@ export default function App() {
         if (Object.keys(normalizedProfile).length > 0) setProfile(normalizedProfile);
       });
 
-    const applyWecomUser = (user) => {
-      if (!user?.name) return;
-      setProfile((current) => {
-        const accountName = getAccountDisplayName(current);
-        const next = {
-          ...current,
-          name: accountName || user.name,
-          username: accountName || current.username || "",
-          wecomName: user.name,
-          wecomUserId: user.userId || user.openUserId || current.wecomUserId || "",
-          wecomConfigured: true,
-          department: user.department || current.department || "",
-          company: current.company || "企业微信",
-        };
-        saveLocalProfile(next);
-        return next;
-      });
-    };
-
-    const nameHint = readWecomNameHintFromUrl();
-    if (nameHint) {
-      applyWecomUser({ name: nameHint });
-    }
-
-    const url = new URL(window.location.href);
-    const code = url.searchParams.get("code");
-    if (code) {
-      api(`/api/wecom/me?code=${encodeURIComponent(code)}`)
-        .then((payload) => {
-          setProfile((current) => {
-            const next = { ...current, wecomConfigured: payload.configured !== false };
-            saveLocalProfile(next);
-            return next;
-          });
-          applyWecomUser(payload.user);
-          window.sessionStorage.removeItem("wecomOAuthTried");
-        })
-        .catch(() => {
-          setProfile((current) => {
-            const next = { ...current, wecomConfigured: false };
-            saveLocalProfile(next);
-            return next;
-          });
-        });
-    } else if (isWecomWebView() && !getLocalProfile().wecomName && !window.sessionStorage.getItem("wecomOAuthTried")) {
-      api(`/api/wecom/oauth-url?redirect=${encodeURIComponent(window.location.href)}`)
-        .then((payload) => {
-          if (payload.configured && payload.url) {
-            window.sessionStorage.setItem("wecomOAuthTried", "1");
-            window.location.replace(payload.url);
-          } else {
-            setProfile((current) => {
-              const next = { ...current, wecomConfigured: false };
-              saveLocalProfile(next);
-              return next;
-            });
-          }
-        })
-        .catch(() => {
-          setProfile((current) => {
-            const next = { ...current, wecomConfigured: false };
-            saveLocalProfile(next);
-            return next;
-          });
-        });
-    }
   }, []);
 
   useEffect(() => {
@@ -1833,51 +1670,9 @@ export default function App() {
     runSmoothDelete(recording, { permanent: true }).catch(() => {});
   }
 
-  function applyAuthPayload(payload, message) {
-    const accountUsername = String(payload.account?.username || payload.profile?.username || "").trim();
-    const nextAuth = {
-      token: payload.token,
-      expiresAt: payload.expiresAt,
-      account: payload.account,
-      profile: payload.profile,
-    };
-    saveStoredAuth(nextAuth);
-    setAuth(nextAuth);
-    const nextProfile = {
-      ...profile,
-      ...(payload.profile || {}),
-      accountLoggedIn: true,
-      name: accountUsername || payload.profile?.name || profile.name || "",
-      username: accountUsername,
-      clientId: payload.account?.clientId || payload.profile?.clientId || getClientId(),
-    };
-    setProfile(nextProfile);
-    saveLocalProfile(nextProfile);
-    window.localStorage.removeItem(QA_ACTIVE_MESSAGE_KEY);
-    setSelectedId("");
-    showToast(message);
-    refreshFolders().catch(() => {});
-    refreshRecordings("", selectedFolderId, { silent: true }).catch(() => {});
-  }
-
-  async function enterAccount({ username, password, mode = "register" }) {
-    const isLogin = mode === "login";
-    const accountProfile = {
-      ...profile,
-      name: username,
-      username,
-    };
-    const payload = await api(isLogin ? "/api/auth/login" : "/api/auth/register", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ username, password, profile: accountProfile, mergeLocal: !isLogin }),
-    });
-    applyAuthPayload(payload, isLogin ? "已登录账号，数据已同步" : "账号已注册，数据已同步");
-  }
-
-  function logoutAccount() {
+  function logoutWecom() {
+    clearWecomUser();
     clearStoredAuth();
-    setAuth(null);
     window.localStorage.removeItem(QA_ACTIVE_MESSAGE_KEY);
     window.localStorage.removeItem(DAILY_BRIEF_ACTIVE_KEY);
     const clientId = getClientId();
@@ -1887,7 +1682,6 @@ export default function App() {
       clientId,
       language: profile.language || "中文",
       recordsTitle: profile.recordsTitle || "我的录音",
-      accountLoggedIn: false,
       name: "",
       username: "",
       avatarUrl: "",
@@ -1898,9 +1692,7 @@ export default function App() {
     setProfile(nextProfile);
     saveLocalProfile(nextProfile);
     setSelectedId("");
-    showToast("已退出登录");
-    refreshFolders().catch(() => {});
-    refreshRecordings("", selectedFolderId, { silent: true }).catch(() => {});
+    showToast("已退出企业微信登录");
   }
 
   async function saveProfile() {
@@ -2015,11 +1807,10 @@ export default function App() {
       <SettingsDrawer
         open={settingsOpen}
         profile={profile}
-        auth={auth}
+        wecomUser={wecomUser}
         setProfile={setProfile}
         onSave={saveProfile}
-        onAccountEnter={enterAccount}
-        onAccountLogout={logoutAccount}
+        onLogout={logoutWecom}
         onClose={() => {
           saveProfile().catch(() => {});
           setSettingsOpen(false);

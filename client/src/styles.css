@@ -106,10 +106,74 @@ button {
 }
 
 .recorder-screen {
+  position: relative;
   display: grid;
   grid-template-rows: minmax(190px, 36%) auto auto minmax(160px, 1fr);
   align-items: center;
   padding-top: max(28px, env(safe-area-inset-top));
+}
+
+.zustand-user-query {
+  position: absolute;
+  z-index: 5;
+  top: max(16px, env(safe-area-inset-top));
+  right: 16px;
+  display: grid;
+  justify-items: end;
+  gap: 8px;
+}
+
+.zustand-user-query-button {
+  display: inline-flex;
+  min-height: 36px;
+  align-items: center;
+  gap: 6px;
+  padding: 0 12px;
+  border: 1px solid rgba(7, 168, 84, 0.18);
+  border-radius: 999px;
+  color: #078f49;
+  background: rgba(255, 255, 255, 0.92);
+  box-shadow: 0 8px 22px rgba(25, 28, 33, 0.08);
+  font-size: 12px;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.zustand-user-result {
+  position: relative;
+  width: min(330px, calc(100vw - 32px));
+  max-height: 42svh;
+  padding: 16px;
+  overflow: auto;
+  border: 1px solid rgba(130, 138, 154, 0.16);
+  border-radius: 14px;
+  color: #263247;
+  background: rgba(255, 255, 255, 0.98);
+  box-shadow: 0 18px 44px rgba(25, 28, 33, 0.15);
+}
+
+.zustand-user-result > button {
+  position: sticky;
+  top: 0;
+  float: right;
+  display: grid;
+  width: 28px;
+  height: 28px;
+  place-items: center;
+  border: 0;
+  border-radius: 50%;
+  color: #6b7280;
+  background: #f1f3f6;
+  cursor: pointer;
+}
+
+.zustand-user-result pre {
+  margin: 0;
+  padding-right: 30px;
+  overflow-wrap: anywhere;
+  white-space: pre-wrap;
+  font: 11px/1.55 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  text-align: left;
 }
 
 .wave-stage {

@@ -4,7 +4,8 @@ import { HashRouter, Route, Routes } from "react-router-dom";
 import App from "./App.jsx";
 import User from "./pages/User/User.jsx";
 import WeComLogin from "./pages/WeComLogin/WeComLogin.jsx";
-// import Login from "./pages/Login/Login.jsx";
+import NotFound from "./pages/NotFound/NotFound.jsx";
+import ProtectedRoute from "./routes/ProtectedRoute.jsx";
 import "./styles.css";
 import "./card-polish.css";
 
@@ -27,8 +28,11 @@ createRoot(document.getElementById("root")).render(
     <HashRouter>
       <Routes>
         <Route path="/login" element={<WeComLogin />} />
-        <Route path="/user" element={<User />} />
-        <Route path="*" element={<App />} />
+        <Route element={<ProtectedRoute />}>
+          <Route path="/" element={<App />} />
+          <Route path="/user" element={<User />} />
+          <Route path="*" element={<NotFound />} />
+        </Route>
       </Routes>
     </HashRouter>
   </React.StrictMode>,

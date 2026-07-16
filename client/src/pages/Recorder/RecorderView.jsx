@@ -1,9 +1,12 @@
-import { Mic } from "lucide-react";
+import { useState } from "react";
+import { Mic, UserRound, X } from "lucide-react";
 import { formatDuration } from "../../utils/index.js";
+import { useWecomAuthStore } from "../../stores/useWecomAuthStore.js";
 import { WaveCanvas } from "./WaveCanvas.jsx";
 import { useRecorder } from "./useRecorder.js";
 
 export function RecorderView({ active, activeView, createUploadCard, uploadRecordingSegments, onRecordingCreated }) {
+  const [queriedUser, setQueriedUser] = useState(null);
   const { elapsedMs, isRecording, level, recordingError, toggleRecording } = useRecorder({
     activeView,
     createUploadCard,
@@ -14,6 +17,24 @@ export function RecorderView({ active, activeView, createUploadCard, uploadRecor
 
   return (
     <section className="screen recorder-screen" aria-label="录音" style={active ? undefined : { display: "none" }}>
+      <div className="zustand-user-query">
+        <button
+          className="zustand-user-query-button"
+          type="button"
+          onClick={() => setQueriedUser(useWecomAuthStore.getState().user || {})}
+        >
+          <UserRound size={16} />
+          查询 Zustand 用户
+        </button>
+        {queriedUser ? (
+          <div className="zustand-user-result" role="status">
+            <button type="button" aria-label="关闭用户信息" onClick={() => setQueriedUser(null)}>
+              <X size={15} />
+            </button>
+            <pre>{JSON.stringify(queriedUser, null, 2)}</pre>
+          </div>
+        ) : null}
+      </div>
       <div className="wave-stage">
         {active ? <WaveCanvas active={isRecording} level={level} /> : null}
       </div>

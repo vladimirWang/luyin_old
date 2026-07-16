@@ -1,10 +1,15 @@
 import { useEffect, useRef, useState } from "react";
 import { createWWLoginPanel } from "@wecom/jssdk";
-import { useNavigate } from "react-router-dom";
-import { api, saveLocalProfile } from "../../utils/index.js";
+import { useLocation, useNavigate } from "react-router-dom";
+import { api, clearStoredAuth, saveLocalProfile } from "../../utils/index.js";
+import { hasWecomIdentity, useWecomAuthStore } from "../../stores/useWecomAuthStore.js";
 import "./WeComLogin.css";
 
 const OAUTH_STATE_KEY = "wecomLoginOAuthState";
+const AUTO_LOGIN_STARTED_KEY = "wecomAutoLoginStarted";
+let embeddedLoginRequest = null;
+let codeExchangeRequest = null;
+let codeExchangeValue = "";
 
 function createOAuthState() {
   return crypto.randomUUID?.() || `${Date.now()}-${Math.random().toString(36).slice(2)}`;
@@ -25,6 +30,26 @@ function errorMessage(error, fallback = "企业微信登录失败，请稍后重
   return String(error?.errMsg || error?.message || fallback);
 }
 
+function isWecomBrowser() {
+  return /wxwork/i.test(window.navigator.userAgent);
+}
+
+function requestEmbeddedLoginUrl() {
+  if (embeddedLoginRequest) return embeddedLoginRequest;
+  if (window.sessionStorage.getItem(AUTO_LOGIN_STARTED_KEY)) {
+    return Promise.reject(new Error("企业微信自动登录未完成，请刷新页面重试"));
+  }
+
+  const state = createOAuthState();
+  const redirectUri = `${window.location.origin}${window.location.pathname}`;
+  window.sessionStorage.setItem(OAUTH_STATE_KEY, state);
+  window.sessionStorage.setItem(AUTO_LOGIN_STARTED_KEY, "1");
+  embeddedLoginRequest = api(
+    `/api/wecom/oauth-url?redirect=${encodeURIComponent(redirectUri)}&state=${encodeURIComponent(state)}`,
+  );
+  return embeddedLoginRequest;
+}
+
 async function exchangeCode(code) {
   const payload = await api(`/api/wecom/me?code=${encodeURIComponent(code)}`);
   if (!payload.configured) throw new Error("服务端尚未配置企业微信应用 Secret");
@@ -33,23 +58,40 @@ async function exchangeCode(code) {
   const user = payload.user;
   const profilePayload = {
     name: user.name || user.userId,
+    username: "",
+    accountLoggedIn: false,
     company: "企业微信",
     department: user.department || "",
     wecomName: user.name || "",
     wecomUserId: user.userId || user.openUserId || "",
     wecomConfigured: true,
   };
+  clearStoredAuth();
   const profileResponse = await api("/api/profile", {
     method: "PUT",
     body: JSON.stringify(profilePayload),
   });
-  const profile = { ...profilePayload, ...(profileResponse.profile || {}) };
+  const profile = { ...(profileResponse.profile || {}), ...profilePayload };
   saveLocalProfile(profile);
-  return profile;
+  return { profile, user };
+}
+
+function exchangeCodeOnce(code) {
+  if (codeExchangeRequest && codeExchangeValue === code) return codeExchangeRequest;
+  codeExchangeValue = code;
+  codeExchangeRequest = exchangeCode(code).catch((error) => {
+    codeExchangeRequest = null;
+    codeExchangeValue = "";
+    throw error;
+  });
+  return codeExchangeRequest;
 }
 
 export default function WeComLogin() {
   const navigate = useNavigate();
+  const location = useLocation();
+  const storedUser = useWecomAuthStore((state) => state.user);
+  const setUser = useWecomAuthStore((state) => state.setUser);
   const panelRef = useRef(null);
   const loginStartedRef = useRef(false);
   const [status, setStatus] = useState("loading");
@@ -64,15 +106,37 @@ export default function WeComLogin() {
       setError("");
       setStatus("authorizing");
       try {
-        await exchangeCode(code);
+        const { user } = await exchangeCodeOnce(code);
         if (cancelled) return;
+        setUser(user);
         window.sessionStorage.removeItem(OAUTH_STATE_KEY);
+        window.sessionStorage.removeItem(AUTO_LOGIN_STARTED_KEY);
         window.history.replaceState(null, "", `${window.location.pathname}${window.location.hash.split("?")[0]}`);
-        navigate("/user", { replace: true });
+        const requestedPath = location.state?.from?.pathname;
+        navigate(requestedPath && requestedPath !== "/login" ? requestedPath : "/", { replace: true });
       } catch (requestError) {
         if (cancelled) return;
         loginStartedRef.current = false;
         setError(errorMessage(requestError));
+        setStatus("error");
+      }
+    }
+
+    async function startEmbeddedLogin() {
+      try {
+        setStatus("authorizing");
+        const payload = await requestEmbeddedLoginUrl();
+        if (!payload.configured || !payload.url) {
+          throw new Error("服务端尚未完整配置企业微信应用");
+        }
+        if (cancelled) return;
+        window.location.replace(payload.url);
+      } catch (requestError) {
+        if (cancelled) return;
+        embeddedLoginRequest = null;
+        window.sessionStorage.removeItem(AUTO_LOGIN_STARTED_KEY);
+        window.sessionStorage.removeItem(OAUTH_STATE_KEY);
+        setError(errorMessage(requestError, "企业微信自动登录失败"));
         setStatus("error");
       }
     }
@@ -130,7 +194,9 @@ export default function WeComLogin() {
     const callbackParams = getCallbackParams();
     const callbackCode = callbackParams.get("code");
     console.log("call back code: ", callbackCode)
-    if (callbackCode) {
+    if (hasWecomIdentity(storedUser)) {
+      navigate("/", { replace: true });
+    } else if (callbackCode) {
       const returnedState = callbackParams.get("state") || "";
       const expectedState = window.sessionStorage.getItem(OAUTH_STATE_KEY) || "";
       if (!expectedState || returnedState !== expectedState) {
@@ -139,15 +205,18 @@ export default function WeComLogin() {
       } else {
         finishLogin(callbackCode);
       }
+    } else if (isWecomBrowser()) {
+      startEmbeddedLogin();
     } else {
       mountLoginPanel();
     }
     return () => {
       cancelled = true;
+      loginStartedRef.current = false;
       panelRef.current?.unmount();
       panelRef.current = null;
     };
-  }, [navigate]);
+  }, [location.state, navigate, setUser, storedUser]);
 
   return (
     <main className="wecom-login-page">

@@ -78,13 +78,11 @@ export async function getWecomUserByCode(code) {
   logger.info("call getWecomUserByCode: ", { message: "start get access token" });
   const token = await getWecomAccessToken();
   if (!token || !code) return null;
-  console.log("call getWecomUserByCode: ", `token: ${token}, code: ${code}`);
   // 使用企业微信 OAuth code 获取当前登录用户的 UserId 或 OpenId。
   const identityResponse = await fetch(
     `https://qyapi.weixin.qq.com/cgi-bin/auth/getuserinfo?access_token=${encodeURIComponent(token)}&code=${encodeURIComponent(code)}`,
   );
   const identity = await identityResponse.json();
-  console.log("call getWecomUserByCode success: ", identity);
   if (identity.errcode) throw new Error(identity.errmsg || "企业微信用户身份获取失败");
 
   const userId = identity.UserId || identity.userid || "";
@@ -94,9 +92,9 @@ export async function getWecomUserByCode(code) {
       openUserId: identity.OpenId || identity.open_userid || "",
       name: identity.name || "",
       department: "",
+      departments: [],
     };
   }
-  console.log("call getWecomUserByCode success userId:  ", userId);
   // 使用 UserId 获取企业通讯录中的成员姓名、部门等详细资料。
   const userResponse = await fetch(
     `https://qyapi.weixin.qq.com/cgi-bin/user/get?access_token=${encodeURIComponent(token)}&userid=${encodeURIComponent(userId)}`,
@@ -109,6 +107,17 @@ export async function getWecomUserByCode(code) {
     openUserId: user.open_userid || "",
     name: user.name || user.alias || userId,
     department: Array.isArray(user.department) ? user.department.join(",") : "",
+    departments: Array.isArray(user.department) ? user.department : [],
+    departmentOrder: Array.isArray(user.order) ? user.order : [],
+    avatar: user.avatar || user.thumb_avatar || "",
+    mobile: user.mobile || "",
+    email: user.email || user.biz_mail || "",
+    position: user.position || "",
+    externalPosition: user.external_position || "",
+    gender: user.gender || "",
+    status: user.status || "",
+    qrCode: user.qr_code || "",
+    alias: user.alias || "",
   };
 }
 
