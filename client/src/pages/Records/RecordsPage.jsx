@@ -103,6 +103,7 @@ import {
   getClientName,
   getAccountDisplayName,
   getDetectedWecomName,
+  profileStorageKey,
   showToast,
   dailyBriefMeetingCount,
   api,
@@ -113,7 +114,7 @@ import {loadImageSource, compressAvatarImage} from '../../utils/image.js'
 import { isInWeCom } from '../../utils/wecom.js'
 import {useUploadManager} from '../../hooks/useUploadManager.js'
 import { useWecomAuthStore } from '../../stores/useWecomAuthStore.js'
-import {QA_ACTIVE_MESSAGE_KEY} from '../../constant.js'
+import {QA_ACTIVE_MESSAGE_KEY, DAILY_BRIEF_ACTIVE_KEY, PROFILE_STORAGE_KEY} from '../../constant.js'
 const cardColors = ["coral", "indigo", "violet", "teal", "clay", "ink"];
 
 function getWecomUserId() {

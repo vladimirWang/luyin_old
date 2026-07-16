@@ -423,9 +423,9 @@ button {
   top: calc(100% + 10px);
   right: 0;
   width: max-content;
-  min-width: 132px;
-  max-width: min(210px, calc(100vw - 24px));
-  padding: 10px;
+  min-width: 112px;
+  max-width: min(168px, calc(100vw - 24px));
+  padding: 8px;
   border: 1px solid rgba(130, 138, 154, 0.14);
   border-radius: 20px;
   background: rgba(255, 255, 255, 0.98);
@@ -461,6 +461,7 @@ button {
   width: 100%;
   min-height: 42px;
   align-items: center;
+  justify-content: center;
   gap: 9px;
   margin-top: 7px;
   padding: 0 10px;

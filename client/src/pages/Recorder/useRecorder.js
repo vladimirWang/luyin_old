@@ -16,13 +16,13 @@ import {
   writeRecordingRecoveryQueue,
   writeRecordingSessionManifest,
 } from "../../utils/index.js";
+import { RECORDING_RECOVERY_STORE } from "../../constant.js";
 import { requestMicrophoneStream } from "../../utils/audio.js";
 
 const RECORDING_DATA_SLICE_MS = 60 * 1000;
 const RECORDING_AUTOSAVE_CHUNK_MS = 5 * 60 * 1000;
 const RECORDING_ROLLOVER_MS = 10 * 60 * 1000;
 const RECORDING_WATCHDOG_MS = 5 * 1000;
-const RECORDING_RECOVERY_STORE = "segments";
 
 async function putRecordingRecoverySegment(row) {
   const db = await openRecordingRecoveryDb();

@@ -1,5 +1,24 @@
 import Toast from "antd-mobile/es/components/toast";
 import {displayDateFromDateKey} from './date.js'
+import {
+  AUTH_STORAGE_KEY,
+  PROFILE_STORAGE_KEY,
+  RECORDING_RECOVERY_DB,
+  RECORDING_RECOVERY_STORE,
+  RECORDING_RECOVERY_VERSION,
+  RECORDING_SESSION_QUEUE_STORAGE_KEY,
+  RECORDING_SESSION_STORAGE_KEY,
+} from "../constant.js";
+
+export {
+  AUTH_STORAGE_KEY,
+  PROFILE_STORAGE_KEY,
+  RECORDING_RECOVERY_DB,
+  RECORDING_RECOVERY_STORE,
+  RECORDING_RECOVERY_VERSION,
+  RECORDING_SESSION_QUEUE_STORAGE_KEY,
+  RECORDING_SESSION_STORAGE_KEY,
+} from "../constant.js";
 
 export const cardColors = ["coral", "indigo", "violet", "teal", "clay", "ink"];
 
@@ -73,14 +92,6 @@ export const MOJIBAKE_PATTERN =
   /\u7481\u677f\u7d8d|\u675e\ue100\u5553\u68f0\u52ee\ue74d|\u93c0\u60f0\u6363|\u8930\u66e2|\u6d7c\u6c33|\u7490\u71bb|\u59dd\uff45\u6e6a|\u6fb6\u8fab\u89e6|\u93c2\u56e7\u74e7|\u93c3\u5815\u66b1|\u95ca\u62bd|\u9352\u55d5\u97e9|\u934f\u62bd\u68f4|\u6fb6\u5d85\u57d7|\u6434\u66e2\u5134|\u7035\u8270\u57c5|\u93b4\u6220|\u93bb\u6130\u68f6|\u93c8\u6944|\u9350\u546d|\u7ef1\u3220\u7d29|\u59af\u2033\u7037|\u9422\u71b8\u579a|\u9358\u71b7\u6d1c|\u934f\u62bd\u656d|\u6e1a\u6fc7\u5d41|\u93c1\u7fe0\u7d8b|\u9352\u3086\u67c7|\u934a\u60e7\u609c|\u7ecb\u5b2a\u5bb3|\u93cd\u7a3f\u7e3e|\u9352\u55d9\u5063|\u7f01\u64b9|\u95c2\ue1be\u74df|\u9286|\u951b|\u951f|\ufffd/;
 export const TECHNICAL_ANSWER_PATTERN =
   /DSML|tool_calls|search_transcript_segments|<\s*\|\s*DSML|<\/\s*\|\s*DSML|overall_judgement|final_conclusion|"evidences"\s*:|"analysis"\s*:|"confidence"\s*:|cleanText\(|\{cleanText|point\.(?:conclusion|reason|basis)|Bad control character|JSON parse failed|Cannot POST|<!DOCTYPE html|<html\b|parameter name=|invoke name=|function\s+\w+\s*\(|const\s+\w+\s*=|=>\s*\{|```/i;
-
-export const RECORDING_RECOVERY_DB = "wecomRecorderRecordingRecovery";
-export const RECORDING_RECOVERY_STORE = "segments";
-export const RECORDING_RECOVERY_VERSION = 1;
-export const RECORDING_SESSION_STORAGE_KEY = "wecomRecorderActiveRecordingSession";
-export const RECORDING_SESSION_QUEUE_STORAGE_KEY = "wecomRecorderRecordingRecoveryQueue";
-export const AUTH_STORAGE_KEY = "wecomRecorderAccountAuth";
-export const PROFILE_STORAGE_KEY = "wecomRecorderProfile";
 
 export function isEnglishLanguage(language) {
   return /^en/i.test(String(language || ""));

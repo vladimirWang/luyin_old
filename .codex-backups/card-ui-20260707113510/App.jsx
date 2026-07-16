@@ -48,7 +48,6 @@ const RECORDING_RECOVERY_VERSION = 1;
 const RECORDING_SESSION_STORAGE_KEY = "wecomRecorderActiveRecordingSession";
 const RECORDING_SESSION_QUEUE_STORAGE_KEY = "wecomRecorderRecordingRecoveryQueue";
 const QA_ACTIVE_MESSAGE_KEY = "wecomRecorderActiveQaMessage";
-const DAILY_BRIEF_ACTIVE_KEY = "wecomRecorderActiveDailyBrief";
 const AUTH_STORAGE_KEY = "wecomRecorderAccountAuth";
 const AVATAR_MAX_SOURCE_BYTES = 60 * 1024 * 1024;
 const AVATAR_TARGET_BYTES = 360 * 1024;

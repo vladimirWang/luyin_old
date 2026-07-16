@@ -1,1 +1,9 @@
 export const QA_ACTIVE_MESSAGE_KEY = "wecomRecorderActiveQaMessage";
+export const DAILY_BRIEF_ACTIVE_KEY = "wecomRecorderActiveDailyBrief";
+export const AUTH_STORAGE_KEY = "wecomRecorderAccountAuth";
+export const PROFILE_STORAGE_KEY = "wecomRecorderProfile";
+export const RECORDING_RECOVERY_DB = "wecomRecorderRecordingRecovery";
+export const RECORDING_RECOVERY_STORE = "segments";
+export const RECORDING_RECOVERY_VERSION = 1;
+export const RECORDING_SESSION_STORAGE_KEY = "wecomRecorderActiveRecordingSession";
+export const RECORDING_SESSION_QUEUE_STORAGE_KEY = "wecomRecorderRecordingRecoveryQueue";
