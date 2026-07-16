@@ -51,7 +51,9 @@ import { requestMicrophoneStream, getAudioFileDuration } from '../../utils/audio
 import {DailyMeetingBriefMessage} from './components/DailyMeetingBriefMessage.jsx'
 import {QA_ACTIVE_MESSAGE_KEY} from '../../constant.js'
 
-export function DetailView({ recording, recordings = [], onBack, language, onSelectRecording }) {
+const EMPTY_RECORDINGS = Object.freeze([]);
+
+export function DetailView({ recording, recordings = EMPTY_RECORDINGS, onBack, language, onSelectRecording }) {
   const onToast = showToast;
   const audioRef = useRef(null);
   const audioSourceRef = useRef("");

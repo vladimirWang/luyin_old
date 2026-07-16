@@ -14,6 +14,8 @@ Navigation decisions: the protected workbench uses `/recorder`, `/records`, and 
 
 Routing implementation decisions: `App` is the protected workbench layout and renders child routes with React Router's `Outlet`. Route declarations render dedicated page-level components directly (`/recorder` → `Recorder`, `/records` → `Records`, `/detail` → `Detail`). Do not pass route-name strings into `App`, conditionally render route pages in `App`, or move page-only properties and methods into `App` or a broad context. Keep page-specific state and behavior in the owning route component; only layout behavior genuinely used by `App` belongs there.
 
+Router ownership decisions: `client/src/AppRouter.jsx` owns `BrowserRouter`, route guards, redirects, and all route declarations. Keep `client/src/main.jsx` as the application bootstrap only, and do not move the global router provider into the workbench layout `App`.
+
 Records menu decisions: the avatar dropdown uses content-driven width with mobile viewport bounds instead of a fixed width.
 
 Visual direction: login and not-found screens follow the recording-list reference style—cool gray-blue atmospheric background, oversized heavy black display type, translucent white cards with generous radii, near-black primary actions, coral secondary accents, circular outline-icon controls, and soft low-contrast shadows.
