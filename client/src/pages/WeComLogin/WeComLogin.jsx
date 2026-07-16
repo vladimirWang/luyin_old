@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { createWWLoginPanel } from "@wecom/jssdk";
+import { ShieldCheck } from "lucide-react";
 import { useLocation, useNavigate } from "react-router-dom";
 import { api, clearStoredAuth, saveLocalProfile } from "../../utils/index.js";
 import { hasWecomIdentity, useWecomAuthStore } from "../../stores/useWecomAuthStore.js";
@@ -7,6 +8,7 @@ import "./WeComLogin.css";
 
 const OAUTH_STATE_KEY = "wecomLoginOAuthState";
 const AUTO_LOGIN_STARTED_KEY = "wecomAutoLoginStarted";
+const LOGIN_RETURN_TO_KEY = "wecomLoginReturnTo";
 let embeddedLoginRequest = null;
 let codeExchangeRequest = null;
 let codeExchangeValue = "";
@@ -112,8 +114,11 @@ export default function WeComLogin() {
         window.sessionStorage.removeItem(OAUTH_STATE_KEY);
         window.sessionStorage.removeItem(AUTO_LOGIN_STARTED_KEY);
         window.history.replaceState(null, "", `${window.location.pathname}${window.location.hash.split("?")[0]}`);
-        const requestedPath = location.state?.from?.pathname;
-        navigate(requestedPath && requestedPath !== "/login" ? requestedPath : "/", { replace: true });
+        const statePath = location.state?.from?.pathname || "";
+        const stateSearch = location.state?.from?.search || "";
+        const requestedLocation = window.sessionStorage.getItem(LOGIN_RETURN_TO_KEY) || `${statePath}${stateSearch}`;
+        window.sessionStorage.removeItem(LOGIN_RETURN_TO_KEY);
+        navigate(requestedLocation && !requestedLocation.startsWith("/login") ? requestedLocation : "/recorder", { replace: true });
       } catch (requestError) {
         if (cancelled) return;
         loginStartedRef.current = false;
@@ -193,6 +198,10 @@ export default function WeComLogin() {
 
     const callbackParams = getCallbackParams();
     const callbackCode = callbackParams.get("code");
+    const returnPath = `${location.state?.from?.pathname || ""}${location.state?.from?.search || ""}`;
+    if (returnPath && !returnPath.startsWith("/login")) {
+      window.sessionStorage.setItem(LOGIN_RETURN_TO_KEY, returnPath);
+    }
     console.log("call back code: ", callbackCode)
     if (hasWecomIdentity(storedUser)) {
       navigate("/", { replace: true });
@@ -222,11 +231,14 @@ export default function WeComLogin() {
     <main className="wecom-login-page">
       <section className="wecom-login-card" aria-labelledby="wecom-login-title">
         <header className="wecom-login-header">
-          <div className="wecom-login-logo" aria-hidden="true">企</div>
           <div>
+            <span className="wecom-login-eyebrow">WECOM RECORDER</span>
             <h1 id="wecom-login-title">企业微信登录</h1>
             <p>使用企业成员身份安全登录录音工作台</p>
           </div>
+          <span className="wecom-login-logo" aria-hidden="true">
+            <ShieldCheck size={31} strokeWidth={2.4} />
+          </span>
         </header>
 
         <div className="wecom-login-panel-shell" aria-busy={status === "loading" || status === "authorizing"}>

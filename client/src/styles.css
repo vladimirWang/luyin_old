@@ -341,6 +341,10 @@ button {
   padding-top: 16px;
 }
 
+.records-header > div:first-child {
+  min-width: 0;
+}
+
 .records-screen {
   display: grid;
   grid-template-rows: auto auto auto auto minmax(0, 1fr);
@@ -379,6 +383,97 @@ button {
   display: flex;
   flex: 0 0 auto;
   gap: 8px;
+}
+
+.records-user-menu {
+  position: relative;
+  flex: 0 0 auto;
+}
+
+.records-user-avatar {
+  display: grid;
+  width: 44px;
+  height: 44px;
+  place-items: center;
+  overflow: hidden;
+  border: 2px solid rgba(255, 255, 255, 0.95);
+  border-radius: 50%;
+  color: #ffffff;
+  background: #101116;
+  box-shadow: 0 10px 26px rgba(25, 28, 33, 0.14);
+  font-size: 16px;
+  font-weight: 900;
+  cursor: pointer;
+}
+
+.records-user-avatar img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.records-user-avatar:focus-visible {
+  outline: 3px solid rgba(230, 107, 104, 0.28);
+  outline-offset: 2px;
+}
+
+.records-user-dropdown {
+  position: absolute;
+  z-index: 30;
+  top: calc(100% + 10px);
+  right: 0;
+  width: 210px;
+  padding: 10px;
+  border: 1px solid rgba(130, 138, 154, 0.14);
+  border-radius: 20px;
+  background: rgba(255, 255, 255, 0.98);
+  box-shadow: 0 20px 48px rgba(25, 28, 33, 0.16);
+}
+
+.records-user-summary {
+  display: grid;
+  gap: 3px;
+  padding: 8px 9px 11px;
+  border-bottom: 1px solid rgba(130, 138, 154, 0.12);
+}
+
+.records-user-summary strong,
+.records-user-summary span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.records-user-summary strong {
+  color: #15171c;
+  font-size: 14px;
+}
+
+.records-user-summary span {
+  color: #8a8f99;
+  font-size: 12px;
+}
+
+.records-user-dropdown > button {
+  display: flex;
+  width: 100%;
+  min-height: 42px;
+  align-items: center;
+  gap: 9px;
+  margin-top: 7px;
+  padding: 0 10px;
+  border: 0;
+  border-radius: 13px;
+  color: #555b66;
+  background: #f5f6f8;
+  font-size: 13px;
+  font-weight: 800;
+  cursor: pointer;
+}
+
+.records-user-dropdown > .records-user-logout {
+  color: #df5f61;
+  background: #fff0f1;
 }
 
 .search-bar {

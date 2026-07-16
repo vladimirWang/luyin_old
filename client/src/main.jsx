@@ -1,6 +1,6 @@
 import React from "react";
 import { createRoot } from "react-dom/client";
-import { HashRouter, Route, Routes } from "react-router-dom";
+import { BrowserRouter, Navigate, Route, Routes } from "react-router-dom";
 import App from "./App.jsx";
 import User from "./pages/User/User.jsx";
 import WeComLogin from "./pages/WeComLogin/WeComLogin.jsx";
@@ -8,13 +8,6 @@ import NotFound from "./pages/NotFound/NotFound.jsx";
 import ProtectedRoute from "./routes/ProtectedRoute.jsx";
 import "./styles.css";
 import "./card-polish.css";
-
-// Enterprise WeChat returns OAuth parameters before the URL hash. Ensure the
-// callback is handled by the login route when HashRouter is in use.
-// const oauthCallbackParams = new URLSearchParams(window.location.search);
-// if (oauthCallbackParams.has("code") && !window.location.hash.includes("/login")) {
-//   window.location.hash = "/login";
-// }
 
 const isProd = process.env.NODE_ENV === "prod"
 if (true) {
@@ -25,16 +18,19 @@ if (true) {
 
 createRoot(document.getElementById("root")).render(
   <React.StrictMode>
-    <HashRouter>
+    <BrowserRouter>
       <Routes>
         <Route path="/login" element={<WeComLogin />} />
         <Route element={<ProtectedRoute />}>
-          <Route path="/" element={<App />} />
+          <Route path="/" element={<Navigate to="/recorder" replace />} />
+          <Route path="/recorder" element={<App routeView="record" />} />
+          <Route path="/records" element={<App routeView="records" />} />
+          <Route path="/detail" element={<App routeView="detail" />} />
           <Route path="/user" element={<User />} />
           <Route path="*" element={<NotFound />} />
         </Route>
       </Routes>
-    </HashRouter>
+    </BrowserRouter>
   </React.StrictMode>,
 );
 

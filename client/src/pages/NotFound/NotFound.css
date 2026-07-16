@@ -2,66 +2,160 @@
   min-height: 100svh;
   display: grid;
   place-items: center;
-  padding: 24px;
-  color: #17233d;
-  background: #f5f7fa;
+  padding: 24px 20px;
+  overflow-y: auto;
+  color: #0b0c10;
+  background:
+    linear-gradient(145deg, rgba(255, 246, 247, 0.92) 0%, rgba(247, 248, 252, 0.98) 46%, rgba(239, 242, 252, 0.96) 100%),
+    #f5f6fa;
 }
 
 .not-found-card {
-  width: min(100%, 420px);
-  padding: 42px 28px;
-  border-radius: 22px;
-  background: #fff;
-  box-shadow: 0 18px 50px rgba(28, 49, 79, 0.1);
-  text-align: center;
+  width: min(100%, 540px);
+  padding: 36px;
+  border: 1px solid rgba(255, 255, 255, 0.9);
+  border-radius: 42px;
+  background-color: rgba(255, 255, 255, 0.76);
+  background-image: radial-gradient(circle, rgba(126, 132, 145, 0.07) 1px, transparent 1.2px);
+  background-size: 15px 15px;
+  box-shadow: 0 28px 70px rgba(48, 52, 65, 0.12);
+  text-align: left;
+  backdrop-filter: blur(18px);
+}
+
+.not-found-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 20px;
+}
+
+.not-found-eyebrow {
+  color: #9297a1;
+  font-size: 14px;
+  font-weight: 850;
+  letter-spacing: 0.06em;
+}
+
+.not-found-icon {
+  display: grid;
+  width: 62px;
+  height: 62px;
+  flex: 0 0 auto;
+  place-items: center;
+  border: 1px solid rgba(255, 255, 255, 0.9);
+  border-radius: 50%;
+  color: #777c87;
+  background: rgba(255, 255, 255, 0.92);
+  box-shadow: 0 10px 28px rgba(44, 48, 58, 0.09), inset 0 -2px 0 rgba(218, 220, 227, 0.7);
 }
 
 .not-found-code {
   display: block;
-  color: #07a854;
-  font-size: clamp(64px, 20vw, 96px);
-  font-weight: 800;
-  line-height: 1;
-  letter-spacing: -0.06em;
+  margin-top: 24px;
+  color: #090a0d;
+  font-size: clamp(88px, 24vw, 138px);
+  font-weight: 950;
+  line-height: 0.82;
+  letter-spacing: -0.08em;
 }
 
 .not-found-card h1 {
-  margin: 20px 0 10px;
-  font-size: 25px;
+  margin: 30px 0 10px;
+  color: #090a0d;
+  font-size: clamp(34px, 8vw, 50px);
+  font-weight: 950;
+  line-height: 1.04;
+  letter-spacing: -0.055em;
 }
 
 .not-found-card p {
+  max-width: 370px;
   margin: 0;
-  color: #6b778c;
-  line-height: 1.6;
+  color: #858a94;
+  font-size: 15px;
+  font-weight: 650;
+  line-height: 1.65;
 }
 
 .not-found-actions {
-  display: flex;
-  justify-content: center;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1.35fr);
   gap: 12px;
-  margin-top: 28px;
+  margin-top: 34px;
 }
 
 .not-found-actions button,
 .not-found-actions a {
   display: inline-flex;
-  min-height: 42px;
+  min-height: 66px;
   align-items: center;
   justify-content: center;
-  gap: 7px;
-  padding: 0 16px;
-  border: 1px solid #dfe5ec;
-  border-radius: 999px;
-  color: #536075;
-  background: #fff;
-  font-weight: 650;
+  gap: 9px;
+  padding: 0 18px;
+  border: 0;
+  border-radius: 24px;
+  font-size: 15px;
+  font-weight: 850;
   text-decoration: none;
   cursor: pointer;
 }
 
+.not-found-actions button {
+  color: #f06e70;
+  background: rgba(247, 223, 226, 0.82);
+}
+
 .not-found-actions a {
-  border-color: #07a854;
   color: #fff;
-  background: #07a854;
+  background: #101116;
+  box-shadow: 0 16px 32px rgba(16, 17, 22, 0.16);
+}
+
+.not-found-actions button:focus-visible,
+.not-found-actions a:focus-visible {
+  outline: 3px solid rgba(240, 110, 112, 0.3);
+  outline-offset: 3px;
+}
+
+@media (max-width: 520px) {
+  .not-found-page {
+    align-items: start;
+    padding: 18px 14px 28px;
+  }
+
+  .not-found-card {
+    min-height: calc(100svh - 46px);
+    display: flex;
+    flex-direction: column;
+    padding: 26px 22px;
+    border-radius: 34px;
+  }
+
+  .not-found-icon {
+    width: 54px;
+    height: 54px;
+  }
+
+  .not-found-code {
+    margin-top: clamp(66px, 14svh, 118px);
+    font-size: clamp(96px, 31vw, 126px);
+  }
+
+  .not-found-card h1 {
+    margin-top: 28px;
+    font-size: 42px;
+  }
+
+  .not-found-actions {
+    margin-top: auto;
+    padding-top: 36px;
+  }
+}
+
+@media (max-width: 370px) {
+  .not-found-card { padding-inline: 17px; }
+  .not-found-actions { grid-template-columns: 1fr; }
+  .not-found-actions button,
+  .not-found-actions a { min-height: 58px; }
 }

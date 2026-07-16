@@ -13,6 +13,8 @@ import {
   ChevronUp,
   ChevronDown,
   Mic,
+  LogOut,
+  UserRound,
 } from "lucide-react";
 import { uiText, api } from "../../utils/index.js";
 import { IconButton } from "../../components/IconButton.jsx";
@@ -32,6 +34,8 @@ export function RecordsView({
   deletingRecordIds = [],
   uploadBusy,
   onOpenSettings,
+  user,
+  onLogout,
   onStartRecording,
   createUploadCard,
   updateUploadCard,
@@ -70,7 +74,9 @@ export function RecordsView({
   const [bulkDeleteMode, setBulkDeleteMode] = useState(false);
   const [bulkDeleteSelectedIds, setBulkDeleteSelectedIds] = useState([]);
   const [cardScale, setCardScale] = useState(1);
+  const [userMenuOpen, setUserMenuOpen] = useState(false);
   const pinchRef = useRef({ distance: 0, scale: 1 });
+  const userMenuRef = useRef(null);
 
 
   const uploadInputRef = useRef(null);
@@ -78,6 +84,21 @@ export function RecordsView({
   useEffect(() => {
     setTitleDraft(recordsTitle || "我的录音");
   }, [recordsTitle]);
+
+  useEffect(() => {
+    if (!userMenuOpen) return undefined;
+    function closeUserMenu(event) {
+      if (event.type === "keydown" && event.key !== "Escape") return;
+      if (event.type === "pointerdown" && userMenuRef.current?.contains(event.target)) return;
+      setUserMenuOpen(false);
+    }
+    document.addEventListener("pointerdown", closeUserMenu);
+    document.addEventListener("keydown", closeUserMenu);
+    return () => {
+      document.removeEventListener("pointerdown", closeUserMenu);
+      document.removeEventListener("keydown", closeUserMenu);
+    };
+  }, [userMenuOpen]);
 
   async function submitFolder(event) {
     event.preventDefault();
@@ -336,9 +357,6 @@ export function RecordsView({
           <IconButton label={uiText(language, "刷新", "Refresh")} onClick={onRefresh}>
             <RefreshCw size={23} />
           </IconButton>
-          <IconButton label={uiText(language, "设置", "Settings")} onClick={onOpenSettings}>
-            <Settings size={24} />
-          </IconButton>
           <IconButton
             className={bulkDeleteMode ? "header-delete-button active" : "header-delete-button"}
             label="批量删除"
@@ -347,6 +365,50 @@ export function RecordsView({
           >
             <Trash2 size={22} />
           </IconButton>
+          <div className="records-user-menu" ref={userMenuRef}>
+            <button
+              className="records-user-avatar"
+              type="button"
+              aria-label="打开用户菜单"
+              aria-haspopup="menu"
+              aria-expanded={userMenuOpen}
+              onClick={() => setUserMenuOpen((current) => !current)}
+            >
+              {user?.avatar ? <img src={user.avatar} alt="" /> : user?.name ? <span>{user.name.slice(0, 1)}</span> : <UserRound size={20} />}
+            </button>
+            {userMenuOpen ? (
+              <div className="records-user-dropdown" role="menu">
+                <div className="records-user-summary">
+                  <strong>{user?.name || "企业微信用户"}</strong>
+                  <span>{user?.position || user?.department || "企业微信"}</span>
+                </div>
+                <button
+                  className="records-user-settings"
+                  type="button"
+                  role="menuitem"
+                  onClick={() => {
+                    setUserMenuOpen(false);
+                    onOpenSettings?.();
+                  }}
+                >
+                  <Settings size={17} />
+                  个人设置
+                </button>
+                <button
+                  className="records-user-logout"
+                  type="button"
+                  role="menuitem"
+                  onClick={() => {
+                    setUserMenuOpen(false);
+                    onLogout?.();
+                  }}
+                >
+                  <LogOut size={17} />
+                  退出登录
+                </button>
+              </div>
+            ) : null}
+          </div>
         </div>
       </header>
 

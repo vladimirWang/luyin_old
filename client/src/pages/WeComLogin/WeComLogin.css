@@ -1,74 +1,97 @@
 .wecom-login-page {
-  min-height: 100vh;
+  min-height: 100svh;
   display: grid;
   place-items: center;
-  padding: 28px 20px;
-  color: #17233d;
-  background: #f4f7f5;
+  padding: 32px 20px;
+  overflow-y: auto;
+  color: #0b0c10;
+  background:
+    linear-gradient(145deg, rgba(255, 246, 247, 0.92) 0%, rgba(247, 248, 252, 0.98) 46%, rgba(239, 242, 252, 0.96) 100%),
+    #f5f6fa;
 }
 
 .wecom-login-card {
   width: min(100%, 560px);
-  padding: 30px 28px 24px;
-  border: 1px solid rgba(23, 35, 61, 0.08);
-  border-radius: 20px;
-  background: #fff;
-  box-shadow: 0 20px 55px rgba(28, 49, 79, 0.1);
+  padding: 34px;
+  border: 1px solid rgba(255, 255, 255, 0.9);
+  border-radius: 42px;
+  background: rgba(255, 255, 255, 0.72);
+  box-shadow: 0 28px 70px rgba(48, 52, 65, 0.12);
+  backdrop-filter: blur(18px);
 }
 
 .wecom-login-header {
-  display: flex;
-  align-items: center;
-  gap: 16px;
-  margin-bottom: 20px;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: start;
+  gap: 18px;
+  margin-bottom: 28px;
+}
+
+.wecom-login-eyebrow {
+  display: block;
+  margin-bottom: 6px;
+  color: #9297a1;
+  font-size: 14px;
+  font-weight: 850;
+  letter-spacing: 0.06em;
 }
 
 .wecom-login-logo {
-  flex: 0 0 auto;
-  width: 56px;
-  height: 56px;
   display: grid;
+  width: 62px;
+  height: 62px;
   place-items: center;
-  border-radius: 16px;
-  color: #fff;
-  background: #07c160;
-  font-size: 27px;
-  font-weight: 700;
+  border: 1px solid rgba(255, 255, 255, 0.9);
+  border-radius: 50%;
+  color: #777c87;
+  background: rgba(255, 255, 255, 0.9);
+  box-shadow: 0 10px 28px rgba(44, 48, 58, 0.09), inset 0 -2px 0 rgba(218, 220, 227, 0.7);
 }
 
 .wecom-login-header h1 {
   margin: 0;
-  font-size: 25px;
-  line-height: 1.25;
+  color: #090a0d;
+  font-size: clamp(38px, 8vw, 52px);
+  font-weight: 950;
+  line-height: 1.04;
+  letter-spacing: -0.06em;
 }
 
 .wecom-login-header p {
-  margin: 7px 0 0;
-  color: #6b778c;
-  line-height: 1.5;
+  margin: 13px 0 0;
+  color: #858a94;
+  font-size: 15px;
+  font-weight: 650;
+  line-height: 1.55;
 }
 
 .wecom-login-panel-shell {
   position: relative;
-  min-height: 380px;
+  min-height: 390px;
   display: grid;
   place-items: center;
   overflow: hidden;
-  border-radius: 14px;
-  background: #f8faf9;
+  border: 1px solid rgba(255, 255, 255, 0.94);
+  border-radius: 34px;
+  background-color: rgba(255, 255, 255, 0.88);
+  background-image: radial-gradient(circle, rgba(126, 132, 145, 0.08) 1px, transparent 1.2px);
+  background-size: 15px 15px;
+  box-shadow: 0 18px 44px rgba(48, 52, 65, 0.09);
 }
 
 #wecom-login-panel {
   display: grid;
   place-items: center;
   width: 100%;
-  min-height: 380px;
+  min-height: 390px;
 }
 
 #wecom-login-panel iframe {
   display: block;
-  max-width: 100%;
+  max-width: calc(100% - 18px);
   border: 0;
+  border-radius: 22px;
 }
 
 .wecom-login-status,
@@ -80,7 +103,8 @@
 
 .wecom-login-status {
   position: absolute;
-  color: #6b778c;
+  color: #858a94;
+  font-weight: 700;
 }
 
 .wecom-login-mask {
@@ -89,33 +113,41 @@
   display: grid;
   place-content: center;
   justify-items: center;
-  gap: 14px;
-  color: #3f4d63;
-  background: rgba(255, 255, 255, 0.94);
+  gap: 16px;
+  color: #5f646e;
+  font-weight: 750;
+  background: rgba(255, 255, 255, 0.93);
+  backdrop-filter: blur(10px);
 }
 
 .wecom-login-spinner {
-  width: 32px;
-  height: 32px;
-  border: 3px solid #d8eee1;
-  border-top-color: #07c160;
+  width: 44px;
+  height: 44px;
+  border: 4px solid #f7dfe2;
+  border-top-color: #f06e70;
   border-radius: 50%;
   animation: wecom-login-spin 0.8s linear infinite;
 }
 
 .wecom-login-error {
   margin-top: 16px;
-  padding: 11px 13px;
-  border-radius: 10px;
-  color: #b42318;
-  background: #fef3f2;
+  padding: 14px 16px;
+  border: 1px solid rgba(240, 110, 112, 0.18);
+  border-radius: 18px;
+  color: #d65358;
+  background: #fff0f1;
+  font-weight: 700;
   line-height: 1.5;
 }
 
 .wecom-login-help {
   margin-top: 18px;
-  color: #7a8597;
+  padding: 13px 18px;
+  border-radius: 999px;
+  color: #f06e70;
+  background: rgba(247, 223, 226, 0.72);
   font-size: 13px;
+  font-weight: 750;
   line-height: 1.5;
   text-align: center;
 }
@@ -126,30 +158,47 @@
 
 @media (max-width: 520px) {
   .wecom-login-page {
-    padding: 0;
-    background: #fff;
+    align-items: start;
+    padding: 18px 14px 28px;
   }
 
   .wecom-login-card {
-    min-height: 100vh;
-    padding: 28px 18px 22px;
-    border: 0;
-    border-radius: 0;
-    box-shadow: none;
+    min-height: calc(100svh - 46px);
+    padding: 25px 20px 22px;
+    border-radius: 34px;
   }
 
   .wecom-login-header {
-    width: min(100%, 320px);
-    margin: 0 auto 18px;
+    gap: 12px;
+    margin-bottom: 22px;
+  }
+
+  .wecom-login-logo {
+    width: 54px;
+    height: 54px;
   }
 
   .wecom-login-header h1 {
-    font-size: 22px;
+    max-width: 260px;
+    font-size: 42px;
   }
 
   .wecom-login-header p {
-    font-size: 14px;
+    max-width: 270px;
+    font-size: 13px;
   }
+
+  .wecom-login-panel-shell,
+  #wecom-login-panel {
+    min-height: 365px;
+  }
+}
+
+@media (max-width: 380px) {
+  .wecom-login-card { padding-inline: 15px; }
+  .wecom-login-header h1 { font-size: 38px; }
+  .wecom-login-panel-shell,
+  #wecom-login-panel { min-height: 350px; }
 }
 
 @media (prefers-reduced-motion: reduce) {

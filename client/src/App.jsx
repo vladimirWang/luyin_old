@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from "react";
+import { useLocation, useNavigate } from "react-router-dom";
 import {
   ArrowLeft,
   Camera,
@@ -115,6 +116,18 @@ import {useUploadManager} from './hooks/useUploadManager.js'
 import { useWecomAuthStore } from './stores/useWecomAuthStore.js'
 
 const cardColors = ["coral", "indigo", "violet", "teal", "clay", "ink"];
+
+const VIEW_ROUTES = {
+  record: "/recorder",
+  records: "/records",
+  detail: "/detail",
+};
+
+function viewFromPathname(pathname) {
+  if (pathname === VIEW_ROUTES.records) return "records";
+  if (pathname === VIEW_ROUTES.detail) return "detail";
+  return "record";
+}
 
 function getWecomUserId() {
   const profile = getLocalProfile();
@@ -938,10 +951,12 @@ function BottomNav({ activeView, onNavigate, language, hidden = false }) {
   );
 }
 
-export default function App() {
+export default function App({ routeView }) {
+  const location = useLocation();
+  const routerNavigate = useNavigate();
   const wecomUser = useWecomAuthStore((state) => state.user);
   const clearWecomUser = useWecomAuthStore((state) => state.clearUser);
-  const [activeView, setActiveView] = useState("record");
+  const activeView = routeView || viewFromPathname(location.pathname);
   const [recordings, setRecordings] = useState([]);
   const [folders, setFolders] = useState([]);
   const [folderStats, setFolderStats] = useState({ totalCount: 0, favoriteCount: 0, uncategorizedCount: 0, trashCount: 0 });
@@ -955,6 +970,12 @@ export default function App() {
   const [keyboardVisible, setKeyboardVisible] = useState(false);
 
   const activeViewRef = useRef(activeView);
+
+  function setActiveView(view, options = {}) {
+    const pathname = VIEW_ROUTES[view] || VIEW_ROUTES.record;
+    const id = view === "detail" ? String(options.id || "").trim() : "";
+    routerNavigate(id ? `${pathname}?id=${encodeURIComponent(id)}` : pathname);
+  }
 
   const {
     uploadingRecords,
@@ -1051,7 +1072,7 @@ export default function App() {
     const sharedId = new URLSearchParams(window.location.search).get("recording");
     if (sharedId) {
       setSelectedId(sharedId);
-      setActiveView("detail");
+      setActiveView("detail", { id: sharedId });
     }
     refreshRecordings("");
     refreshFolders().catch(() => {});
@@ -1092,6 +1113,12 @@ export default function App() {
       });
 
   }, []);
+
+  useEffect(() => {
+    if (activeView !== "detail") return;
+    const routeId = new URLSearchParams(location.search).get("id");
+    if (routeId) setSelectedId(routeId);
+  }, [activeView, location.search]);
 
   useEffect(() => {
     if (Object.keys(profile || {}).length > 0) saveLocalProfile(profile);
@@ -1728,7 +1755,7 @@ export default function App() {
 
   function openDetail(id) {
     setSelectedId(id);
-    setActiveView("detail");
+    setActiveView("detail", { id });
   }
 
   function navigate(view) {
@@ -1761,6 +1788,8 @@ export default function App() {
               deletingRecordIds={deletingRecordIds}
               uploadBusy={uploadingRecords.length > 0}
               onOpenSettings={() => setSettingsOpen(true)}
+              user={wecomUser}
+              onLogout={logoutWecom}
               onStartRecording={() => setActiveView("record")}
               createUploadCard={createUploadCard}
               updateUploadCard={updateUploadCard}
@@ -1796,7 +1825,10 @@ export default function App() {
               recordings={recordings}
               onBack={() => setActiveView("records")}
               language={profile.language}
-              onSelectRecording={setSelectedId}
+              onSelectRecording={(id) => {
+                setSelectedId(id);
+                setActiveView("detail", { id });
+              }}
             />
           ) : null}
         </div>
