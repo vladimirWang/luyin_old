@@ -118,7 +118,7 @@ function wecomConfig() {
 
 function hasWecomConfig() {
   const config = wecomConfig();
-  return Boolean(config.corpId && config.corpSecret);
+  return Boolean(config.agentid && config.corpSecret);
 }
 
 function userSafeErrorMessage(error, fallback = "操作失败，请稍后重试。") {

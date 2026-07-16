@@ -26,8 +26,7 @@ createRoot(document.getElementById("root")).render(
   <React.StrictMode>
     <HashRouter>
       <Routes>
-        <Route path="/login" element={<Login />} />
-        <Route path="/wecom-login" element={<WeComLogin />} />
+        <Route path="/login" element={<WeComLogin />} />
         <Route path="/user" element={<User />} />
         <Route path="*" element={<App />} />
       </Routes>
