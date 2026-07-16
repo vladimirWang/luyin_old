@@ -7,7 +7,6 @@ import {
   Play,
   LoaderCircle,
   Share2,
-  Star,
   RefreshCw,
   Keyboard,
   Mic,
@@ -49,7 +48,9 @@ import { dateKeyFromRecording, todayDisplayDateFallback, displayDateFromDateKey 
 import { DailyMeetingBriefCard } from './components/DailyMeetingBriefCard.jsx'
 import { requestMicrophoneStream, getAudioFileDuration } from '../../utils/audio.js'
 import {DailyMeetingBriefMessage} from './components/DailyMeetingBriefMessage.jsx'
+import { ChatHistoryPanel } from "./components/ChatHistoryPanel.jsx";
 import {QA_ACTIVE_MESSAGE_KEY, DAILY_BRIEF_ACTIVE_KEY} from '../../constant.js'
+import {todayDateKey} from '../../utils/date.js'
 
 const EMPTY_RECORDINGS = Object.freeze([]);
 
@@ -82,7 +83,6 @@ export function DetailView({ recording, recordings = EMPTY_RECORDINGS, onBack, l
   const [dailyBriefRefreshingRecordingIds, setDailyBriefRefreshingRecordingIds] = useState(() => new Set());
   const [qaHistory, setQaHistory] = useState([]);
   const [historyOpen, setHistoryOpen] = useState(false);
-  const [historyMode, setHistoryMode] = useState("history");
   const [images, setImages] = useState([]);
   const [attachments, setAttachments] = useState([]);
   const [attachmentsOpen, setAttachmentsOpen] = useState(false);
@@ -459,14 +459,13 @@ export function DetailView({ recording, recordings = EMPTY_RECORDINGS, onBack, l
   const shouldShowDailyBriefCard = !recording?.id && scopeIds.length === 0 && answers.length === 0 && !dailyBriefExpanded;
   const shouldShowDailyBriefList = !recording?.id && scopeIds.length === 0 && answers.length === 0 && dailyBriefExpanded;
   const chatThreadClassName = shouldShowDailyBriefCard ? "chat-thread has-daily-brief" : shouldShowDailyBriefList ? "chat-thread daily-brief-list-thread" : "chat-thread";
-  const visibleHistoryMessages = useMemo(() => {
+  const historyMessages = useMemo(() => {
     const alive = qaHistory.filter((item) => !item.deletedAt);
-    const base = historyMode === "favorites" ? alive.filter((item) => item.favorite) : alive;
-    const scoped = activeScopeIds.length > 0 ? base.filter((item) => isSameRecordingScope(messageScopeFromKnown(item, activeScopeIds, alive), activeScopeIds)) : base;
+    const scoped = activeScopeIds.length > 0 ? alive.filter((item) => isSameRecordingScope(messageScopeFromKnown(item, activeScopeIds, alive), activeScopeIds)) : alive;
     return sortMessagesAscending(scoped);
-  }, [answers, historyMode, qaHistory, scopeKey]);
-  const visibleDailyBriefHistory = useMemo(() => {
-    if (historyMode !== "history" || activeScopeIds.length > 0) return [];
+  }, [qaHistory, scopeKey]);
+  const historyDailyBriefs = useMemo(() => {
+    if (activeScopeIds.length > 0) return [];
     return [...dailyBriefHistory]
       .filter((item) => item?.date && item.status !== "empty")
       .sort((a, b) => {
@@ -474,8 +473,7 @@ export function DetailView({ recording, recordings = EMPTY_RECORDINGS, onBack, l
         const right = new Date(b.updatedAt || b.generatedAt || b.date || 0).getTime();
         return right - left;
       });
-  }, [dailyBriefHistory, historyMode, scopeKey]);
-  const visibleHistoryCount = visibleHistoryMessages.length + visibleDailyBriefHistory.length;
+  }, [dailyBriefHistory, scopeKey]);
 
   useEffect(() => {
     if (!lockedRecordingId) return;
@@ -649,12 +647,6 @@ export function DetailView({ recording, recordings = EMPTY_RECORDINGS, onBack, l
     setHistoryOpen(false);
     setActiveCitationKey("");
     setExpandedCitationGroups({});
-  }
-
-  function switchHistoryMode(mode, event) {
-    event.stopPropagation();
-    setHistoryMode(mode);
-    setHistoryOpen(true);
   }
 
   function openAttachmentPreview(item, type = "file") {
@@ -2158,135 +2150,18 @@ export function DetailView({ recording, recordings = EMPTY_RECORDINGS, onBack, l
         <span>{scopeLabel}</span>
       </header>
 
-      <aside
-        className={historyOpen ? "chat-history-panel open" : "chat-history-panel"}
-        aria-label="历史聊天记录"
-        onPointerDown={(event) => event.stopPropagation()}
-        onClick={(event) => event.stopPropagation()}
-      >
-        <header>
-          <div>
-            <strong>{historyMode === "favorites" ? "收藏夹" : "历史聊天记录"}</strong>
-            <span>{historyMode === "favorites" ? `${visibleHistoryMessages.length} 条收藏` : `${visibleHistoryCount} 条记录`}</span>
-          </div>
-          <button type="button" onClick={() => setHistoryOpen(false)}>
-            <X size={16} />
-          </button>
-        </header>
-
-        <div className="chat-history-tabs" role="tablist" aria-label="历史类型">
-          <button
-            className={historyMode === "history" ? "active" : ""}
-            type="button"
-            onPointerDown={(event) => switchHistoryMode("history", event)}
-            onClick={(event) => switchHistoryMode("history", event)}
-          >
-            历史
-          </button>
-          <button
-            className={historyMode === "favorites" ? "active" : ""}
-            type="button"
-            onPointerDown={(event) => switchHistoryMode("favorites", event)}
-            onClick={(event) => switchHistoryMode("favorites", event)}
-          >
-            收藏夹
-          </button>
-        </div>
-
-        <div className="chat-history-list">
-          {visibleHistoryCount > 0 ? (
-            <>
-              {visibleDailyBriefHistory.map((brief) => (
-                <article
-                  className="chat-history-item daily-brief-history-item"
-                  key={brief.id || brief.date}
-                  role="button"
-                  tabIndex={0}
-                  onClick={() => openDailyBriefHistoryItem(brief)}
-                  onKeyDown={(event) => {
-                    if (event.key === "Enter" || event.key === " ") {
-                      event.preventDefault();
-                      openDailyBriefHistoryItem(brief);
-                    }
-                  }}
-                >
-                  <button
-                    className="chat-history-main"
-                    type="button"
-                    onClick={(event) => {
-                      event.stopPropagation();
-                      openDailyBriefHistoryItem(brief);
-                    }}
-                  >
-                    <span>{brief.displayDate || brief.date}</span>
-                    <strong>{brief.title || "今日会议简报"}</strong>
-                    <em>
-                      {Number(brief.meetingCount || 0)} 场会议 · {brief.status === "generating" ? "生成中" : brief.summaryMarkdown ? "已生成" : "暂无内容"}
-                    </em>
-                  </button>
-                  <div className="chat-history-actions" aria-label="今日总结操作">
-                    <button
-                      className="history-share-button"
-                      type="button"
-                      aria-label="分享 PDF"
-                      disabled={brief.status === "generating" || !brief.summaryMarkdown}
-                      onClick={(event) => shareDailyBriefPdf(brief, event)}
-                    >
-                      {brief.status === "generating" ? <LoaderCircle className="spin-icon" size={14} /> : <Share2 size={14} />}
-                    </button>
-                  </div>
-                </article>
-              ))}
-              {visibleHistoryMessages.map((item) => (
-                <article
-                className={item.favorite ? "chat-history-item favorite" : "chat-history-item"}
-                key={item.id}
-                role="button"
-                tabIndex={0}
-                onClick={() => openHistoryItem(item)}
-                onKeyDown={(event) => {
-                  if (event.key === "Enter" || event.key === " ") {
-                    event.preventDefault();
-                    openHistoryItem(item);
-                  }
-                }}
-              >
-                <button
-                  className="chat-history-main"
-                  type="button"
-                  onClick={(event) => {
-                    event.stopPropagation();
-                    openHistoryItem(item);
-                  }}
-                >
-                  <span>{formatDate(item.createdAt)}</span>
-                  <strong>{item.question}</strong>
-                  {item.recordingNames?.length ? <em>{item.recordingNames.slice(0, 2).join("、")}</em> : null}
-                </button>
-                <div className="chat-history-actions" aria-label="问答操作">
-                  <button
-                    className="history-favorite-button"
-                    type="button"
-                    aria-label={item.favorite ? "取消收藏" : "收藏"}
-                    onClick={(event) => toggleHistoryFavorite(item, event)}
-                  >
-                    <Star size={14} fill={item.favorite ? "currentColor" : "none"} />
-                  </button>
-                  <button className="history-share-button" type="button" aria-label="分享 PDF" onClick={(event) => shareHistoryMessage(item, event)}>
-                    <Share2 size={14} />
-                  </button>
-                  <button className="history-delete-button" type="button" aria-label="删除问答" onClick={(event) => deleteHistoryMessage(item, event)}>
-                    <Trash2 size={14} />
-                  </button>
-                </div>
-              </article>
-              ))}
-            </>
-          ) : (
-            <p>{historyMode === "favorites" ? "还没有收藏的问答" : "还没有历史提问"}</p>
-          )}
-        </div>
-      </aside>
+      <ChatHistoryPanel
+        open={historyOpen}
+        messages={historyMessages}
+        dailyBriefs={historyDailyBriefs}
+        onClose={() => setHistoryOpen(false)}
+        onOpenMessage={openHistoryItem}
+        onOpenDailyBrief={openDailyBriefHistoryItem}
+        onToggleFavorite={toggleHistoryFavorite}
+        onShareMessage={shareHistoryMessage}
+        onShareDailyBrief={shareDailyBriefPdf}
+        onDeleteMessage={deleteHistoryMessage}
+      />
 
       <section className={scopeExpanded ? "recording-scope-panel expanded" : "recording-scope-panel collapsed"} aria-label="选择录音">
         <div className="scope-toolbar">

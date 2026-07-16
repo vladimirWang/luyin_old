@@ -297,7 +297,7 @@ export function RecordCard({
           }}
           onClick={(event) => event.stopPropagation()}
         />
-
+        <div style={{color: 'red', fontSize: 12}}>id{recording.id}</div>
         <div className="record-meta">
           <span>上传时间 {formatClockTime(recording.createdAt)}</span>
         </div>

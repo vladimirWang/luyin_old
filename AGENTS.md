@@ -22,4 +22,6 @@ Database startup decisions: `docker-entrypoint.sh` selects the Prisma schema str
 
 Records menu decisions: the avatar dropdown uses a compact, content-driven width with mobile viewport bounds instead of a fixed width, and its icon-only action buttons center their icons.
 
+Detail component decisions: keep the chat-history panel in `client/src/pages/Detail/components` as a controlled component. Its owner controls visibility through `open` and `onClose`, while panel-only state such as the history/favorites tab remains inside the panel.
+
 Visual direction: login and not-found screens follow the recording-list reference style—cool gray-blue atmospheric background, oversized heavy black display type, translucent white cards with generous radii, near-black primary actions, coral secondary accents, circular outline-icon controls, and soft low-contrast shadows.
