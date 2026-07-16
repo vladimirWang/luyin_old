@@ -95,7 +95,7 @@ async function requestPersistentRecordingStorage() {
   }
 }
 
-export function useRecorder({ activeView, createUploadCard, uploadRecordingSegments, onRecordingCreated }) {
+export function useRecorder({ createUploadCard, uploadRecordingSegments }) {
   const [isRecording, setIsRecording] = useState(false);
   const [elapsedMs, setElapsedMs] = useState(0);
   const [level, setLevel] = useState(0.12);
@@ -118,7 +118,6 @@ export function useRecorder({ activeView, createUploadCard, uploadRecordingSegme
   const rolloverTimerRef = useRef(0);
   const autosaveTimerRef = useRef(0);
   const recordingWatchdogTimerRef = useRef(0);
-  const activeViewRef = useRef(activeView);
   const resumeAvailableRef = useRef(false);
   const isRecordingRef = useRef(false);
   const manualStopRequestedRef = useRef(false);
@@ -138,9 +137,6 @@ export function useRecorder({ activeView, createUploadCard, uploadRecordingSegme
   const lastRecorderDataAtRef = useRef(0);
   const lastRecorderWatchdogActionAtRef = useRef(0);
 
-  useEffect(() => {
-    activeViewRef.current = activeView;
-  }, [activeView]);
 
 useEffect(() => {
   isRecordingRef.current = isRecording;
@@ -511,7 +507,6 @@ async function recoverSingleRecordingManifest(manifestSnapshot) {
         toastMessage: "上次中断前的录音已自动恢复上传",
       },
     );
-    if (recording && activeViewRef.current !== "detail") onRecordingCreated?.(recording.id);
     await clearRecordingRecoveryManifest(manifest);
     return true;
   } catch (error) {
@@ -862,7 +857,6 @@ async function finishRecordingSession() {
   let uploaded = false;
   try {
     const recording = await uploadRecordingSegments(segments, durationMs);
-    if (recording && activeViewRef.current !== "detail") onRecordingCreated?.(recording.id);
     uploaded = true;
     setRecordingError("");
   } catch (error) {
@@ -1080,4 +1074,3 @@ function toggleRecording() {
 
   return { elapsedMs, isRecording, level, recordingError, toggleRecording };
 }
-

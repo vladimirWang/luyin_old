@@ -5,18 +5,16 @@ import { useWecomAuthStore } from "../../stores/useWecomAuthStore.js";
 import { WaveCanvas } from "./WaveCanvas.jsx";
 import { useRecorder } from "./useRecorder.js";
 
-export function RecorderView({ active, activeView, createUploadCard, uploadRecordingSegments, onRecordingCreated }) {
+export function RecorderView({ createUploadCard, uploadRecordingSegments }) {
   const [queriedUser, setQueriedUser] = useState(null);
   const { elapsedMs, isRecording, level, recordingError, toggleRecording } = useRecorder({
-    activeView,
     createUploadCard,
     uploadRecordingSegments,
-    onRecordingCreated,
   });
   const ringLevel = isRecording ? Math.max(0.04, Math.min(1, level)) : 0;
 
   return (
-    <section className="screen recorder-screen" aria-label="录音" style={active ? undefined : { display: "none" }}>
+    <section className="screen recorder-screen" aria-label="录音">
       <div className="zustand-user-query">
         {/* <button
           className="zustand-user-query-button"
@@ -36,7 +34,7 @@ export function RecorderView({ active, activeView, createUploadCard, uploadRecor
         ) : null}
       </div>
       <div className="wave-stage">
-        {active ? <WaveCanvas active={isRecording} level={level} /> : null}
+        <WaveCanvas active={isRecording} level={level} />
       </div>
 
       <div className="record-time">{formatDuration(elapsedMs, true)}</div>
