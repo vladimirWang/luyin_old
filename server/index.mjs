@@ -146,22 +146,67 @@ function userSafeTranscriptionError(error) {
 
 async function getWecomAccessToken() {
   const now = Date.now();
-  if (wecomTokenCache.value && wecomTokenCache.expiresAt > now + 60000) return wecomTokenCache.value;
-  const config = wecomConfig();
-  if (!config.corpId || !config.corpSecret) return "";
+  if (wecomTokenCache.value && wecomTokenCache.expiresAt > now + 60000) {
+    logger.debug("wecom.access_token.cache_hit", {
+      expiresInSeconds: Math.floor((wecomTokenCache.expiresAt - now) / 1000),
+    });
+    return wecomTokenCache.value;
+  }
 
-  const url = `https://qyapi.weixin.qq.com/cgi-bin/gettoken?corpid=${encodeURIComponent(config.corpId)}&corpsecret=${encodeURIComponent(config.corpSecret)}`;
-  const response = await fetch(url);
-  const payload = await response.json();
-  if (payload.errcode) throw new Error(payload.errmsg || "企业微信 access_token 获取失败");
+  const config = wecomConfig();
+  if (!config.appid || !config.corpSecret) {
+    logger.warn("wecom.access_token.config_missing", {
+      hasCorpId: Boolean(config.appid),
+      hasCorpSecret: Boolean(config.corpSecret),
+    });
+    return "";
+  }
+
+  const url = `https://qyapi.weixin.qq.com/cgi-bin/gettoken?corpid=${encodeURIComponent(config.appid)}&corpsecret=${encodeURIComponent(config.corpSecret)}`;
+  logger.info("wecom.access_token.request_started", { corpId: config.appid });
+
+  let response;
+  let payload;
+  try {
+    response = await fetch(url);
+    payload = await response.json();
+  } catch (error) {
+    logger.error("wecom.access_token.request_failed", {
+      message: error instanceof Error ? error.message : String(error),
+    });
+    throw error;
+  }
+
+  if (!response.ok || payload.errcode) {
+    logger.error("wecom.access_token.api_error", {
+      httpStatus: response.status,
+      errcode: payload.errcode,
+      errmsg: payload.errmsg || "",
+    });
+    throw new Error(payload.errmsg || `企业微信 access_token 获取失败（HTTP ${response.status}）`);
+  }
+
+  if (!payload.access_token) {
+    logger.error("wecom.access_token.invalid_response", {
+      httpStatus: response.status,
+      expiresIn: payload.expires_in,
+    });
+    throw new Error("企业微信 access_token 响应缺少 access_token");
+  }
+
   wecomTokenCache = {
     value: payload.access_token,
     expiresAt: now + Math.max(300, Number(payload.expires_in || 7200) - 120) * 1000,
   };
+
+  logger.info("wecom.access_token.request_succeeded", {
+    expiresInSeconds: Math.floor((wecomTokenCache.expiresAt - now) / 1000),
+  });
   return wecomTokenCache.value;
 }
 
 async function getWecomUserByCode(code) {
+  logger.info("call getWecomUserByCode: ", {message: 'start get access token'})
   const token = await getWecomAccessToken();
   if (!token || !code) return null;
   console.log("call getWecomUserByCode: ", `token: ${token}, code: ${code}`)

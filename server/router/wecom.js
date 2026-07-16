@@ -1,4 +1,5 @@
 import express from "express";
+import logger from "../utils/log.js";
 
 const router = express.Router();
 
@@ -54,14 +55,16 @@ router.get("/oauth-url", (request, response) => {
 });
 
 router.get("/me", async (request, response, next) => {
+  logger.info("request /wecom/me", {message: `code: ${request.query.code}`})
   const { hasWecomConfig, getWecomUserByCode } = dependencies;
   try {
     const code = String(request.query.code || "").trim();
     if (!code || !hasWecomConfig()) {
+      logger.info("request /wecom/me", {message: `code or hasWecomConfig not existed`})
       response.json({ configured: hasWecomConfig(), authenticated: false, user: null });
       return;
     }
-
+    logger.info("request /wecom/me", {message: `start get user by code`})
     const user = await getWecomUserByCode(code);
     response.json({ configured: true, authenticated: Boolean(user?.name), user });
   } catch (error) {
