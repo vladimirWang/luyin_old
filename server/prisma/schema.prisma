@@ -8,16 +8,16 @@ datasource db {
 }
 
 model AppUser {
-  id           String    @id @db.VarChar(80)
-  wecomUserId  String?   @unique @map("wecom_user_id") @db.VarChar(128)
-  name         String?   @db.LongText
-  company      String?   @db.LongText
-  department   String?   @db.LongText
-  phone        String?   @db.VarChar(80)
-  language     String?   @db.VarChar(40)
-  recordsTitle String?   @map("records_title") @db.LongText
-  createdAt    DateTime? @default(now()) @map("created_at") @db.Timestamp(0)
-  updatedAt    DateTime? @map("updated_at") @db.Timestamp(0)
+  id           String   @id @db.VarChar(80)
+  wecomUserId  String?  @unique @map("wecom_user_id") @db.VarChar(128)
+  name         String?  @db.LongText
+  company      String?  @db.LongText
+  department   String?  @db.LongText
+  phone        String?  @db.VarChar(80)
+  language     String?  @db.VarChar(40)
+  recordsTitle String?  @map("records_title") @db.LongText
+  createdAt    DateTime @default(now()) @map("created_at") @db.Timestamp(0)
+  updatedAt    DateTime @default(now()) @updatedAt @map("updated_at") @db.Timestamp(0)
 
   recordings Recording[]
   folders    RecordingFolder[]
@@ -69,8 +69,8 @@ model Recording {
   tencentMeetingSourceKind      String?   @map("tencent_meeting_source_kind") @db.VarChar(40)
   errorMessage                  String?   @map("error_message") @db.LongText
   userAgent                     String?   @map("user_agent") @db.LongText
-  createdAt                     DateTime? @default(now()) @map("created_at") @db.Timestamp(0)
-  updatedAt                     DateTime? @map("updated_at") @db.Timestamp(0)
+  createdAt                     DateTime  @default(now()) @map("created_at") @db.Timestamp(0)
+  updatedAt                     DateTime  @default(now()) @updatedAt @map("updated_at") @db.Timestamp(0)
 
   user      AppUser?            @relation(fields: [userId], references: [id])
   folder    RecordingFolder?    @relation(fields: [folderId], references: [id])
@@ -84,12 +84,12 @@ model Recording {
 }
 
 model RecordingFolder {
-  id            String    @id @db.VarChar(80)
-  userId        String?   @map("user_id") @db.VarChar(80)
-  name          String?   @db.LongText
-  ownerClientId String?   @map("owner_client_id") @db.VarChar(160)
-  createdAt     DateTime? @default(now()) @map("created_at") @db.Timestamp(0)
-  updatedAt     DateTime? @map("updated_at") @db.Timestamp(0)
+  id            String   @id @db.VarChar(80)
+  userId        String?  @map("user_id") @db.VarChar(80)
+  name          String?  @db.LongText
+  ownerClientId String?  @map("owner_client_id") @db.VarChar(160)
+  createdAt     DateTime @default(now()) @map("created_at") @db.Timestamp(0)
+  updatedAt     DateTime @default(now()) @updatedAt @map("updated_at") @db.Timestamp(0)
 
   user       AppUser?    @relation(fields: [userId], references: [id])
   recordings Recording[]
@@ -98,14 +98,14 @@ model RecordingFolder {
 }
 
 model TranscriptSegment {
-  id           String    @id @db.VarChar(160)
-  recordingId  String    @map("recording_id") @db.VarChar(80)
-  startMs      BigInt?   @default(0) @map("start_ms")
-  endMs        BigInt?   @default(0) @map("end_ms")
-  text         String?   @db.LongText
+  id           String   @id @db.VarChar(160)
+  recordingId  String   @map("recording_id") @db.VarChar(80)
+  startMs      BigInt?  @default(0) @map("start_ms")
+  endMs        BigInt?  @default(0) @map("end_ms")
+  text         String?  @db.LongText
   confidence   Float?
-  speakerLabel String?   @map("speaker_label") @db.VarChar(120)
-  createdAt    DateTime? @default(now()) @map("created_at") @db.Timestamp(0)
+  speakerLabel String?  @map("speaker_label") @db.VarChar(120)
+  createdAt    DateTime @default(now()) @map("created_at") @db.Timestamp(0)
 
   recording Recording @relation(fields: [recordingId], references: [id])
 
@@ -133,8 +133,8 @@ model RecordingQuestion {
   thinkingJson         String?   @map("thinking_json") @db.LongText
   favorite             Boolean?  @default(false)
   deletedAt            DateTime? @map("deleted_at") @db.Timestamp(0)
-  createdAt            DateTime? @default(now()) @map("created_at") @db.Timestamp(0)
-  updatedAt            DateTime? @map("updated_at") @db.Timestamp(0)
+  createdAt            DateTime  @default(now()) @map("created_at") @db.Timestamp(0)
+  updatedAt            DateTime  @default(now()) @updatedAt @map("updated_at") @db.Timestamp(0)
 
   recording Recording? @relation(fields: [recordingId], references: [id])
   user      AppUser?   @relation(fields: [userId], references: [id])
@@ -146,22 +146,22 @@ model RecordingQuestion {
 }
 
 model AppAccount {
-  id           String    @id @db.VarChar(80)
-  username     String    @db.LongText
-  passwordSalt String?   @map("password_salt") @db.VarChar(160)
-  passwordHash String?   @map("password_hash") @db.VarChar(255)
-  profileJson  String?   @map("profile_json") @db.LongText
-  createdAt    DateTime? @default(now()) @map("created_at") @db.Timestamp(0)
-  updatedAt    DateTime? @map("updated_at") @db.Timestamp(0)
+  id           String   @id @db.VarChar(80)
+  username     String   @db.LongText
+  passwordSalt String?  @map("password_salt") @db.VarChar(160)
+  passwordHash String?  @map("password_hash") @db.VarChar(255)
+  profileJson  String?  @map("profile_json") @db.LongText
+  createdAt    DateTime @default(now()) @map("created_at") @db.Timestamp(0)
+  updatedAt    DateTime @default(now()) @updatedAt @map("updated_at") @db.Timestamp(0)
 
   @@map("app_accounts")
 }
 
 model ClientProfile {
-  clientId    String    @id @map("client_id") @db.VarChar(160)
-  profileJson String?   @map("profile_json") @db.LongText
-  createdAt   DateTime? @default(now()) @map("created_at") @db.Timestamp(0)
-  updatedAt   DateTime? @map("updated_at") @db.Timestamp(0)
+  clientId    String   @id @map("client_id") @db.VarChar(160)
+  profileJson String?  @map("profile_json") @db.LongText
+  createdAt   DateTime @default(now()) @map("created_at") @db.Timestamp(0)
+  updatedAt   DateTime @default(now()) @updatedAt @map("updated_at") @db.Timestamp(0)
 
   @@map("client_profiles")
 }
@@ -178,7 +178,7 @@ model DailyMeetingBrief {
   summaryMarkdown  String?   @map("summary_markdown") @db.LongText
   status           String?   @db.VarChar(32)
   generatedAt      DateTime? @map("generated_at") @db.Timestamp(0)
-  updatedAt        DateTime? @map("updated_at") @db.Timestamp(0)
+  updatedAt        DateTime  @default(now()) @updatedAt @map("updated_at") @db.Timestamp(0)
   dirty            Boolean?  @default(false)
 
   @@unique([dateKey, clientId], map: "daily_meeting_briefs_date_client_unique")
