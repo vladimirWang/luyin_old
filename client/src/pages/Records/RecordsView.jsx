@@ -23,6 +23,7 @@ import { RecordCard } from "./RecordCard.jsx";
 import { RecordPreviewOverlay } from "./RecordPreviewOverlay.jsx";
 import {isUploadableMediaFile, getAudioFileDuration} from '../../utils/audio.js'
 import {showToast} from '../../utils/index.js'
+import { isInWeCom } from "../../utils/wecom.js";
 
 export function RecordsView({
   recordings,
@@ -392,20 +393,22 @@ export function RecordsView({
                   }}
                 >
                   <Settings size={17} />
-                  个人设置
+                  {/* 个人设置 */}
                 </button>
-                <button
-                  className="records-user-logout"
-                  type="button"
-                  role="menuitem"
-                  onClick={() => {
-                    setUserMenuOpen(false);
-                    onLogout?.();
-                  }}
-                >
-                  <LogOut size={17} />
-                  退出登录
-                </button>
+                {
+                  !isInWeCom() && <button
+                    className="records-user-logout"
+                    type="button"
+                    role="menuitem"
+                    onClick={() => {
+                      setUserMenuOpen(false);
+                      onLogout?.();
+                    }}
+                  >
+                    <LogOut size={17} />
+                    {/* 退出登录 */}
+                  </button>
+                }
               </div>
             ) : null}
           </div>

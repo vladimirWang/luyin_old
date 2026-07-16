@@ -112,6 +112,7 @@ import {
   dailyBriefDisplayDate
 } from './utils/index.js'
 import {loadImageSource, compressAvatarImage} from './utils/image.js'
+import { isInWeCom } from './utils/wecom.js'
 import {useUploadManager} from './hooks/useUploadManager.js'
 import { useWecomAuthStore } from './stores/useWecomAuthStore.js'
 import {QA_ACTIVE_MESSAGE_KEY} from './constant.js'
@@ -157,10 +158,6 @@ function appendUrlParam(url, key, value) {
 function mediaRequestUrl(url, version = "") {
   const auth = getStoredAuth();
   return appendUrlParam(appendUrlParam(appendUrlParam(url, "clientId", getClientId()), "authToken", auth?.token || ""), "v", version);
-}
-
-function isWecomWebView() {
-  return /wxwork|wecom|micromessenger/i.test(navigator.userAgent);
 }
 
 function normalizeDailyBriefTitle(value = "") {
@@ -1398,7 +1395,7 @@ export default function App({ routeView }) {
     }
 
     async function shareWecomAudioFile() {
-      if (!isWecomWebView() || !window.wx?.invoke) return false;
+      if (!isInWeCom() || !window.wx?.invoke) return false;
       const payload = await api(`/api/recordings/${recording.id}/wecom-audio-media`, { method: "POST" });
       const mediaId = payload.mediaId || payload.media_id;
       if (!mediaId) throw new Error("企业微信 MP3 文件素材生成失败");

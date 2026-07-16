@@ -3,8 +3,10 @@ import { createWWLoginPanel } from "@wecom/jssdk";
 import { ShieldCheck } from "lucide-react";
 import { useLocation, useNavigate } from "react-router-dom";
 import { api, clearStoredAuth, saveLocalProfile } from "../../utils/index.js";
+import { isInWeCom } from "../../utils/wecom.js";
 import { hasWecomIdentity, useWecomAuthStore } from "../../stores/useWecomAuthStore.js";
-import "./WeComLogin.css";
+import LoginFailed from "./components/LoginFailed.jsx";
+import "./Login.css";
 
 const OAUTH_STATE_KEY = "wecomLoginOAuthState";
 const AUTO_LOGIN_STARTED_KEY = "wecomAutoLoginStarted";
@@ -49,10 +51,6 @@ function returnPathWithoutOAuthParams(locationLike) {
 function errorMessage(error, fallback = "企业微信登录失败，请稍后重试") {
   if (error instanceof Error && error.message) return error.message;
   return String(error?.errMsg || error?.message || fallback);
-}
-
-function isWecomBrowser() {
-  return /wxwork/i.test(window.navigator.userAgent);
 }
 
 function requestEmbeddedLoginUrl() {
@@ -118,6 +116,29 @@ export default function WeComLogin() {
   const loginStartedRef = useRef(false);
   const [status, setStatus] = useState("loading");
   const [error, setError] = useState("");
+  const inWeCom = isInWeCom();
+
+  function showLoginFailed(loginError) {
+    const message = errorMessage(loginError, "企业微信自动登录失败");
+    setError(message);
+    setStatus("failed");
+    navigate("/login?status=failed", {
+      replace: true,
+      state: { loginError: message },
+    });
+  }
+
+  function retryAutoLogin() {
+    embeddedLoginRequest = null;
+    codeExchangeRequest = null;
+    codeExchangeValue = "";
+    loginStartedRef.current = false;
+    window.sessionStorage.removeItem(OAUTH_STATE_KEY);
+    window.sessionStorage.removeItem(AUTO_LOGIN_STARTED_KEY);
+    setError("");
+    setStatus("loading");
+    navigate("/login", { replace: true, state: null });
+  }
 
   useEffect(() => {
     let cancelled = false;
@@ -142,8 +163,12 @@ export default function WeComLogin() {
       } catch (requestError) {
         if (cancelled) return;
         loginStartedRef.current = false;
-        setError(errorMessage(requestError));
-        setStatus("error");
+        if (inWeCom) {
+          showLoginFailed(requestError);
+        } else {
+          setError(errorMessage(requestError));
+          setStatus("error");
+        }
       }
     }
 
@@ -161,8 +186,7 @@ export default function WeComLogin() {
         embeddedLoginRequest = null;
         window.sessionStorage.removeItem(AUTO_LOGIN_STARTED_KEY);
         window.sessionStorage.removeItem(OAUTH_STATE_KEY);
-        setError(errorMessage(requestError, "企业微信自动登录失败"));
-        setStatus("error");
+        showLoginFailed(requestError);
       }
     }
 
@@ -216,6 +240,15 @@ export default function WeComLogin() {
       }
     }
 
+    const requestedStatus = new URLSearchParams(location.search).get("status");
+    if (requestedStatus === "failed") {
+      setError(String(location.state?.loginError || "登录请求没有完成，请重新发起企业微信授权。"));
+      setStatus("failed");
+      return () => {
+        cancelled = true;
+      };
+    }
+
     const callbackParams = getCallbackParams(location.state?.from?.search, location.state?.from?.hash);
     const callbackCode = callbackParams.get("code");
     const returnPath = returnPathWithoutOAuthParams(location.state?.from);
@@ -229,12 +262,16 @@ export default function WeComLogin() {
       const returnedState = callbackParams.get("state") || "";
       const expectedState = window.sessionStorage.getItem(OAUTH_STATE_KEY) || "";
       if (!expectedState || returnedState !== expectedState) {
-        setError("登录校验失败，请重新发起企业微信登录");
-        setStatus("error");
+        if (inWeCom) {
+          showLoginFailed(new Error("登录校验失败，请重新发起企业微信登录"));
+        } else {
+          setError("登录校验失败，请重新发起企业微信登录");
+          setStatus("error");
+        }
       } else {
         finishLogin(callbackCode);
       }
-    } else if (isWecomBrowser()) {
+    } else if (inWeCom) {
       startEmbeddedLogin();
     } else {
       mountLoginPanel();
@@ -245,7 +282,11 @@ export default function WeComLogin() {
       panelRef.current?.unmount();
       panelRef.current = null;
     };
-  }, [location.state, navigate, setUser, storedUser]);
+  }, [inWeCom, location.hash, location.search, location.state, navigate, setUser, storedUser]);
+
+  if (status === "failed") {
+    return <LoginFailed message={error} onRetry={retryAutoLogin} />;
+  }
 
   return (
     <main className="wecom-login-page">
