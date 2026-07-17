@@ -5,10 +5,11 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "dev": "dotenv -e ../.env.dev nodemon index.mjs",
+    "dev:local": "dotenv -e ../.env.dev.local nodemon index.mjs",
     "start:prod": "node index.mjs",
-    "migrate:dev": "dotenv -e ../.env.dev -- prisma migrate dev",
-    "generate:dev": "dotenv -e ../.env.dev -- prisma generate dev"
+    "push:local": "dotenv -e ../.env.dev.local -- prisma db push",
+    "migrate:local": "dotenv -e ../.env.dev.local -- prisma migrate dev",
+    "generate:local": "dotenv -e ../.env.dev.local -- prisma generate dev"
   },
   "dependencies": {
     "@prisma/adapter-mariadb": "^7.8.0",
