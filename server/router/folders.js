@@ -1,5 +1,6 @@
 import express from "express";
 import { canDeleteAllRecordings, canReadRecording } from "../utils/common.mjs";
+import { requestClientIdBetter } from "../utils/recordings.js";
 
 const router = express.Router();
 
@@ -10,9 +11,9 @@ export function configure(deps) {
 }
 
 router.get("/", async (request, response) => {
-  const { loadDb, requestClientId, canReadFolder, publicFolder } = dependencies;
+  const { loadDb, canReadFolder, publicFolder } = dependencies;
   const db = await loadDb();
-  const clientId = requestClientId(request);
+  const clientId = requestClientIdBetter(request);
   const canDeleteAll = canDeleteAllRecordings();
   const readableRecordings = canDeleteAll ? db.recordings : db.recordings.filter((recording) => canReadRecording(recording, clientId));
   const folders = [...db.folders]
@@ -28,9 +29,9 @@ router.get("/", async (request, response) => {
 });
 
 router.post("/", async (request, response) => {
-  const { requestClientId, updateDb, crypto, publicFolder } = dependencies;
+  const { updateDb, crypto, publicFolder } = dependencies;
   const name = String(request.body?.name || "").trim();
-  const clientId = requestClientId(request);
+  const clientId = requestClientIdBetter(request);
   if (!name) {
     response.status(400).json({ error: "文件夹名称不能为空" });
     return;
@@ -54,8 +55,8 @@ router.post("/", async (request, response) => {
 });
 
 router.patch("/:id", async (request, response) => {
-  const { requestClientId, updateDb, canReadFolder, publicFolder } = dependencies;
-  const clientId = requestClientId(request);
+  const { updateDb, canReadFolder, publicFolder } = dependencies;
+  const clientId = requestClientIdBetter(request);
   const updated = await updateDb((db) => {
     const folder = db.folders.find((item) => item.id === request.params.id);
     if (!folder || !canReadFolder(folder, clientId)) return null;
@@ -76,8 +77,8 @@ router.patch("/:id", async (request, response) => {
 });
 
 router.delete("/:id", async (request, response) => {
-  const { requestClientId, updateDb, canReadFolder } = dependencies;
-  const clientId = requestClientId(request);
+  const { updateDb, canReadFolder } = dependencies;
+  const clientId = requestClientIdBetter(request);
   const deleted = await updateDb((db) => {
     const exists = db.folders.some((folder) => folder.id === request.params.id && canReadFolder(folder, clientId));
     if (!exists) return false;

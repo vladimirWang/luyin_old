@@ -45,7 +45,7 @@ import profileRouter, { configure as configureProfileRouter } from "./router/pro
 import transcriptionRouter, { configure as configureTranscriptionRouter } from "./router/transcription.js";
 import authRouter, { configure as configureAuthRouter } from "./router/auth.js";
 import foldersRouter, { configure as configureFoldersRouter } from "./router/folders.js";
-import { resolveRecordingAudioPath } from "./utils/recordings.js";
+import { requestClientIdBetter, resolveRecordingAudioPath } from "./utils/recordings.js";
 import { wecomConfig } from "./utils/wecom.js";
 import {
   expandTencentMeetingKeyCandidates,
@@ -136,15 +136,6 @@ function userSafeTranscriptionError(error) {
     return "转写服务暂时繁忙，请稍后点击重新转写。";
   }
   return "转写失败，请稍后点击重新转写。";
-}
-
-function requestClientId(request) {
-  const accountPayload = requestAccountPayload(request);
-  if (accountPayload?.accountId) return accountClientId(accountPayload.accountId);
-  const raw = String(request.get("x-client-id") || request.query?.clientId || "").trim();
-  if (raw && !raw.startsWith("account-")) return raw.slice(0, 120);
-  const fallback = `${request.ip || ""}|${request.get("user-agent") || ""}`;
-  return `ip-${crypto.createHash("sha1").update(fallback).digest("hex").slice(0, 20)}`;
 }
 
 function normalizeAccountUsername(value = "") {
@@ -242,7 +233,7 @@ function publicAccount(account) {
 function clientProfileForRequest(db, request) {
   const accountPayload = requestAccountPayload(request);
   const account = accountPayload?.accountId ? (db.accounts || []).find((item) => item.id === accountPayload.accountId) : null;
-  const clientId = account ? accountClientId(account.id) : requestClientId(request);
+  const clientId = account ? accountClientId(account.id) : requestClientIdBetter(request);
   const clientProfiles =
     db.clientProfiles && typeof db.clientProfiles === "object" && !Array.isArray(db.clientProfiles)
       ? db.clientProfiles
@@ -680,7 +671,6 @@ configureRecordingsRouter(projectRoot, {
   persistQaMessageSnapshot,
   scheduleQaJob,
   verifiedStoredRecording,
-  requestClientId,
   canManageRecording,
   canDeleteRecording,
   findRecording,
@@ -693,7 +683,6 @@ configureRecordingsRouter(projectRoot, {
 app.use("/api/recordings", recordingsRouter);
 
 configureRecordingUploadSessionsRouter(projectRoot, {
-  requestClientId,
   queueTranscriptionJob,
   verifiedStoredRecording,
   publicRecording,
@@ -732,7 +721,6 @@ app.use("/api/health", healthRouter);
 
 configureMeetingBriefsRouter({
   dailyBriefDateParts,
-  requestClientId,
   loadDb,
   recordingsForBriefDate,
   findDailyBrief,
@@ -754,7 +742,6 @@ configureMeetingBriefsRouter({
 app.use("/api/meeting-briefs", meetingBriefsRouter);
 
 configureQaMessagesRouter({
-  requestClientId,
   loadDb,
   canReadQaMessage,
   qaMessageCache,
@@ -771,7 +758,6 @@ configureQaMessagesRouter({
 app.use("/api/qa-messages", qaMessagesRouter);
 
 configureAskRouter({
-  requestClientId,
   loadDb,
   findReusableQaMessage,
   publicQaMessage,
@@ -798,7 +784,6 @@ app.use("/api/voice-input", voiceInputRouter);
 configureProfileRouter({
   loadDb,
   clientProfileForRequest,
-  requestClientId,
   requestAccountPayload,
   updateDb,
   profilePatchForClient,
@@ -816,7 +801,6 @@ configureAuthRouter({
   requestAccountPayload,
   publicAccount,
   normalizeAccountUsername,
-  requestClientId,
   profilePatchForClient,
   updateDb,
   ensureDeleteAllAccount,
@@ -831,7 +815,6 @@ app.use("/api/auth", authRouter);
 
 configureFoldersRouter({
   loadDb,
-  requestClientId,
   canReadFolder,
   publicFolder,
   updateDb,

@@ -1,5 +1,6 @@
 import express from "express";
 import { canReadRecording } from "../utils/common.mjs";
+import { requestClientIdBetter } from "../utils/recordings.js";
 
 const router = express.Router();
 
@@ -11,7 +12,6 @@ export function configure(deps) {
 
 router.post("/", async (request, response) => {
   const {
-    requestClientId,
     loadDb,
     findReusableQaMessage,
     publicQaMessage,
@@ -22,7 +22,7 @@ router.post("/", async (request, response) => {
     persistQaMessageSnapshot,
   } = dependencies;
 
-  const clientId = requestClientId(request);
+  const clientId = requestClientIdBetter(request);
   const rawQuestion = String(request.body?.question || "").trim();
   const recordingId = String(request.body?.recordingId || "").trim();
   const recordingIds = Array.isArray(request.body?.recordingIds)

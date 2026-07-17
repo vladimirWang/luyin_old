@@ -13,6 +13,7 @@ import {
 import { audioDir, loadDb, tempDir, updateDb } from "../db.mjs";
 import { convertAudioFileToMp3, fileInfo, mergeAudioFilesToMp3 } from "../media.mjs";
 import {
+  requestClientIdBetter,
   requestClientNameAndDecode,
   safeDownloadName,
   recordingSearchScore,
@@ -38,9 +39,9 @@ export function configure(root, deps) {
 }
 
 async function sendRecordingAudio(req, res, disposition = "inline") {
-  const { hasValidAudioDownloadToken, isTencentMeetingRecording, queueTencentMeetingImportSync, tencentMeetingSyncInfoFromRecording, requestClientId, findRecording, resolveRecordingAudioPath } = dependencies;
+  const { hasValidAudioDownloadToken, isTencentMeetingRecording, queueTencentMeetingImportSync, tencentMeetingSyncInfoFromRecording, findRecording, resolveRecordingAudioPath } = dependencies;
   const db = await loadDb();
-  const clientId = requestClientId(req);
+  const clientId = requestClientIdBetter(req);
   const clientName = requestClientNameAndDecode(req);
   const recording = findRecording(db, req.params.id);
   const audioPath = recording ? resolveRecordingAudioPath(recording, projectRoot) : "";
@@ -76,9 +77,9 @@ async function sendRecordingAudio(req, res, disposition = "inline") {
 
 async function handleMeetingOutlineRequest(req, res, next) {
   try {
-    const { requestClientId, findRecording, findSegments, canManageRecording, generateAndStoreMeetingOutline } = dependencies;
+    const { findRecording, findSegments, canManageRecording, generateAndStoreMeetingOutline } = dependencies;
     const db = await loadDb();
-    const clientId = requestClientId(req);
+    const clientId = requestClientIdBetter(req);
     const clientName = requestClientNameAndDecode(req);
     const recording = findRecording(db, req.params.id);
     if (!recording || !canReadRecording(recording, clientId)) {
@@ -121,9 +122,9 @@ async function handleMeetingOutlineRequest(req, res, next) {
 }
 
 router.get("/", async (request, response) => {
-  const { schedulePendingLocalTranscriptionSweep, requestClientId, findSegments, publicRecording } = dependencies;
+  const { schedulePendingLocalTranscriptionSweep, findSegments, publicRecording } = dependencies;
   const db = await loadDb();
-  const clientId = requestClientId(request);
+  const clientId = requestClientIdBetter(request);
   const clientName = requestClientNameAndDecode(request);
   const canDeleteAll = canDeleteAllRecordings();
   const query = String(request.query.q || request.query.search || "").trim().toLowerCase();
@@ -158,7 +159,7 @@ router.get("/", async (request, response) => {
 });
 
 router.post("/", upload.single("audio"), async (request, response, next) => {
-  const { queueTranscriptionJob, verifiedStoredRecording = fileInfo, requestClientId, publicRecording } = dependencies;
+  const { queueTranscriptionJob, verifiedStoredRecording = fileInfo, publicRecording } = dependencies;
   try {
     if (!request.file) {
       response.status(400).json({ error: "缺少录音文件" });
@@ -169,7 +170,7 @@ router.post("/", upload.single("audio"), async (request, response, next) => {
     const fileName = `${id}.mp3`;
     const storagePath = path.join(audioDir, fileName);
     const now = new Date().toISOString();
-    const ownerClientId = requestClientId(request);
+    const ownerClientId = requestClientIdBetter(request);
     const ownerName = requestClientNameAndDecode(request);
     await convertAudioFileToMp3(request.file.path, storagePath);
     await removeFileIfExists(request.file.path);
@@ -223,7 +224,7 @@ router.post("/", upload.single("audio"), async (request, response, next) => {
 
 router.post("/segments", upload.array("audio", 480), async (request, response, next) => {
   // response.status(200).json({message: 'fff'})
-  const { queueTranscriptionJob, verifiedStoredRecording = fileInfo, requestClientId, publicRecording } = dependencies;
+  const { queueTranscriptionJob, verifiedStoredRecording = fileInfo, publicRecording } = dependencies;
   logger.debug("post recording.segments", {message: `files.length: ${request.files.length}`});
   const files = Array.isArray(request.files) ? request.files : [];
   try {
@@ -236,7 +237,7 @@ router.post("/segments", upload.array("audio", 480), async (request, response, n
     const fileName = `${id}.mp3`;
     const storagePath = path.join(audioDir, fileName);
     const now = new Date().toISOString();
-    const ownerClientId = requestClientId(request);
+    const ownerClientId = requestClientIdBetter(request);
     const ownerName = requestClientNameAndDecode(request);
     await mergeAudioFilesToMp3(
       files.map((file) => file.path),
@@ -325,9 +326,9 @@ router.post("/segments", upload.array("audio", 480), async (request, response, n
 });
 
 router.get("/:id", async (request, response) => {
-  const { requestClientId, findRecording, findSegments, publicRecording } = dependencies;
+  const { findRecording, findSegments, publicRecording } = dependencies;
   const db = await loadDb();
-  const clientId = requestClientId(request);
+  const clientId = requestClientIdBetter(request);
   const clientName = requestClientNameAndDecode(request);
   const canDeleteAll = canDeleteAllRecordings();
   const recording = findRecording(db, request.params.id);
@@ -340,8 +341,8 @@ router.get("/:id", async (request, response) => {
 });
 
 router.patch("/:id", async (request, response) => {
-  const { requestClientId, findRecording, canManageRecording, findSegments, publicRecording } = dependencies;
-  const clientId = requestClientId(request);
+  const { findRecording, canManageRecording, findSegments, publicRecording } = dependencies;
+  const clientId = requestClientIdBetter(request);
   const clientName = requestClientNameAndDecode(request);
   const updated = await updateDb((db) => {
     const recording = findRecording(db, request.params.id);
@@ -398,8 +399,8 @@ router.patch("/:id", async (request, response) => {
 });
 
 router.delete("/:id", async (request, response) => {
-  const { requestClientId, findRecording, canManageRecording, canDeleteRecording } = dependencies;
-  const clientId = requestClientId(request);
+  const { findRecording, canManageRecording, canDeleteRecording } = dependencies;
+  const clientId = requestClientIdBetter(request);
   const clientName = requestClientNameAndDecode(request);
   const canDeleteAll = canDeleteAllRecordings();
   let filePath = "";
@@ -450,9 +451,9 @@ router.get("/:id/audio.mp3", async (request, response) => {
 });
 
 router.post("/:id/audio-share-url", async (request, response) => {
-  const { createAudioDownloadToken, requestClientId, findRecording, resolveRecordingAudioPath } = dependencies;
+  const { createAudioDownloadToken, findRecording, resolveRecordingAudioPath } = dependencies;
   const db = await loadDb();
-  const clientId = requestClientId(request);
+  const clientId = requestClientIdBetter(request);
   const clientName = requestClientNameAndDecode(request);
   const recording = findRecording(db, request.params.id);
   const audioPath = recording ? resolveRecordingAudioPath(recording, projectRoot) : "";
@@ -473,10 +474,10 @@ router.post("/:id/audio-share-url", async (request, response) => {
 });
 
 router.post("/:id/wecom-audio-media", async (request, response, next) => {
-  const { requestClientId, findRecording, resolveRecordingAudioPath } = dependencies;
+  const { findRecording, resolveRecordingAudioPath } = dependencies;
   try {
     const db = await loadDb();
-    const clientId = requestClientId(request);
+    const clientId = requestClientIdBetter(request);
     const clientName = requestClientNameAndDecode(request);
     const recording = findRecording(db, request.params.id);
     const audioPath = recording ? resolveRecordingAudioPath(recording, projectRoot) : "";
@@ -501,9 +502,9 @@ router.post("/:id/wecom-audio-media", async (request, response, next) => {
 });
 
 router.get("/:id/transcript.txt", async (request, response) => {
-  const { requestClientId, findRecording } = dependencies;
+  const { findRecording } = dependencies;
   const db = await loadDb();
-  const clientId = requestClientId(request);
+  const clientId = requestClientIdBetter(request);
   const clientName = requestClientNameAndDecode(request);
   const recording = findRecording(db, request.params.id);
   if (!recording || !canReadRecording(recording, clientId) || !recording.transcriptPath || !existsSync(recording.transcriptPath)) {
@@ -520,9 +521,9 @@ router.post("/:id/meeting-outline", handleMeetingOutlineRequest);
 
 router.get("/:id/meeting-outline.pdf", async (request, response, next) => {
   try {
-    const { requestClientId, findRecording, findSegments, canManageRecording, generateAndStoreMeetingOutline, renderMeetingOutlinePdf } = dependencies;
+    const { findRecording, findSegments, canManageRecording, generateAndStoreMeetingOutline, renderMeetingOutlinePdf } = dependencies;
     const db = await loadDb();
-    const clientId = requestClientId(request);
+    const clientId = requestClientIdBetter(request);
     const clientName = requestClientNameAndDecode(request);
     const recording = findRecording(db, request.params.id);
     if (!recording || !canReadRecording(recording, clientId)) {
@@ -557,10 +558,10 @@ router.get("/:id/meeting-outline.pdf", async (request, response, next) => {
 });
 
 router.post("/:id/transcribe", async (request, response) => {
-  const { queueTranscriptionJob, isTencentMeetingRecording, syncTencentMeetingBuiltInTranscript, tencentMeetingSyncInfoFromRecording, isLocalApiTranscriptionRecording, requestClientId, findRecording, canManageRecording } = dependencies;
+  const { queueTranscriptionJob, isTencentMeetingRecording, syncTencentMeetingBuiltInTranscript, tencentMeetingSyncInfoFromRecording, isLocalApiTranscriptionRecording, findRecording, canManageRecording } = dependencies;
   logger.info("[CALL] /api/recordings/:id/transcribe", {message: `request.params.id: ${request.params.id}`});
   const db = await loadDb();
-  const clientId = requestClientId(request);
+  const clientId = requestClientIdBetter(request);
   const clientName = requestClientNameAndDecode(request);
   const recording = findRecording(db, request.params.id);
   if (!recording || !canManageRecording(recording, clientId, clientName)) {
@@ -603,8 +604,8 @@ router.post("/:id/transcribe", async (request, response) => {
 });
 
 router.post("/:id/restore", async (request, response) => {
-  const { requestClientId, findRecording, canManageRecording, findSegments, publicRecording } = dependencies;
-  const clientId = requestClientId(request);
+  const { findRecording, canManageRecording, findSegments, publicRecording } = dependencies;
+  const clientId = requestClientIdBetter(request);
   const clientName = requestClientNameAndDecode(request);
   const restored = await updateDb((db) => {
     const recording = findRecording(db, request.params.id);
@@ -624,8 +625,8 @@ router.post("/:id/restore", async (request, response) => {
 });
 
 router.post("/:id/ask", async (request, response) => {
-  const { findReusableQaMessage, publicQaMessage, persistQaAttachments, cacheQaMessage, persistQaMessageSnapshot, scheduleQaJob, requestClientId, findRecording } = dependencies;
-  const clientId = requestClientId(request);
+  const { findReusableQaMessage, publicQaMessage, persistQaAttachments, cacheQaMessage, persistQaMessageSnapshot, scheduleQaJob, findRecording } = dependencies;
+  const clientId = requestClientIdBetter(request);
   const clientName = requestClientNameAndDecode(request);
   const rawQuestion = String(request.body?.question || "").trim();
   const images = Array.isArray(request.body?.images) ? request.body.images.slice(0, 3) : [];

@@ -8,6 +8,7 @@ import { getTranscriptionMode } from "../transcription.mjs";
 import { audioDir, loadDb, tempDir, updateDb } from "../db.mjs";
 import { mergeAudioFilesToMp3 } from "../media.mjs";
 import {
+  requestClientIdBetter,
   requestClientNameAndDecode,
   safeUploadSessionId,
   uploadSessionPath,
@@ -27,13 +28,12 @@ export function configure(root, deps) {
 }
 
 router.post("/", async (request, response, next) => {
-  const { requestClientId } = dependencies;
   try {
     const sessionId = crypto.randomUUID();
     const dir = uploadSessionPath(sessionId);
     await mkdir(dir, { recursive: true });
     const now = new Date().toISOString();
-    const ownerClientId = requestClientId(request);
+    const ownerClientId = requestClientIdBetter(request);
     const ownerName = requestClientNameAndDecode(request);
     const meta = {
       id: sessionId,
@@ -55,13 +55,12 @@ router.post("/", async (request, response, next) => {
 });
 
 router.post("/:sessionId/segments", upload.array("audio", 80), async (request, response, next) => {
-  const { requestClientId } = dependencies;
   const files = Array.isArray(request.files) ? request.files : [];
   try {
     const sessionId = safeUploadSessionId(request.params.sessionId);
     const dir = uploadSessionPath(sessionId);
     const meta = await readUploadSessionMeta(sessionId);
-    if (!dir || !meta || meta.ownerClientId !== requestClientId(request)) {
+    if (!dir || !meta || meta.ownerClientId !== requestClientIdBetter(request)) {
       await Promise.all(files.map((file) => removeFileIfExists(file.path)));
       response.status(404).json({ error: "上传会话不存在" });
       return;
@@ -92,12 +91,11 @@ router.post("/:sessionId/segments", upload.array("audio", 80), async (request, r
 });
 
 router.delete("/:sessionId", async (request, response, next) => {
-  const { requestClientId } = dependencies;
   try {
     const sessionId = safeUploadSessionId(request.params.sessionId);
     const dir = uploadSessionPath(sessionId);
     const meta = await readUploadSessionMeta(sessionId);
-    if (!dir || !meta || meta.ownerClientId !== requestClientId(request)) {
+    if (!dir || !meta || meta.ownerClientId !== requestClientIdBetter(request)) {
       response.status(404).json({ error: "上传会话不存在" });
       return;
     }
@@ -109,12 +107,12 @@ router.delete("/:sessionId", async (request, response, next) => {
 });
 
 router.post("/:sessionId/finalize", async (request, response, next) => {
-  const { requestClientId, queueTranscriptionJob, verifiedStoredRecording, publicRecording } = dependencies;
+  const { queueTranscriptionJob, verifiedStoredRecording, publicRecording } = dependencies;
   try {
     const sessionId = safeUploadSessionId(request.params.sessionId);
     const dir = uploadSessionPath(sessionId);
     const meta = await readUploadSessionMeta(sessionId);
-    if (!dir || !meta || meta.ownerClientId !== requestClientId(request)) {
+    if (!dir || !meta || meta.ownerClientId !== requestClientIdBetter(request)) {
       response.status(404).json({ error: "上传会话不存在" });
       return;
     }

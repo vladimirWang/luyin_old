@@ -1,4 +1,5 @@
 import express from "express";
+import { requestClientIdBetter } from "../utils/recordings.js";
 
 const router = express.Router();
 
@@ -15,8 +16,8 @@ router.get("/", async (request, response) => {
 });
 
 router.put("/", async (request, response) => {
-  const { requestClientId, requestAccountPayload, updateDb, profilePatchForClient, accountClientId } = dependencies;
-  const clientId = requestClientId(request);
+  const { requestAccountPayload, updateDb, profilePatchForClient, accountClientId } = dependencies;
+  const clientId = requestClientIdBetter(request);
   const accountPayload = requestAccountPayload(request);
   const nextProfile = await updateDb((db) => {
     const patch = profilePatchForClient(request.body || {});

@@ -40,6 +40,27 @@ export function requestClientId(request) {
   return String(header || param).trim();
 }
 
+/**
+ * 获取可稳定标识当前访问者的客户端 ID。
+ *
+ * 已登录用户优先使用签名 Token 中的账号 ID；未登录用户使用请求中的合法
+ * `x-client-id`；两者都不存在时，根据请求 IP 和 User-Agent 生成匿名 ID。
+ * 客户端不能伪造 `account-` 前缀的账号 ID，返回值最长为 120 个字符。
+ *
+ * @param {import("express").Request} request Express 请求对象。
+ * @returns {string} 账号、客户端或匿名访问者的稳定 ID。
+ */
+export function requestClientIdBetter(request) {
+  const accountPayload = requestAccountPayload(request);
+  if (accountPayload?.accountId) return `account-${accountPayload.accountId}`;
+
+  const raw = String(request.get("x-client-id") || request.query?.clientId || "").trim();
+  if (raw && !raw.startsWith("account-")) return raw.slice(0, 120);
+
+  const fallback = `${request.ip || ""}|${request.get("user-agent") || ""}`;
+  return `ip-${crypto.createHash("sha1").update(fallback).digest("hex").slice(0, 20)}`;
+}
+
 export function requestClientName(request) {
   const header = request.headers["x-client-name"] || request.headers["client-name"] || "";
   const param = request.query?.clientName || request.body?.clientName || "";

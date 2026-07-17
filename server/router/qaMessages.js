@@ -1,4 +1,5 @@
 import express from "express";
+import { requestClientIdBetter } from "../utils/recordings.js";
 
 const router = express.Router();
 
@@ -9,8 +10,8 @@ export function configure(deps) {
 }
 
 router.get("/", async (request, response) => {
-  const { requestClientId, loadDb, canReadQaMessage, qaMessageCache, schedulePendingQaMessages, publicQaMessage } = dependencies;
-  const clientId = requestClientId(request);
+  const { loadDb, canReadQaMessage, qaMessageCache, schedulePendingQaMessages, publicQaMessage } = dependencies;
+  const clientId = requestClientIdBetter(request);
   const limit = Math.min(100, Math.max(1, Number(request.query.limit || 50)));
   const favoriteOnly = request.query.favorite === "true";
   const db = await loadDb();
@@ -34,8 +35,8 @@ router.get("/", async (request, response) => {
 });
 
 router.get("/:id", async (request, response) => {
-  const { requestClientId, cachedQaMessage, canReadQaMessage, scheduleQaJob, loadDb, findQaMessage, publicQaMessage } = dependencies;
-  const clientId = requestClientId(request);
+  const { cachedQaMessage, canReadQaMessage, scheduleQaJob, loadDb, findQaMessage, publicQaMessage } = dependencies;
+  const clientId = requestClientIdBetter(request);
   const cached = cachedQaMessage(request.params.id);
   if (cached && !cached.deletedAt && canReadQaMessage(cached, clientId)) {
     if (cached.pending || cached.status === "pending") scheduleQaJob(cached.id);
@@ -56,8 +57,8 @@ router.get("/:id", async (request, response) => {
 });
 
 router.patch("/:id", async (request, response) => {
-  const { requestClientId, updateDb, findQaMessage, canReadQaMessage, publicQaMessage } = dependencies;
-  const clientId = requestClientId(request);
+  const { updateDb, findQaMessage, canReadQaMessage, publicQaMessage } = dependencies;
+  const clientId = requestClientIdBetter(request);
   const updated = await updateDb((db) => {
     const message = findQaMessage(db, request.params.id);
     if (!message || message.deletedAt) return null;
@@ -81,8 +82,8 @@ router.patch("/:id", async (request, response) => {
 });
 
 router.delete("/:id", async (request, response) => {
-  const { requestClientId, updateDb, findQaMessage, canReadQaMessage } = dependencies;
-  const clientId = requestClientId(request);
+  const { updateDb, findQaMessage, canReadQaMessage } = dependencies;
+  const clientId = requestClientIdBetter(request);
   const deleted = await updateDb((db) => {
     const message = findQaMessage(db, request.params.id);
     if (!message) return false;
@@ -101,10 +102,10 @@ router.delete("/:id", async (request, response) => {
 });
 
 router.get("/:id/share.pdf", async (request, response, next) => {
-  const { requestClientId, loadDb, findQaMessage, canReadQaMessage, publicQaMessage, renderQaMessagePdf, safeDownloadName } = dependencies;
+  const { loadDb, findQaMessage, canReadQaMessage, publicQaMessage, renderQaMessagePdf, safeDownloadName } = dependencies;
   try {
     const db = await loadDb();
-    const clientId = requestClientId(request);
+    const clientId = requestClientIdBetter(request);
     const message = findQaMessage(db, request.params.id);
     if (!message || message.deletedAt || !canReadQaMessage(message, clientId)) {
       response.status(404).json({ error: "问答记录不存在" });
@@ -123,9 +124,9 @@ router.get("/:id/share.pdf", async (request, response, next) => {
 });
 
 router.get("/:id/attachments/:attachmentId", async (request, response) => {
-  const { requestClientId, loadDb, findQaMessage, canReadQaMessage, existsSync } = dependencies;
+  const { loadDb, findQaMessage, canReadQaMessage, existsSync } = dependencies;
   const db = await loadDb();
-  const clientId = requestClientId(request);
+  const clientId = requestClientIdBetter(request);
   const message = findQaMessage(db, request.params.id);
   if (!message || message.deletedAt || !canReadQaMessage(message, clientId)) {
     response.status(404).json({ error: "附件不存在" });

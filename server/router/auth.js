@@ -1,4 +1,5 @@
 import express from "express";
+import { requestClientIdBetter } from "../utils/recordings.js";
 
 const router = express.Router();
 
@@ -17,7 +18,7 @@ router.get("/me", async (request, response) => {
 });
 
 router.post("/enter", async (request, response) => {
-  const { normalizeAccountUsername, requestClientId, profilePatchForClient, updateDb, ensureDeleteAllAccount, verifyPassword, mergeLocalClientDataIntoAccount, crypto, createPasswordRecord, logger, accountAuthResponse } = dependencies;
+  const { normalizeAccountUsername, profilePatchForClient, updateDb, ensureDeleteAllAccount, verifyPassword, mergeLocalClientDataIntoAccount, crypto, createPasswordRecord, logger, accountAuthResponse } = dependencies;
   
   const username = normalizeAccountUsername(request.body?.username);
   const password = String(request.body?.password || "");
@@ -30,7 +31,7 @@ router.post("/enter", async (request, response) => {
     return;
   }
 
-  const sourceClientId = requestClientId(request);
+  const sourceClientId = requestClientIdBetter(request);
   const profilePatch = profilePatchForClient(request.body?.profile || {});
   let created = false;
   let passwordWrong = false;
@@ -71,7 +72,7 @@ router.post("/enter", async (request, response) => {
 });
 
 router.post("/register", async (request, response) => {
-  const { normalizeAccountUsername, requestClientId, profilePatchForClient, updateDb, ensureDeleteAllAccount, mergeLocalClientDataIntoAccount, crypto, createPasswordRecord, logger, accountAuthResponse } = dependencies;
+  const { normalizeAccountUsername, profilePatchForClient, updateDb, ensureDeleteAllAccount, mergeLocalClientDataIntoAccount, crypto, createPasswordRecord, logger, accountAuthResponse } = dependencies;
   
   const username = normalizeAccountUsername(request.body?.username);
   const password = String(request.body?.password || "");
@@ -84,7 +85,7 @@ router.post("/register", async (request, response) => {
     return;
   }
 
-  const sourceClientId = requestClientId(request);
+  const sourceClientId = requestClientIdBetter(request);
   const profilePatch = profilePatchForClient(request.body?.profile || {});
   const account = await updateDb((db) => {
     db.accounts = Array.isArray(db.accounts) ? db.accounts : [];
@@ -116,11 +117,11 @@ router.post("/register", async (request, response) => {
 });
 
 router.post("/login", async (request, response) => {
-  const { normalizeAccountUsername, requestClientId, profilePatchForClient, updateDb, ensureDeleteAllAccount, verifyPassword, mergeLocalClientDataIntoAccount, logger, accountAuthResponse } = dependencies;
+  const { normalizeAccountUsername, profilePatchForClient, updateDb, ensureDeleteAllAccount, verifyPassword, mergeLocalClientDataIntoAccount, logger, accountAuthResponse } = dependencies;
   
   const username = normalizeAccountUsername(request.body?.username);
   const password = String(request.body?.password || "");
-  const sourceClientId = requestClientId(request);
+  const sourceClientId = requestClientIdBetter(request);
   const profilePatch = profilePatchForClient(request.body?.profile || {});
   const account = await updateDb((db) => {
     db.accounts = Array.isArray(db.accounts) ? db.accounts : [];

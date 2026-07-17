@@ -1,5 +1,5 @@
 import express from "express";
-import { requestClientNameAndDecode } from "../utils/recordings.js";
+import { requestClientIdBetter, requestClientNameAndDecode } from "../utils/recordings.js";
 
 const router = express.Router();
 
@@ -12,7 +12,6 @@ export function configure(deps) {
 router.get("/today", async (request, response, next) => {
   const {
     dailyBriefDateParts,
-    requestClientId,
     loadDb,
     recordingsForBriefDate,
     findDailyBrief,
@@ -26,7 +25,7 @@ router.get("/today", async (request, response, next) => {
   } = dependencies;
   try {
     const parts = dailyBriefDateParts();
-    const clientId = requestClientId(request);
+    const clientId = requestClientIdBetter(request);
     const clientName = requestClientNameAndDecode(request);
     const db = await loadDb();
     const recordings = recordingsForBriefDate(db, parts.date, clientId, clientName);
@@ -69,7 +68,6 @@ router.get("/today", async (request, response, next) => {
 router.post("/today", async (request, response, next) => {
   const {
     dailyBriefDateParts,
-    requestClientId,
     queueDailyBriefGeneration,
     loadDb,
     recordingsForBriefDate,
@@ -78,7 +76,7 @@ router.post("/today", async (request, response, next) => {
   } = dependencies;
   try {
     const parts = dailyBriefDateParts();
-    const clientId = requestClientId(request);
+    const clientId = requestClientIdBetter(request);
     const clientName = requestClientNameAndDecode(request);
     const queued = await queueDailyBriefGeneration(parts.date, clientId, clientName);
     const db = await loadDb();
@@ -92,7 +90,6 @@ router.post("/today", async (request, response, next) => {
 
 router.get("/", async (request, response, next) => {
   const {
-    requestClientId,
     loadDb,
     dailyBriefDateKeysForRecordings,
     dailyBriefOwnerKey,
@@ -103,7 +100,7 @@ router.get("/", async (request, response, next) => {
     dailyBriefPlaceholder,
   } = dependencies;
   try {
-    const clientId = requestClientId(request);
+    const clientId = requestClientIdBetter(request);
     const clientName = requestClientNameAndDecode(request);
     const limit = Math.min(60, Math.max(1, Number(request.query.limit || 30)));
     const db = await loadDb();
@@ -133,7 +130,6 @@ router.get("/", async (request, response, next) => {
 router.get("/:date", async (request, response, next) => {
   const {
     normalizeDailyBriefDateParam,
-    requestClientId,
     dailyBriefPartsFromDateKey,
     loadDb,
     recordingsForBriefDate,
@@ -149,7 +145,7 @@ router.get("/:date", async (request, response, next) => {
       response.status(400).json({ error: "日期格式不正确" });
       return;
     }
-    const clientId = requestClientId(request);
+    const clientId = requestClientIdBetter(request);
     const clientName = requestClientNameAndDecode(request);
     const parts = dailyBriefPartsFromDateKey(dateKey);
     const db = await loadDb();
@@ -171,7 +167,6 @@ router.get("/:date", async (request, response, next) => {
 router.post("/:date", async (request, response, next) => {
   const {
     normalizeDailyBriefDateParam,
-    requestClientId,
     dailyBriefPartsFromDateKey,
     queueDailyBriefGeneration,
     loadDb,
@@ -185,7 +180,7 @@ router.post("/:date", async (request, response, next) => {
       response.status(400).json({ error: "日期格式不正确" });
       return;
     }
-    const clientId = requestClientId(request);
+    const clientId = requestClientIdBetter(request);
     const clientName = requestClientNameAndDecode(request);
     const parts = dailyBriefPartsFromDateKey(dateKey);
     const queued = await queueDailyBriefGeneration(dateKey, clientId, clientName);
@@ -200,7 +195,6 @@ router.post("/:date", async (request, response, next) => {
 
 router.get("/:date/share.pdf", async (request, response, next) => {
   const {
-    requestClientId,
     normalizeDailyBriefDateParam,
     loadDb,
     findDailyBrief,
@@ -208,7 +202,7 @@ router.get("/:date/share.pdf", async (request, response, next) => {
     safeDownloadName,
   } = dependencies;
   try {
-    const clientId = requestClientId(request);
+    const clientId = requestClientIdBetter(request);
     const dateKey = normalizeDailyBriefDateParam(request.params.date);
     if (!dateKey) {
       response.status(400).json({ error: "日期格式不正确" });
