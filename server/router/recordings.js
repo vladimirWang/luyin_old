@@ -19,6 +19,7 @@ import {
   recordingSearchScore,
 } from "../utils/recordings.js";
 import { uploadWecomTemporaryFile } from "../utils/wecom.js";
+import { isTencentMeetingRecording, tencentMeetingSyncInfoFromRecording } from "../utils/tencentMeeting.mjs";
 // import prisma from "../plugins/prisma.js";
 import {removeFileIfExists} from '../utils/file.js'
 import { canDeleteAllRecordings, canReadRecording } from "../utils/common.mjs";
@@ -39,7 +40,7 @@ export function configure(root, deps) {
 }
 
 async function sendRecordingAudio(req, res, disposition = "inline") {
-  const { hasValidAudioDownloadToken, isTencentMeetingRecording, queueTencentMeetingImportSync, tencentMeetingSyncInfoFromRecording, findRecording, resolveRecordingAudioPath } = dependencies;
+  const { hasValidAudioDownloadToken, queueTencentMeetingImportSync, findRecording, resolveRecordingAudioPath } = dependencies;
   const db = await loadDb();
   const clientId = requestClientIdBetter(req);
   const clientName = requestClientNameAndDecode(req);
@@ -52,7 +53,7 @@ async function sendRecordingAudio(req, res, disposition = "inline") {
   }
 
   if (!audioPath) {
-    if (String(recording.source || "").startsWith(TENCENT_MEETING_SOURCE_PREFIX)) {
+    if (isTencentMeetingRecording(recording)) {
       queueTencentMeetingImportSync(recording.id, tencentMeetingSyncInfoFromRecording(recording));
       res.setHeader("Retry-After", "15");
       res.status(202).json({ ok: false, pending: true, message: "腾讯会议音频正在同步，请稍后重试。" });
@@ -574,7 +575,7 @@ router.get("/:id/meeting-outline.pdf", async (request, response, next) => {
 });
 
 router.post("/:id/transcribe", async (request, response) => {
-  const { queueTranscriptionJob, isTencentMeetingRecording, syncTencentMeetingBuiltInTranscript, tencentMeetingSyncInfoFromRecording, isLocalApiTranscriptionRecording, findRecording, canManageRecording } = dependencies;
+  const { queueTranscriptionJob, syncTencentMeetingBuiltInTranscript, isLocalApiTranscriptionRecording, findRecording, canManageRecording } = dependencies;
   logger.info("[CALL] /api/recordings/:id/transcribe", {message: `request.params.id: ${request.params.id}`});
   const db = await loadDb();
   const clientId = requestClientIdBetter(request);
@@ -601,7 +602,7 @@ router.post("/:id/transcribe", async (request, response) => {
   }
 
   if (!isRecordingApiTranscriptionEnabled()) {
-    if (String(recording.source || "").startsWith(TENCENT_MEETING_SOURCE_PREFIX)) {
+    if (isTencentMeetingRecording(recording)) {
       const synced = await syncTencentMeetingBuiltInTranscript(recording.id, tencentMeetingSyncInfoFromRecording(recording));
       response.status(synced ? 200 : 202).json({
         ok: true,

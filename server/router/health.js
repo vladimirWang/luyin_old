@@ -1,4 +1,5 @@
 import express from "express";
+import { tencentMeetingWebhookStatus } from "../utils/tencentMeeting.mjs";
 
 const router = express.Router();
 
@@ -9,7 +10,7 @@ export function configure(deps) {
 }
 
 router.get("/", async (_request, response) => {
-  const { getTranscriptionDiagnostics, tencentMeetingWebhookStatus, ttsDiagnostics } = dependencies;
+  const { getTranscriptionDiagnostics, ttsDiagnostics } = dependencies;
   const diagnostics = getTranscriptionDiagnostics();
   response.json({
     ok: true,

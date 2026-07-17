@@ -1,5 +1,6 @@
 import express from "express";
 import { requestClientIdBetter } from "../utils/recordings.js";
+import { accountClientId } from "../utils/auth.mjs";
 
 const router = express.Router();
 
@@ -16,7 +17,7 @@ router.get("/", async (request, response) => {
 });
 
 router.put("/", async (request, response) => {
-  const { requestAccountPayload, updateDb, profilePatchForClient, accountClientId } = dependencies;
+  const { requestAccountPayload, updateDb, profilePatchForClient } = dependencies;
   const clientId = requestClientIdBetter(request);
   const accountPayload = requestAccountPayload(request);
   const nextProfile = await updateDb((db) => {

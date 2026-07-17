@@ -1,5 +1,6 @@
 import express from "express";
 import { requestClientIdBetter } from "../utils/recordings.js";
+import { normalizeAccountUsername, accountClientId, verifyPassword } from "../utils/auth.mjs";
 
 const router = express.Router();
 
@@ -18,7 +19,7 @@ router.get("/me", async (request, response) => {
 });
 
 router.post("/enter", async (request, response) => {
-  const { normalizeAccountUsername, profilePatchForClient, updateDb, ensureDeleteAllAccount, verifyPassword, mergeLocalClientDataIntoAccount, crypto, createPasswordRecord, logger, accountAuthResponse } = dependencies;
+  const { profilePatchForClient, updateDb, ensureDeleteAllAccount, mergeLocalClientDataIntoAccount, crypto, createPasswordRecord, logger, accountAuthResponse } = dependencies;
   
   const username = normalizeAccountUsername(request.body?.username);
   const password = String(request.body?.password || "");
@@ -72,7 +73,7 @@ router.post("/enter", async (request, response) => {
 });
 
 router.post("/register", async (request, response) => {
-  const { normalizeAccountUsername, profilePatchForClient, updateDb, ensureDeleteAllAccount, mergeLocalClientDataIntoAccount, crypto, createPasswordRecord, logger, accountAuthResponse } = dependencies;
+  const { profilePatchForClient, updateDb, ensureDeleteAllAccount, mergeLocalClientDataIntoAccount, crypto, createPasswordRecord, logger, accountAuthResponse } = dependencies;
   
   const username = normalizeAccountUsername(request.body?.username);
   const password = String(request.body?.password || "");
@@ -117,7 +118,7 @@ router.post("/register", async (request, response) => {
 });
 
 router.post("/login", async (request, response) => {
-  const { normalizeAccountUsername, profilePatchForClient, updateDb, ensureDeleteAllAccount, verifyPassword, mergeLocalClientDataIntoAccount, logger, accountAuthResponse } = dependencies;
+  const { profilePatchForClient, updateDb, ensureDeleteAllAccount, mergeLocalClientDataIntoAccount, logger, accountAuthResponse } = dependencies;
   
   const username = normalizeAccountUsername(request.body?.username);
   const password = String(request.body?.password || "");

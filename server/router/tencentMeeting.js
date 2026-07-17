@@ -1,7 +1,7 @@
 import express from "express";
 import logger from "../utils/log.js";
 import { parseJsonObject } from "../utils/common.mjs";
-import { requestTencentMeetingStsTokenIfNeeded, tencentMeetingVerifiedPlaintext } from "../utils/tencentMeeting.mjs";
+import { requestTencentMeetingStsTokenIfNeeded, tencentMeetingVerifiedPlaintext, tencentMeetingWebhookStatus } from "../utils/tencentMeeting.mjs";
 
 const router = express.Router();
 
@@ -12,7 +12,6 @@ export function configure(deps) {
 }
 
 router.get("/webhook/status", (_request, response) => {
-  const { tencentMeetingWebhookStatus } = dependencies;
   response.json({
     ok: true,
     tencentMeetingWebhook: tencentMeetingWebhookStatus(),

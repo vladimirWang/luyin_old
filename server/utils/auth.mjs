@@ -1,6 +1,29 @@
 import crypto from "node:crypto";
 import { projectRoot } from "../config.js";
 
+function generateSalt() {
+  return crypto.randomBytes(16).toString("base64url");
+}
+
+export function normalizeAccountUsername(value = "") {
+  return String(value || "").trim().toLowerCase().replace(/\s+/g, "");
+}
+
+export function accountClientId(accountId = "") {
+  return accountId ? `account-${accountId}` : "";
+}
+
+export function passwordHash(password, salt = generateSalt()) {
+  return crypto.scryptSync(String(password || ""), salt, 64).toString("base64url");
+}
+
+export function verifyPassword(password, account) {
+  if (!account?.passwordSalt || !account?.passwordHash) return false;
+  const actual = Buffer.from(passwordHash(password, account.passwordSalt));
+  const expected = Buffer.from(account.passwordHash);
+  return actual.length === expected.length && crypto.timingSafeEqual(actual, expected);
+}
+
 const accountTokenSecret =
   process.env.ACCOUNT_TOKEN_SECRET ||
   process.env.SESSION_SECRET ||

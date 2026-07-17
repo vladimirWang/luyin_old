@@ -11,8 +11,8 @@ import { fileURLToPath } from "node:url";
 import multer from "multer";
 import PDFDocument from "pdfkit";
 import logger from "./utils/log.js";
-import { requestAccountPayload, signAccountToken } from "./utils/auth.mjs";
-import { canReadRecording, parseJsonObject, firstEnv, splitEnvList } from "./utils/common.mjs";
+import { requestAccountPayload, signAccountToken, normalizeAccountUsername, accountClientId, passwordHash, verifyPassword } from "./utils/auth.mjs";
+import { canReadRecording, parseJsonObject, firstEnv, splitEnvList, envFlag, firstNonEmptyValue, asArray, boundedNumber, normalizeTtsText, detectTtsAudioFormat, userSafeErrorMessage, userSafeTranscriptionError } from "./utils/common.mjs";
 import {
   answerRecordingsQuestion,
   answerRecordingQuestion,
@@ -54,6 +54,63 @@ import {
   saveTencentMeetingStsToken,
   tencentMeetingApiConfig,
   tencentMeetingApiRequest,
+  tencentMeetingEventTimeMs,
+  tencentMeetingTimestampMs,
+  tencentMeetingDurationValueMs,
+  tencentMeetingDurationMsFromFile,
+  tencentMeetingDisplayTime,
+  tencentMeetingPlaceholderName,
+  tencentMeetingPlaceholderTag,
+  tencentMeetingImportTag,
+  tencentMeetingRecordFileId,
+  isTencentMeetingRecording,
+  tencentMeetingMeetingRecordId,
+  tencentMeetingSourceKindFromEvent,
+  tencentMeetingRecordFiles,
+  tencentMeetingRecordsFromPayload,
+  firstTencentMeetingMediaUrl,
+  tencentMeetingDownloadUrlFromFile,
+  tencentMeetingSummaryFilesFromPayload,
+  tencentMeetingSummaryDownloadUrlsFromPayload,
+  tencentMeetingTranscriptParagraphsFromPayload,
+  tencentMeetingTranscriptPidsFromPayload,
+  tencentMeetingTranscriptDetailConcurrency,
+  tencentMeetingTranscriptRetryIntervalMs,
+  isTencentMeetingTranscriptUnavailableError,
+  tencentMeetingTranscriptErrorKind,
+  dominantTencentMeetingTranscriptFailure,
+  isTencentMeetingTranscriptFinalWindowExpired,
+  tencentMeetingTranscriptFinalStatus,
+  tencentMeetingTranscriptNextRetryAt,
+  tencentMeetingTranscriptTextFromParagraph,
+  tencentMeetingTranscriptSpeakerName,
+  tencentMeetingTranscriptSegmentsFromPayload,
+  tencentMeetingTranscriptSegmentsFromText,
+  tencentMeetingNameFromDetail,
+  tencentMeetingOwnerNameFromDetail,
+  tencentMeetingCreatorUseridFromDetail,
+  tencentMeetingOperateTimeFromRecord,
+  tencentMeetingInfoFromRecordFile,
+  tencentMeetingSyncInfoFromRecording,
+  tencentMeetingRecordingTimeMs,
+  tencentMeetingPendingBatchSize,
+  tencentMeetingDiscoveryWindow,
+  tencentMeetingSummaryFallbackEnabled,
+  tencentMeetingAudioSyncEnabled,
+  tencentMeetingCallbackUrl,
+  tencentMeetingStsOperatorId,
+  tencentMeetingImportOwnerClientId,
+  tencentMeetingImportOwnerName,
+  tencentMeetingSourceKey,
+  tencentMeetingApiConfigured,
+  tencentMeetingQuery,
+  tencentMeetingSearchWindow,
+  tencentMeetingCandidateOperatorParams,
+  tencentMeetingCandidateUserIds,
+  tencentMeetingCandidateDownloadIdentityParams,
+  tencentMeetingCandidateTranscriptOperatorParams,
+  tencentMeetingWebhookConfig,
+  tencentMeetingWebhookStatus,
 } from "./utils/tencentMeeting.mjs";
 // import prisma from './plugins/prisma.js';
 import {removeFileIfExists} from './utils/file.js'
@@ -116,50 +173,9 @@ function hasWecomConfig() {
   return Boolean(config.appid && config.agentid && config.corpSecret && config.redirectUri);
 }
 
-function userSafeErrorMessage(error, fallback = "操作失败，请稍后重试。") {
-  const raw = String(error instanceof Error ? error.message : error || "");
-  if (!raw) return fallback;
-
-  if (/EPERM|EBUSY|EACCES|ENOENT|rename|db\.json|\.tmp|Cannot POST|DOCTYPE|<html|JSON parse|Bad control character|Expected .*JSON|tool_calls|DSML|parameter name=/i.test(raw)) {
-    return fallback;
-  }
-
-  return raw.slice(0, 120);
-}
-
-function userSafeTranscriptionError(error) {
-  const raw = String(error instanceof Error ? error.message : error || "");
-  if (/EPERM|EBUSY|EACCES|ENOENT|rename|db\.json|\.tmp/i.test(raw)) {
-    return "系统正在保存数据，请稍后点击重新转写。";
-  }
-  if (/timed out|timeout|429|rate|limit|busy|network|fetch|ECONN|ETIMEDOUT/i.test(raw)) {
-    return "转写服务暂时繁忙，请稍后点击重新转写。";
-  }
-  return "转写失败，请稍后点击重新转写。";
-}
-
-function normalizeAccountUsername(value = "") {
-  return String(value || "").trim().toLowerCase().replace(/\s+/g, "");
-}
-
-function accountClientId(accountId = "") {
-  return accountId ? `account-${accountId}` : "";
-}
-
-function passwordHash(password, salt) {
-  return crypto.scryptSync(String(password || ""), salt, 64).toString("base64url");
-}
-
 function createPasswordRecord(password) {
   const salt = crypto.randomBytes(16).toString("base64url");
   return { passwordSalt: salt, passwordHash: passwordHash(password, salt) };
-}
-
-function verifyPassword(password, account) {
-  if (!account?.passwordSalt || !account?.passwordHash) return false;
-  const actual = Buffer.from(passwordHash(password, account.passwordSalt));
-  const expected = Buffer.from(account.passwordHash);
-  return actual.length === expected.length && crypto.timingSafeEqual(actual, expected);
 }
 
 const DELETE_ALL_ACCOUNT_USERNAME = normalizeAccountUsername(process.env.DELETE_ALL_ACCOUNT_USERNAME || "zhangqi");
@@ -374,14 +390,6 @@ function ttsDiagnostics() {
   };
 }
 
-function normalizeTtsText(text) {
-  return String(text || "")
-    .replace(/\s+/g, " ")
-    .replace(/[<>]/g, "")
-    .trim()
-    .slice(0, 1800);
-}
-
 function extractQwenTtsAudioUrl(payload) {
   const candidates = [
     payload?.output?.audio?.url,
@@ -391,26 +399,6 @@ function extractQwenTtsAudioUrl(payload) {
     payload?.url,
   ];
   return String(candidates.find(Boolean) || "").trim();
-}
-
-function detectTtsAudioFormat(buffer, fallbackExt = "mp3") {
-  const signature = buffer.subarray(0, 12).toString("ascii");
-  if (signature.startsWith("RIFF") && signature.slice(8, 12) === "WAVE") {
-    return { ext: "wav", contentType: "audio/wav" };
-  }
-  if (signature.startsWith("ID3") || buffer[0] === 0xff) {
-    return { ext: "mp3", contentType: "audio/mpeg" };
-  }
-  if (signature.startsWith("OggS")) {
-    return { ext: "ogg", contentType: "audio/ogg" };
-  }
-  if (signature.startsWith("fLaC")) {
-    return { ext: "flac", contentType: "audio/flac" };
-  }
-  if (fallbackExt === "wav") return { ext: "wav", contentType: "audio/wav" };
-  if (fallbackExt === "ogg") return { ext: "ogg", contentType: "audio/ogg" };
-  if (fallbackExt === "flac") return { ext: "flac", contentType: "audio/flac" };
-  return { ext: "mp3", contentType: "audio/mpeg" };
 }
 
 function ttsAudioUrl(id, ext) {
@@ -584,23 +572,11 @@ const tencentMeetingImportJobs = new Set();
 const tencentMeetingTranscriptJobs = new Set();
 let tencentMeetingCloudDiscoveryJob = null;
 const TENCENT_MEETING_SOURCE_PREFIX = "tencent-meeting:";
-const LOCAL_API_TRANSCRIPTION_SOURCES = new Set(["wecom-h5", "wecom-h5-long-session", "wecom-h5-resumed"]);
 const LOCAL_TRANSCRIPTION_STALE_MS = 2 * 60 * 1000;
 const LOCAL_TRANSCRIPTION_SWEEP_INTERVAL_MS = 30 * 1000;
 const LOCAL_TRANSCRIPTION_SWEEP_LIMIT = 8;
 let tencentMeetingStsTokenRequestInFlight = null;
 let pendingLocalTranscriptionSweepAt = 0;
-
-function envFlag(value, fallback = false) {
-  if (value == null || value === "") return fallback;
-  return /^(1|true|yes|on)$/i.test(String(value).trim());
-}
-
-function tencentMeetingAudioSyncEnabled() {
-  const explicit = firstEnv("TENCENT_MEETING_AUDIO_SYNC_ENABLED", "WEMEET_AUDIO_SYNC_ENABLED");
-  if (explicit) return envFlag(explicit, false);
-  return tencentMeetingApiConfigured();
-}
 
 app.use(cors());
 app.use(express.json({ limit: "12mb" }));
@@ -658,8 +634,6 @@ configureRecordingsRouter(projectRoot, {
   queueTranscriptionJob,
   hasValidAudioDownloadToken,
   createAudioDownloadToken,
-  isTencentMeetingRecording,
-  tencentMeetingSyncInfoFromRecording,
   syncTencentMeetingBuiltInTranscript,
   queueTencentMeetingImportSync,
   isLocalApiTranscriptionRecording,
@@ -690,7 +664,6 @@ configureRecordingUploadSessionsRouter(projectRoot, {
 app.use("/api/recording-upload-sessions", recordingUploadSessionsRouter);
 
 configureTencentMeetingRouter({
-  tencentMeetingWebhookStatus,
   queueTencentMeetingCloudDiscovery,
   importTencentMeetingCloudRecordingsFromApi,
   appendTencentMeetingWebhookEvent,
@@ -702,7 +675,6 @@ app.use("/tencent-meeting", tencentMeetingRouter);
 
 configureTtsRouter({
   generateQwenTtsAudio,
-  detectTtsAudioFormat,
   findCachedTtsAudio,
 });
 app.use("/api/tts", ttsRouter);
@@ -714,7 +686,6 @@ app.use("/api/wecom", wecomRouter);
 
 configureHealthRouter({
   getTranscriptionDiagnostics,
-  tencentMeetingWebhookStatus,
   ttsDiagnostics,
 });
 app.use("/api/health", healthRouter);
@@ -787,7 +758,6 @@ configureProfileRouter({
   requestAccountPayload,
   updateDb,
   profilePatchForClient,
-  accountClientId,
 });
 app.use("/api/profile", profileRouter);
 
@@ -800,11 +770,9 @@ configureAuthRouter({
   loadDb,
   requestAccountPayload,
   publicAccount,
-  normalizeAccountUsername,
   profilePatchForClient,
   updateDb,
   ensureDeleteAllAccount,
-  verifyPassword,
   mergeLocalClientDataIntoAccount,
   crypto,
   createPasswordRecord,
@@ -821,35 +789,6 @@ configureFoldersRouter({
   crypto,
 });
 app.use("/api/folders", foldersRouter);
-
-function tencentMeetingWebhookConfig() {
-  const tokens = [
-    ...splitEnvList(process.env.TENCENT_MEETING_WEBHOOK_TOKEN),
-    ...splitEnvList(process.env.WEMEET_WEBHOOK_TOKEN),
-    ...splitEnvList(process.env.TENCENT_MEETING_WEBHOOK_TOKENS),
-    ...splitEnvList(process.env.WEMEET_WEBHOOK_TOKENS),
-  ].filter((token, index, list) => list.indexOf(token) === index);
-  const encodingAesKeys = expandTencentMeetingKeyCandidates([
-    ...splitEnvList(process.env.TENCENT_MEETING_WEBHOOK_ENCODING_AES_KEY),
-    ...splitEnvList(process.env.TENCENT_MEETING_ENCODING_AES_KEY),
-    ...splitEnvList(process.env.WEMEET_WEBHOOK_ENCODING_AES_KEY),
-    ...splitEnvList(process.env.WEMEET_ENCODING_AES_KEY),
-    ...splitEnvList(process.env.TENCENT_MEETING_WEBHOOK_ENCODING_AES_KEYS),
-    ...splitEnvList(process.env.WEMEET_WEBHOOK_ENCODING_AES_KEYS),
-  ]);
-
-  return {
-    token: tokens[0] || "",
-    tokens,
-    encodingAesKey: encodingAesKeys[0] || "",
-    encodingAesKeys,
-  };
-}
-
-function tencentMeetingCallbackUrl() {
-  const baseUrl = configuredPublicBaseUrl();
-  return baseUrl ? `${baseUrl}/api/tencent-meeting/webhook` : "";
-}
 
 async function appendTencentMeetingWebhookEvent(entry) {
   // await mkdir(tencentMeetingWebhookDir, { recursive: true });
@@ -875,10 +814,6 @@ async function importTencentMeetingStsTokenPayload(payload = {}) {
     );
   }
   return saved;
-}
-
-function tencentMeetingStsOperatorId() {
-  return firstEnv("TENCENT_MEETING_STS_OPERATOR_ID", "WEMEET_STS_OPERATOR_ID", "TENCENT_MEETING_OPERATOR_ID", "WEMEET_OPERATOR_ID");
 }
 
 async function requestTencentMeetingStsTokenIfPossible() {
@@ -907,181 +842,10 @@ async function requestTencentMeetingStsTokenIfPossible() {
   return tencentMeetingStsTokenRequestInFlight;
 }
 
-function tencentMeetingImportOwnerClientId() {
-  return firstEnv("TENCENT_MEETING_IMPORT_OWNER_CLIENT_ID", "TENCENT_MEETING_OWNER_CLIENT_ID") || "tencent-meeting";
-}
-
-function tencentMeetingImportOwnerName() {
-  return firstEnv("TENCENT_MEETING_IMPORT_OWNER_NAME", "TENCENT_MEETING_OWNER_NAME") || "腾讯会议录音笔";
-}
-
-function tencentMeetingSourceKey(recordFileId) {
-  return `${TENCENT_MEETING_SOURCE_PREFIX}${String(recordFileId || "").trim()}`;
-}
-
-function tencentMeetingEventTimeMs(value) {
-  const number = Number(value || 0);
-  if (!Number.isFinite(number) || number <= 0) return Date.now();
-  return number > 10_000_000_000 ? number : number * 1000;
-}
-
-function tencentMeetingTimestampMs(value) {
-  const number = Number(value || 0);
-  if (!Number.isFinite(number) || number <= 0) return 0;
-  return number > 10_000_000_000 ? number : number * 1000;
-}
-
-function firstNonEmptyValue(values = []) {
-  for (const value of values) {
-    if (value === undefined || value === null) continue;
-    const text = String(value).trim();
-    if (text) return value;
-  }
-  return "";
-}
-
-function tencentMeetingDurationValueMs(value, unit = "") {
-  const number = Number(value || 0);
-  if (!Number.isFinite(number) || number <= 0) return 0;
-  if (/ms|millisecond/i.test(unit) || number > 1000 * 60 * 60 * 24) return Math.round(number);
-  return Math.round(number * 1000);
-}
-
-function tencentMeetingDurationMsFromFile(file = {}, meetingInfo = {}, container = {}) {
-  const durationMs = firstNonEmptyValue([
-    file.duration_ms,
-    file.durationMs,
-    file.record_duration_ms,
-    file.recordDurationMs,
-    file.record_file_duration_ms,
-    file.file_duration_ms,
-    file.audio_duration_ms,
-    container.duration_ms,
-    container.durationMs,
-  ]);
-  const parsedDurationMs = tencentMeetingDurationValueMs(durationMs, "ms");
-  if (parsedDurationMs > 0) return parsedDurationMs;
-
-  const durationSeconds = firstNonEmptyValue([
-    file.duration,
-    file.record_duration,
-    file.recordDuration,
-    file.record_file_duration,
-    file.file_duration,
-    file.audio_duration,
-    meetingInfo.duration,
-    container.duration,
-  ]);
-  const parsedDurationSeconds = tencentMeetingDurationValueMs(durationSeconds, "seconds");
-  if (parsedDurationSeconds > 0) return parsedDurationSeconds;
-
-  const startMs = tencentMeetingTimestampMs(
-    firstNonEmptyValue([
-      file.start_time,
-      file.startTime,
-      meetingInfo.start_time,
-      meetingInfo.startTime,
-      container.start_time,
-      container.startTime,
-    ]),
-  );
-  const endMs = tencentMeetingTimestampMs(
-    firstNonEmptyValue([
-      file.end_time,
-      file.endTime,
-      meetingInfo.end_time,
-      meetingInfo.endTime,
-      container.end_time,
-      container.endTime,
-    ]),
-  );
-  return startMs > 0 && endMs > startMs ? endMs - startMs : 0;
-}
-
-function tencentMeetingDisplayTime(value) {
-  const date = new Date(tencentMeetingEventTimeMs(value));
-  const pad = (part) => String(part).padStart(2, "0");
-  return `${pad(date.getMonth() + 1)}/${pad(date.getDate())} ${pad(date.getHours())}:${pad(date.getMinutes())}`;
-}
-
-function tencentMeetingPlaceholderName(info) {
-  const title = String(info?.subject || info?.name || "").trim();
-  if (title) return title.slice(0, 80);
-  return `${info?.sourceKind === "cloud" ? "腾讯会议云录制" : "腾讯会议录音"} ${tencentMeetingDisplayTime(info?.operateTime)}`;
-}
-
-function tencentMeetingPlaceholderTag(status = "等待同步") {
-  return `腾讯会议录音笔 / ${compactTencentMeetingStatus(status)}`;
-}
-
-function tencentMeetingImportTag(info = {}, status = "等待同步") {
-  const kind = info.sourceKind === "cloud" ? "云录制" : "录音笔";
-  return `腾讯会议${kind} / ${compactTencentMeetingStatus(status)}`;
-}
-
-function compactTencentMeetingStatus(status = "") {
-  return String(status || "等待同步")
-    .replace(/等待腾讯会议文字/g, "等待腾讯文字")
-    .replace(/等待腾讯转写/g, "等待转写")
-    .replace(/已同步转写/g, "已同步")
-    .replace(/已同步音频/g, "已同步")
-    .replace(/等待下载权限/g, "待同步")
-    .replace(/腾讯会议无文字|腾讯无可用文字/g, "腾讯无文字")
-    .trim();
-}
-
-function tencentMeetingRecordFileId(file = {}) {
-  return String(
-    firstNonEmptyValue([
-      file.record_file_id,
-      file.recordFileId,
-      file.record_id,
-      file.recordId,
-      file.file_id,
-      file.fileId,
-      file.id,
-    ]),
-  ).trim();
-}
-
-function isTencentMeetingRecording(recording = {}) {
-  return String(recording.source || "").startsWith(TENCENT_MEETING_SOURCE_PREFIX);
-}
-
 function isLocalApiTranscriptionRecording(recording = {}) {
-  const result = LOCAL_API_TRANSCRIPTION_SOURCES.has(String(recording.source || "").trim());
-  logger.debug(`call isLocalApiTranscriptionRecording: LOCAL_API_TRANSCRIPTION_SOURCES: ${LOCAL_API_TRANSCRIPTION_SOURCES}, recording.source: ${recording.source}`)
+  const LOCAL_API_TRANSCRIPTION_SOURCES = new Set(["wecom-h5", "wecom-h5-long-session", "wecom-h5-resumed"]);
+  const result = LOCAL_API_TRANSCRIPTION_SOURCES.has(String(recording.source).trim());
   return result
-}
-
-function tencentMeetingMeetingRecordId(record = {}, file = {}, fallback = "") {
-  return String(
-    firstNonEmptyValue([
-      file.meeting_record_id,
-      file.meetingRecordId,
-      record.meeting_record_id,
-      record.meetingRecordId,
-      record.record_id,
-      record.recordId,
-      record.id,
-      fallback,
-    ]),
-  ).trim();
-}
-
-function tencentMeetingSourceKindFromEvent(event = "", container = {}, file = {}, fallback = "") {
-  const text = `${event} ${container.source_kind || container.sourceKind || ""} ${file.source_kind || file.sourceKind || ""} ${
-    file.file_type || file.fileType || file.type || ""
-  }`;
-  if (/audio-completed|audio_completed|recorder|recording_pen|recording-pen|录音笔/i.test(text)) return "recorder";
-  if (/cloud|record-completed|record_completed|recording\.completed|recording\.record-completed/i.test(text)) return "cloud";
-  return fallback || "recorder";
-}
-
-function asArray(value) {
-  if (Array.isArray(value)) return value;
-  if (value && typeof value === "object") return [value];
-  return [];
 }
 
 function extractTencentMeetingRecordingEvents(payload) {
@@ -1195,484 +959,6 @@ function extractTencentMeetingRecordingEvents(payload) {
   return entries;
 }
 
-function tencentMeetingApiConfigured() {
-  const config = tencentMeetingApiConfig();
-  return Boolean(config.secretId && config.secretKey && config.appId);
-}
-
-function tencentMeetingQuery(pathname, params = {}) {
-  const query = new URLSearchParams();
-  for (const [key, value] of Object.entries(params)) {
-    if (value === undefined || value === null || value === "") continue;
-    query.set(key, String(value));
-  }
-  const text = query.toString();
-  return text ? `${pathname}?${text}` : pathname;
-}
-
-function tencentMeetingSearchWindow(info = {}) {
-  const operateMs = tencentMeetingEventTimeMs(info.operateTime);
-  const startMs = operateMs - 1000 * 60 * 60 * 24 * 8;
-  const endMs = Math.max(Date.now() + 1000 * 60 * 60 * 24, operateMs + 1000 * 60 * 60 * 24 * 2);
-  return {
-    startTime: Math.floor(startMs / 1000),
-    endTime: Math.floor(endMs / 1000),
-  };
-}
-
-function tencentMeetingCandidateOperatorParams() {
-  const operatorId = firstEnv("TENCENT_MEETING_OPERATOR_ID", "WEMEET_OPERATOR_ID");
-  if (!operatorId) return [];
-  const type = firstEnv("TENCENT_MEETING_OPERATOR_ID_TYPE", "WEMEET_OPERATOR_ID_TYPE") || "3";
-  return [{ operator_id: operatorId, operator_id_type: type }];
-}
-
-function tencentMeetingCandidateUserIds() {
-  return [
-    ...splitEnvList(process.env.TENCENT_MEETING_USERIDS),
-    ...splitEnvList(process.env.TENCENT_MEETING_USER_IDS),
-    ...splitEnvList(process.env.WEMEET_USERIDS),
-    ...splitEnvList(process.env.WEMEET_USER_IDS),
-    firstEnv("TENCENT_MEETING_USERID", "WEMEET_USERID"),
-  ].filter((value, index, list) => value && list.indexOf(value) === index);
-}
-
-function tencentMeetingCandidateDownloadIdentityParams(info = {}) {
-  const eventUserIds = [
-    info.creatorUserid,
-    info.creatorUserId,
-    info.ownerUserid,
-    info.ownerUserId,
-    info.userid,
-    info.userId,
-  ].filter(Boolean);
-  const identities = [
-    ...eventUserIds.map((userid) => ({ userid })),
-    ...tencentMeetingCandidateUserIds().map((userid) => ({ userid })),
-    ...tencentMeetingCandidateOperatorParams(),
-  ];
-  const seen = new Set();
-  return identities.filter((identity) => {
-    const key = JSON.stringify(identity);
-    if (seen.has(key)) return false;
-    seen.add(key);
-    return true;
-  });
-}
-
-// 构建调用腾讯会议转写 API 时的候选操作符参数列表
-function tencentMeetingCandidateTranscriptOperatorParams(info = {}) {
-  const eventUserIds = [
-    info.creatorUserid,
-    info.creatorUserId,
-    info.ownerUserid,
-    info.ownerUserId,
-    info.userid,
-    info.userId,
-  ].filter(Boolean);
-  const identities = [
-    ...eventUserIds.map((operatorId) => ({ operator_id: operatorId, operator_id_type: 1 })),
-    ...tencentMeetingCandidateUserIds().map((operatorId) => ({ operator_id: operatorId, operator_id_type: 1 })),
-    ...tencentMeetingCandidateOperatorParams(),
-  ];
-  const seen = new Set();
-  return identities.filter((identity) => {
-    const key = JSON.stringify(identity);
-    if (seen.has(key)) return false;
-    seen.add(key);
-    return true;
-  });
-}
-
-function tencentMeetingRecordFiles(record = {}) {
-  return [
-    ...asArray(record.record_file),
-    ...asArray(record.recordFile),
-    ...asArray(record.record_files),
-    ...asArray(record.recording_files),
-    ...asArray(record.files),
-    ...asArray(record.record_file_list),
-    ...asArray(record.meeting_record),
-    ...asArray(record.meetingRecord),
-    ...asArray(record.meeting_records),
-    ...asArray(record.meetingRecords),
-  ];
-}
-
-function tencentMeetingRecordsFromPayload(payload = {}) {
-  return [
-    ...asArray(payload.record_meeting),
-    ...asArray(payload.record_meetings),
-    ...asArray(payload.meeting_record),
-    ...asArray(payload.meeting_record_list),
-    ...asArray(payload.meeting_records),
-    ...asArray(payload.records),
-    ...asArray(payload.record_list),
-    ...asArray(payload.list),
-    ...asArray(payload.data?.record_meeting),
-    ...asArray(payload.data?.record_meetings),
-    ...asArray(payload.data?.meeting_record),
-    ...asArray(payload.data?.meeting_record_list),
-    ...asArray(payload.data?.records),
-    ...asArray(payload.data?.record_list),
-    ...asArray(payload.data?.list),
-  ];
-}
-
-function firstTencentMeetingMediaUrl(value, seen = new Set()) {
-  if (!value) return "";
-  if (typeof value === "string") {
-    const text = value.trim();
-    return /^https?:\/\//i.test(text) ? text : "";
-  }
-  if (typeof value !== "object") return "";
-  if (seen.has(value)) return "";
-  seen.add(value);
-
-  const fieldsByPriority = [
-    [
-      "audio_download_url",
-      "audioDownloadUrl",
-      "audio_download_address",
-      "audioDownloadAddress",
-      "audio_address",
-      "audioAddress",
-      "audio_url",
-      "audioUrl",
-      "download_audio_url",
-      "downloadAudioUrl",
-    ],
-    [
-      "download_address",
-      "downloadAddress",
-      "download_url",
-      "downloadUrl",
-      "file_download_url",
-      "fileDownloadUrl",
-      "file_download_address",
-      "fileDownloadAddress",
-    ],
-    [
-      "media_url",
-      "mediaUrl",
-      "media_address",
-      "mediaAddress",
-      "recording_url",
-      "recordingUrl",
-      "recording_address",
-      "recordingAddress",
-      "video_download_url",
-      "videoDownloadUrl",
-      "video_url",
-      "videoUrl",
-      "play_url",
-      "playUrl",
-      "file_url",
-      "fileUrl",
-      "url",
-    ],
-  ];
-
-  for (const fields of fieldsByPriority) {
-    for (const field of fields) {
-      const url = firstTencentMeetingMediaUrl(value[field], seen);
-      if (url) return url;
-    }
-  }
-
-  const containers = [
-    "download_address_info",
-    "downloadAddressInfo",
-    "download_info",
-    "downloadInfo",
-    "audio",
-    "video",
-    "media",
-    "file",
-    "record_file",
-    "recordFile",
-  ];
-  for (const field of containers) {
-    const url = firstTencentMeetingMediaUrl(value[field], seen);
-    if (url) return url;
-  }
-
-  const arrays = [
-    "download_addresses",
-    "downloadAddresses",
-    "addresses",
-    "urls",
-    "files",
-    "record_files",
-    "recordFiles",
-    "recording_files",
-    "recordingFiles",
-    "media_files",
-    "mediaFiles",
-  ];
-  for (const field of arrays) {
-    for (const item of asArray(value[field])) {
-      const url = firstTencentMeetingMediaUrl(item, seen);
-      if (url) return url;
-    }
-  }
-
-  return "";
-}
-
-function tencentMeetingDownloadUrlFromFile(file = {}) {
-  return firstTencentMeetingMediaUrl(file);
-}
-
-function tencentMeetingSummaryFilesFromPayload(payload = {}) {
-  const nested = payload.data || {};
-  return [
-    ...asArray(payload.meeting_summary),
-    ...asArray(payload.meetingSummary),
-    ...asArray(payload.summary_files),
-    ...asArray(payload.summaryFiles),
-    ...asArray(payload.transcript_files),
-    ...asArray(payload.transcriptFiles),
-    ...asArray(nested.meeting_summary),
-    ...asArray(nested.meetingSummary),
-    ...asArray(nested.summary_files),
-    ...asArray(nested.summaryFiles),
-    ...asArray(nested.transcript_files),
-    ...asArray(nested.transcriptFiles),
-  ];
-}
-
-function tencentMeetingSummaryDownloadUrlsFromPayload(payload = {}) {
-  const urls = [];
-  const add = (value) => {
-    const text = String(value || "").trim();
-    if (text && !urls.includes(text)) urls.push(text);
-  };
-  for (const file of tencentMeetingSummaryFilesFromPayload(payload)) {
-    const fileType = String(file.file_type || file.fileType || file.type || "").toLowerCase();
-    const url =
-      file.download_address ||
-      file.downloadAddress ||
-      file.download_url ||
-      file.downloadUrl ||
-      file.url ||
-      "";
-    if (!fileType || fileType === "txt" || fileType === "text") add(url);
-  }
-  return urls;
-}
-
-function tencentMeetingTranscriptParagraphsFromPayload(payload = {}) {
-  return [
-    ...asArray(payload.minutes?.paragraphs),
-    ...asArray(payload.minutes?.paragraph_list),
-    ...asArray(payload.data?.minutes?.paragraphs),
-    ...asArray(payload.data?.minutes?.paragraph_list),
-    ...asArray(payload.paragraphs),
-    ...asArray(payload.paragraph_list),
-    ...asArray(payload.data?.paragraphs),
-    ...asArray(payload.data?.paragraph_list),
-  ];
-}
-
-function tencentMeetingTranscriptPidsFromPayload(payload = {}) {
-  const pidFromValue = (value) => {
-    if (!value || typeof value !== "object") return String(value || "").trim();
-    return String(
-      firstNonEmptyValue([
-        value.pid,
-        value.paragraph_id,
-        value.paragraphId,
-        value.id,
-        value.start_pid,
-        value.startPid,
-      ]),
-    ).trim();
-  };
-  const values = [
-    ...asArray(payload.pids),
-    ...asArray(payload.pid_list),
-    ...asArray(payload.paragraph_ids),
-    ...asArray(payload.data?.pids),
-    ...asArray(payload.data?.pid_list),
-    ...asArray(payload.data?.paragraph_ids),
-    ...tencentMeetingTranscriptParagraphsFromPayload(payload).map((paragraph) => paragraph.pid || paragraph.paragraph_id || paragraph.id),
-  ];
-  return [...new Set(values.map(pidFromValue).filter(Boolean))];
-}
-
-function boundedNumber(value, fallback, min, max) {
-  const number = Number(value);
-  if (!Number.isFinite(number)) return fallback;
-  return Math.min(max, Math.max(min, Math.round(number)));
-}
-
-function tencentMeetingTranscriptDetailConcurrency() {
-  return boundedNumber(process.env.TENCENT_MEETING_TRANSCRIPT_DETAIL_CONCURRENCY, 8, 1, 16);
-}
-
-function tencentMeetingTranscriptRetryIntervalMs(recording = {}) {
-  if (process.env.TENCENT_MEETING_TRANSCRIPT_RETRY_INTERVAL_MS) {
-    return boundedNumber(process.env.TENCENT_MEETING_TRANSCRIPT_RETRY_INTERVAL_MS, 60 * 1000, 30 * 1000, 60 * 60 * 1000);
-  }
-  const createdMs = Date.parse(recording.createdAt || recording.updatedAt || "");
-  const ageMs = Number.isFinite(createdMs) ? Date.now() - createdMs : 0;
-  if (ageMs > 0 && ageMs < 30 * 60 * 1000) return 60 * 1000;
-  if (ageMs > 0 && ageMs < 3 * 60 * 60 * 1000) return 2 * 60 * 1000;
-  return 5 * 60 * 1000;
-}
-
-function isTencentMeetingTranscriptUnavailableError(error) {
-  const message = String(error instanceof Error ? error.message : error || "");
-  return /108030001|108000403|纪要不存在|会议纪要|转写.*不存在|暂无.*转写|暂无.*纪要|transcript.*not/i.test(message);
-}
-
-function tencentMeetingTranscriptErrorKind(error) {
-  const message = String(error instanceof Error ? error.message : error || "");
-  if (/1009009042|暂无权限|无权限|permission|forbidden/i.test(message)) return "permission";
-  if (/108030002|纪要无内容|转写无内容|无内容/i.test(message)) return "empty";
-  if (/108004051|录制文件已经被删除|108004049|不存在的记录|record.*not.*exist/i.test(message)) return "missing";
-  if (isTencentMeetingTranscriptUnavailableError(error)) return "pending";
-  return message ? "error" : "pending";
-}
-
-function dominantTencentMeetingTranscriptFailure(kinds = []) {
-  const values = kinds.filter(Boolean);
-  if (!values.length) return "pending";
-  for (const kind of ["pending", "empty", "permission", "missing", "error"]) {
-    if (values.includes(kind)) return kind;
-  }
-  return "pending";
-}
-
-function isTencentMeetingTranscriptFinalWindowExpired(recording = {}) {
-  const createdMs = Date.parse(recording.createdAt || recording.updatedAt || "");
-  const ageMs = Number.isFinite(createdMs) ? Date.now() - createdMs : 0;
-  return ageMs > Number(process.env.TENCENT_MEETING_TRANSCRIPT_FINALIZE_MS || 24 * 60 * 60 * 1000);
-}
-
-function tencentMeetingTranscriptFinalStatus(failureKind = "pending", recording = {}) {
-  if (failureKind === "permission") {
-    return {
-      final: false,
-      statusText: "等待下载权限",
-      transcriptSource: "",
-      errorMessage: "腾讯会议暂未给当前应用读取这条录制文字的权限，请确认录制文件授权。",
-    };
-  }
-  if (failureKind === "missing") {
-    return {
-      final: true,
-      statusText: "腾讯无文字",
-      transcriptSource: "tencent-meeting-unavailable",
-      errorMessage: "腾讯会议返回这条录制文件不存在或已删除，无法同步文字。",
-    };
-  }
-  if ((failureKind === "empty" || failureKind === "pending") && isTencentMeetingTranscriptFinalWindowExpired(recording)) {
-    return {
-      final: true,
-      statusText: "腾讯无文字",
-      transcriptSource: "tencent-meeting-unavailable",
-      errorMessage: "腾讯会议没有为这条录制生成可同步的文字，通常是录制太短、无有效发言或腾讯侧文字未生成。",
-    };
-  }
-  return {
-    final: false,
-    statusText: "等待腾讯会议文字",
-    transcriptSource: "",
-    errorMessage: "腾讯会议还没有返回已生成的转写文字，后台会稍后自动同步。",
-  };
-}
-
-function tencentMeetingTranscriptNextRetryAt(recording = {}) {
-  return new Date(Date.now() + tencentMeetingTranscriptRetryIntervalMs(recording)).toISOString();
-}
-
-function tencentMeetingTranscriptTextFromParagraph(paragraph = {}) {
-  const direct = firstNonEmptyValue([
-    paragraph.text,
-    paragraph.content,
-    paragraph.transcript,
-    paragraph.sentence,
-    paragraph.words_text,
-  ]);
-  if (direct) return String(direct).trim();
-
-  const sentenceText = asArray(paragraph.sentences)
-    .map((sentence) => {
-      const words = asArray(sentence.words)
-        .map((word) => String(word?.text || word?.word || "").trim())
-        .filter(Boolean)
-        .join("");
-      return words || String(sentence.text || sentence.content || "").trim();
-    })
-    .filter(Boolean)
-    .join("");
-  return sentenceText.trim();
-}
-
-function tencentMeetingTranscriptSpeakerName(paragraph = {}, fallback = "") {
-  const speaker = paragraph.speaker_info || paragraph.speakerInfo || paragraph.speaker || {};
-  return String(
-    firstNonEmptyValue([
-      paragraph.speaker_name,
-      paragraph.speakerName,
-      paragraph.user_name,
-      paragraph.userName,
-      speaker.username,
-      speaker.user_name,
-      speaker.userName,
-      speaker.name,
-      fallback,
-    ]),
-  ).trim();
-}
-
-function tencentMeetingTranscriptSegmentsFromPayload(payload = {}, durationMs = 0) {
-  const paragraphs = tencentMeetingTranscriptParagraphsFromPayload(payload);
-  const speakerNameToKey = new Map();
-  const speakerMap = {};
-  const segments = paragraphs
-    .map((paragraph, index) => {
-      const text = tencentMeetingTranscriptTextFromParagraph(paragraph);
-      if (!text) return null;
-
-      const startMs = Math.max(0, Number(paragraph.start_time ?? paragraph.startTime ?? paragraph.begin_time ?? index * 8000) || 0);
-      const rawEndMs = Number(paragraph.end_time ?? paragraph.endTime ?? paragraph.finish_time ?? startMs + 8000) || startMs + 8000;
-      const endMs = Math.max(startMs + 1000, durationMs ? Math.min(rawEndMs, Math.max(durationMs, startMs + 1000)) : rawEndMs);
-      const speakerName = tencentMeetingTranscriptSpeakerName(paragraph, `说话人 ${speakerNameToKey.size + 1}`);
-      if (!speakerNameToKey.has(speakerName)) {
-        const key = `speaker-${speakerNameToKey.size + 1}`;
-        speakerNameToKey.set(speakerName, key);
-        speakerMap[key] = speakerName;
-      }
-      const speakerKey = speakerNameToKey.get(speakerName) || "speaker-1";
-      return {
-        id: crypto.randomUUID(),
-        startMs,
-        endMs,
-        text,
-        rawText: text,
-        correctedText: text,
-        apiRaw: {
-          provider: "tencent-meeting",
-          pid: paragraph.pid || paragraph.paragraph_id || paragraph.id || "",
-        },
-        speakerKey,
-        confidence: 0.98,
-      };
-    })
-    .filter(Boolean)
-    .sort((a, b) => a.startMs - b.startMs || a.endMs - b.endMs);
-
-  return {
-    segments,
-    speakerMap,
-    rawText: segments.map((segment) => segment.rawText || segment.text || "").filter(Boolean).join("\n"),
-    correctedText: segments.map((segment) => segment.correctedText || segment.text || "").filter(Boolean).join("\n"),
-  };
-}
-
 function cleanTencentMeetingSummaryText(text = "") {
   return String(text || "")
     .replace(/^\uFEFF/, "")
@@ -1695,100 +981,6 @@ function parseTencentMeetingTimecode(value = "") {
   return ((hours * 60 + minutes) * 60 + seconds) * 1000 + millis;
 }
 
-function tencentMeetingTranscriptSegmentsFromText(text = "", durationMs = 0) {
-  const cleaned = cleanTencentMeetingSummaryText(text);
-  if (!cleaned) return { segments: [], speakerMap: {}, rawText: "", correctedText: "" };
-
-  const speakerNameToKey = new Map();
-  const speakerMap = {};
-  const segments = [];
-  let pendingStartMs = null;
-  let pendingEndMs = null;
-
-  const speakerKeyForName = (name) => {
-    const speakerName = String(name || `说话人 ${speakerNameToKey.size + 1}`).trim();
-    if (!speakerNameToKey.has(speakerName)) {
-      const key = `speaker-${speakerNameToKey.size + 1}`;
-      speakerNameToKey.set(speakerName, key);
-      speakerMap[key] = speakerName;
-    }
-    return speakerNameToKey.get(speakerName) || "speaker-1";
-  };
-
-  const appendSegment = (line, fallbackIndex, startMs = null, endMs = null) => {
-    let content = String(line || "").trim();
-    if (!content) return;
-
-    const rangeMatch = content.match(
-      /^(\[?\d{1,2}:\d{2}(?::\d{2})?(?:[,.]\d{1,3})?\]?)\s*(?:-->|-|~|至)\s*(\[?\d{1,2}:\d{2}(?::\d{2})?(?:[,.]\d{1,3})?\]?)\s*(.*)$/,
-    );
-    if (rangeMatch) {
-      startMs = parseTencentMeetingTimecode(rangeMatch[1]);
-      endMs = parseTencentMeetingTimecode(rangeMatch[2]);
-      content = rangeMatch[3] || "";
-    } else {
-      const leadingTimeMatch = content.match(/^\[?(\d{1,2}:\d{2}(?::\d{2})?(?:[,.]\d{1,3})?)\]?\s*(.*)$/);
-      if (leadingTimeMatch) {
-        startMs = parseTencentMeetingTimecode(leadingTimeMatch[1]);
-        content = leadingTimeMatch[2] || "";
-      }
-    }
-
-    content = content.trim();
-    if (!content || /^(时间|发言人|内容)$/i.test(content)) return;
-
-    let speakerName = "";
-    const speakerMatch = content.match(/^([^：:]{1,28})[：:]\s*(.+)$/);
-    if (speakerMatch && !/[。！？.!?]$/.test(speakerMatch[1])) {
-      speakerName = speakerMatch[1].trim();
-      content = speakerMatch[2].trim();
-    }
-    if (!content) return;
-
-    const safeStartMs = Number.isFinite(startMs) && startMs !== null ? Math.max(0, startMs) : fallbackIndex * 8000;
-    const fallbackEndMs = safeStartMs + 8000;
-    const rawEndMs = Number.isFinite(endMs) && endMs !== null && endMs > safeStartMs ? endMs : fallbackEndMs;
-    const safeEndMs = Math.max(
-      safeStartMs + 1000,
-      durationMs ? Math.min(rawEndMs, Math.max(durationMs, safeStartMs + 1000)) : rawEndMs,
-    );
-
-    segments.push({
-      id: crypto.randomUUID(),
-      startMs: safeStartMs,
-      endMs: safeEndMs,
-      text: content,
-      rawText: content,
-      correctedText: content,
-      apiRaw: { provider: "tencent-meeting-summary" },
-      speakerKey: speakerKeyForName(speakerName || ""),
-      confidence: 0.98,
-    });
-  };
-
-  for (const line of cleaned.split("\n")) {
-    const timeRange = line.match(
-      /^(\d{1,2}:\d{2}(?::\d{2})?(?:[,.]\d{1,3})?)\s*-->\s*(\d{1,2}:\d{2}(?::\d{2})?(?:[,.]\d{1,3})?)/,
-    );
-    if (timeRange) {
-      pendingStartMs = parseTencentMeetingTimecode(timeRange[1]);
-      pendingEndMs = parseTencentMeetingTimecode(timeRange[2]);
-      continue;
-    }
-    appendSegment(line, segments.length, pendingStartMs, pendingEndMs);
-    pendingStartMs = null;
-    pendingEndMs = null;
-  }
-
-  const sortedSegments = segments.sort((a, b) => a.startMs - b.startMs || a.endMs - b.endMs);
-  return {
-    segments: sortedSegments,
-    speakerMap,
-    rawText: sortedSegments.map((segment) => segment.rawText || segment.text || "").filter(Boolean).join("\n"),
-    correctedText: sortedSegments.map((segment) => segment.correctedText || segment.text || "").filter(Boolean).join("\n"),
-  };
-}
-
 async function fetchTencentMeetingSummaryText(downloadUrl) {
   const url = String(downloadUrl || "").trim();
   if (!url) return "";
@@ -1797,14 +989,6 @@ async function fetchTencentMeetingSummaryText(downloadUrl) {
   });
   if (!response.ok) throw new Error(`Tencent Meeting summary download failed: ${response.status}`);
   return response.text();
-}
-
-function tencentMeetingSummaryFallbackEnabled(info = {}) {
-  // TODO 多余环境变量 configured始终为空字符串
-  // const configured = firstEnv("TENCENT_MEETING_SUMMARY_FALLBACK_ENABLED", "WEMEET_SUMMARY_FALLBACK_ENABLED");
-  // const configured = ""
-  // if (configured !== "") return envFlag(configured, false);
-  return false;
 }
 
 async function fetchTencentMeetingSummaryTranscript(info = {}, durationMs = 0, failureKinds = []) {
@@ -1920,119 +1104,6 @@ async function fetchTencentMeetingTranscriptByParagraphs(recordFileId, info, ope
 
   const result = tencentMeetingTranscriptSegmentsFromPayload(mergedPayload, durationMs);
   return result.segments.length > 0 ? result : null;
-}
-
-function tencentMeetingNameFromDetail(record = {}, file = {}, fallback = "") {
-  return String(
-    firstNonEmptyValue([
-      record.subject,
-      record.meeting_subject,
-      record.meetingSubject,
-      record.topic,
-      file.subject,
-      file.meeting_subject,
-      file.meetingSubject,
-      file.record_file_name,
-      file.recordFileName,
-      file.file_name,
-      file.name,
-      fallback ||
-        "",
-    ]),
-  ).trim();
-}
-
-function tencentMeetingOwnerNameFromDetail(record = {}, file = {}, fallback = "") {
-  const owner = file.owner || file.file_owner || file.fileOwner || record.owner || record.file_owner || {};
-  const creator = record.creator || record.meeting_info?.creator || record.meetingInfo?.creator || {};
-  return String(
-    firstNonEmptyValue([
-      file.owner_name,
-      file.ownerName,
-      file.user_name,
-      file.userName,
-      owner.user_name,
-      owner.userName,
-      owner.username,
-      owner.name,
-      record.owner_name,
-      record.ownerName,
-      record.user_name,
-      record.userName,
-      creator.user_name,
-      creator.userName,
-      creator.username,
-      creator.name,
-      fallback,
-    ]),
-  ).trim();
-}
-
-function tencentMeetingCreatorUseridFromDetail(record = {}, file = {}, fallback = "") {
-  const owner = file.owner || file.file_owner || file.fileOwner || record.owner || record.file_owner || {};
-  const creator = record.creator || record.meeting_info?.creator || record.meetingInfo?.creator || {};
-  return String(
-    firstNonEmptyValue([
-      file.userid,
-      file.user_id,
-      file.userId,
-      owner.userid,
-      owner.user_id,
-      owner.userId,
-      record.userid,
-      record.user_id,
-      record.userId,
-      creator.userid,
-      creator.user_id,
-      creator.UserID,
-      creator.userId,
-      fallback,
-    ]),
-  ).trim();
-}
-
-function tencentMeetingOperateTimeFromRecord(record = {}, file = {}, fallback = "") {
-  return firstNonEmptyValue([
-    file.operate_time,
-    file.operateTime,
-    file.create_time,
-    file.createTime,
-    file.end_time,
-    file.endTime,
-    file.start_time,
-    file.startTime,
-    record.operate_time,
-    record.operateTime,
-    record.end_time,
-    record.endTime,
-    record.start_time,
-    record.startTime,
-    fallback,
-    Date.now(),
-  ]);
-}
-
-function tencentMeetingInfoFromRecordFile(record = {}, file = {}, fallback = {}, sourceKind = "cloud") {
-  const meetingInfo = record.meeting_info || record.meetingInfo || record;
-  const recordFileId = tencentMeetingRecordFileId(file) || String(fallback.recordFileId || "").trim();
-  const meetingRecordId = tencentMeetingMeetingRecordId(record, file, fallback.meetingRecordId || fallback.meeting_record_id || "");
-  const detectedSourceKind = tencentMeetingSourceKindFromEvent(fallback.event || record.event || "", record, file, sourceKind);
-  return {
-    event: fallback.event || "recording.discovery",
-    sourceKind: detectedSourceKind,
-    recordFileId,
-    meetingRecordId,
-    operateTime: tencentMeetingOperateTimeFromRecord(record, file, fallback.operateTime),
-    subject: tencentMeetingNameFromDetail(record, file, fallback.subject),
-    ownerName: tencentMeetingOwnerNameFromDetail(record, file, fallback.ownerName),
-    creatorUserid: tencentMeetingCreatorUseridFromDetail(record, file, fallback.creatorUserid),
-    durationMs: tencentMeetingDurationMsFromFile(file, meetingInfo, record) || Number(fallback.durationMs || 0),
-    meetingId: meetingInfo.meeting_id || meetingInfo.meetingId || record.meeting_id || record.meetingId || fallback.meetingId || "",
-    meetingCode: meetingInfo.meeting_code || meetingInfo.meetingCode || record.meeting_code || record.meetingCode || fallback.meetingCode || "",
-    downloadUrl: tencentMeetingDownloadUrlFromFile(file) || fallback.downloadUrl || "",
-    record,
-    file,
-  };
 }
 
 async function findTencentMeetingDownloadTarget(info) {
@@ -2503,23 +1574,6 @@ function queueTencentMeetingImportSync(recordingId, info = {}) {
   return true;
 }
 
-function tencentMeetingSyncInfoFromRecording(recording = {}) {
-  return {
-    recordFileId: String(recording.source || "").slice(TENCENT_MEETING_SOURCE_PREFIX.length),
-    meetingRecordId: recording.tencentMeetingMeetingRecordId || "",
-    sourceKind:
-      recording.tencentMeetingSourceKind ||
-      (/云录制|cloud|recording\.completed/i.test(`${recording.tag || ""} ${recording.userAgent || ""}`) ? "cloud" : "recorder"),
-    operateTime: recording.createdAt || Date.now(),
-    subject: recording.name,
-    ownerName: recording.ownerName || "",
-    durationMs: recording.durationMs || 0,
-    creatorUserid: recording.tencentMeetingCreatorUserid || "",
-    meetingId: recording.tencentMeetingMeetingId || "",
-    meetingCode: recording.tencentMeetingMeetingCode || "",
-  };
-}
-
 function needsTencentMeetingTranscriptSync(db, recording = {}) {
   if (!String(recording.source || "").startsWith(TENCENT_MEETING_SOURCE_PREFIX)) return false;
   if (recording.deletedAt) return false;
@@ -2531,21 +1585,8 @@ function needsTencentMeetingTranscriptSync(db, recording = {}) {
   return Boolean(tencentMeetingSyncInfoFromRecording(recording).recordFileId);
 }
 
-function tencentMeetingRecordingTimeMs(recording = {}) {
-  const candidates = [recording.updatedAt, recording.createdAt, recording.sharedAt, recording.transcribedAt];
-  for (const value of candidates) {
-    const time = Date.parse(value || "");
-    if (Number.isFinite(time)) return time;
-  }
-  return 0;
-}
-
 function newestTencentMeetingRecordingFirst(a = {}, b = {}) {
   return tencentMeetingRecordingTimeMs(b) - tencentMeetingRecordingTimeMs(a);
-}
-
-function tencentMeetingPendingBatchSize(envName, fallback) {
-  return Math.min(50, Math.max(1, Number(process.env[envName] || fallback)));
 }
 
 function queueTencentMeetingTranscriptSync(recordingId, info = {}) {
@@ -2677,16 +1718,6 @@ async function importTencentMeetingWebhookPayload(payload) {
   return results;
 }
 
-function tencentMeetingDiscoveryWindow() {
-  const lookbackDays = Math.min(31, 7);
-  const endMs = Date.now() + 1000 * 60 * 60 * 6;
-  const startMs = endMs - lookbackDays * 24 * 60 * 60 * 1000;
-  return {
-    startTime: Math.floor(startMs / 1000),
-    endTime: Math.floor(endMs / 1000),
-  };
-}
-
 async function fetchTencentMeetingCloudRecordInfos() {
   if (!tencentMeetingApiConfigured()) return [];
   // 申请token
@@ -2802,25 +1833,6 @@ async function queueTencentMeetingPendingImports() {
   }
 
   return pendingAudio.length + pendingTranscripts.length;
-}
-
-function tencentMeetingWebhookStatus() {
-  const config = tencentMeetingWebhookConfig();
-  return {
-    configured: Boolean(config.tokens.length && config.encodingAesKeys.length),
-    callbackUrl: tencentMeetingCallbackUrl(),
-    apiConfigured: tencentMeetingApiConfigured(),
-    cloudDiscovery: {
-      enabled: Number(process.env.TENCENT_MEETING_CLOUD_DISCOVERY_INTERVAL_MS || 10 * 60 * 1000) !== 0,
-      lookbackDays: Math.min(31, 7),
-    },
-    needs: {
-      publicBaseUrl: !configuredPublicBaseUrl(),
-      token: !config.tokens.length,
-      encodingAesKey: !config.encodingAesKeys.length,
-      apiCredentials: !tencentMeetingApiConfigured(),
-    },
-  };
 }
 
 function safeUploadSessionId(value = "") {

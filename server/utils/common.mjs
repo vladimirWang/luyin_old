@@ -25,6 +25,82 @@ export function splitEnvList(value = "") {
     .filter(Boolean);
 }
 
+export function envFlag(value, fallback = false) {
+  if (value == null || value === "") return fallback;
+  return /^(1|true|yes|on)$/i.test(String(value).trim());
+}
+
+export function firstNonEmptyValue(values = []) {
+  for (const value of values) {
+    if (value === undefined || value === null) continue;
+    const text = String(value).trim();
+    if (text) return value;
+  }
+  return "";
+}
+
+export function asArray(value) {
+  if (Array.isArray(value)) return value;
+  if (value && typeof value === "object") return [value];
+  return [];
+}
+
+export function boundedNumber(value, fallback, min, max) {
+  const number = Number(value);
+  if (!Number.isFinite(number)) return fallback;
+  return Math.min(max, Math.max(min, Math.round(number)));
+}
+
+export function normalizeTtsText(text) {
+  return String(text || "")
+    .replace(/\s+/g, " ")
+    .replace(/[<>]/g, "")
+    .trim()
+    .slice(0, 1800);
+}
+
+export function detectTtsAudioFormat(buffer, fallbackExt = "mp3") {
+  const signature = buffer.subarray(0, 12).toString("ascii");
+  if (signature.startsWith("RIFF") && signature.slice(8, 12) === "WAVE") {
+    return { ext: "wav", contentType: "audio/wav" };
+  }
+  if (signature.startsWith("ID3") || buffer[0] === 0xff) {
+    return { ext: "mp3", contentType: "audio/mpeg" };
+  }
+  if (signature.startsWith("OggS")) {
+    return { ext: "ogg", contentType: "audio/ogg" };
+  }
+  if (signature.startsWith("fLaC")) {
+    return { ext: "flac", contentType: "audio/flac" };
+  }
+  if (fallbackExt === "wav") return { ext: "wav", contentType: "audio/wav" };
+  if (fallbackExt === "ogg") return { ext: "ogg", contentType: "audio/ogg" };
+  if (fallbackExt === "flac") return { ext: "flac", contentType: "audio/flac" };
+  return { ext: "mp3", contentType: "audio/mpeg" };
+}
+
+export function userSafeErrorMessage(error, fallback = "操作失败，请稍后重试。") {
+  const raw = String(error instanceof Error ? error.message : error || "");
+  if (!raw) return fallback;
+
+  if (/EPERM|EBUSY|EACCES|ENOENT|rename|db\.json|\.tmp|Cannot POST|DOCTYPE|<html|JSON parse|Bad control character|Expected .*JSON|tool_calls|DSML|parameter name=/i.test(raw)) {
+    return fallback;
+  }
+
+  return raw.slice(0, 120);
+}
+
+export function userSafeTranscriptionError(error) {
+  const raw = String(error instanceof Error ? error.message : error || "");
+  if (/EPERM|EBUSY|EACCES|ENOENT|rename|db\.json|\.tmp/i.test(raw)) {
+    return "系统正在保存数据，请稍后点击重新转写。";
+  }
+  if (/timed out|timeout|429|rate|limit|busy|network|fetch|ECONN|ETIMEDOUT/i.test(raw)) {
+    return "转写服务暂时繁忙，请稍后点击重新转写。";
+  }
+  return "转写失败，请稍后点击重新转写。";
+}
+
 /**
  * 判断当前请求用户是否拥有删除全部录音的权限。
  *

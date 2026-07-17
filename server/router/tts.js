@@ -3,6 +3,7 @@ import path from "node:path";
 import { existsSync } from "node:fs";
 import { readFile } from "node:fs/promises";
 import { ttsDir } from "../db.mjs";
+import { detectTtsAudioFormat } from "../utils/common.mjs";
 
 const router = express.Router();
 
@@ -26,7 +27,7 @@ router.post("/", async (request, response) => {
 });
 
 router.get("/:id/audio.:ext", async (request, response) => {
-  const { detectTtsAudioFormat, findCachedTtsAudio } = dependencies;
+  const { findCachedTtsAudio } = dependencies;
   const id = String(request.params.id || "").replace(/[^a-f0-9]/gi, "").slice(0, 80);
   const requestedExt = String(request.params.ext || "").replace(/[^a-z0-9]/gi, "").toLowerCase();
   const requestedPath = requestedExt ? path.join(ttsDir, `${id}.${requestedExt}`) : "";
