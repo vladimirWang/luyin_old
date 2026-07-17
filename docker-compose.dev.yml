@@ -1,8 +1,10 @@
 services:
   app:
     build:
-      context: .
+      context: ./server
       dockerfile: Dockerfile
+      args:
+        INSTALL_DEV: "true"
     ports:
       - "8787:8787"
       - "9229:9229"
@@ -16,10 +18,19 @@ services:
       FFPROBE_PATH: /usr/bin/ffprobe
       MYSQL_HOST: mysql
       MYSQL_PORT: 3306
+    depends_on:
+      mysql:
+        condition: service_healthy
     restart: unless-stopped
     extra_hosts:
       - "host.docker.internal:host-gateway"
-    command: ["npx", "nodemon", "--inspect=0.0.0.0:9229", "server/index.mjs"]
+    command: ["pnpm", "--dir", "server", "exec", "nodemon", "--inspect=0.0.0.0:9229", "index.mjs"]
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:8787/api/health').then(r=>{if(!r.ok)process.exit(1)}).catch(()=>process.exit(1))"]
+      interval: 5s
+      timeout: 3s
+      retries: 12
+      start_period: 20s
     volumes:
       - ./server/logs:/app/logs
       - ./server/storage:/app/server/storage
