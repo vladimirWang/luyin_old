@@ -5224,25 +5224,25 @@ scheduleDailyBriefGeneration();
 //   console.error("Artifact migration failed", error);
 // });
 
-queueTencentMeetingPendingImports().catch((error) => {
-  console.error("Tencent Meeting pending import scan failed", error);
-});
+// queueTencentMeetingPendingImports().catch((error) => {
+//   console.error("Tencent Meeting pending import scan failed", error);
+// });
 
-queueTencentMeetingCloudDiscovery();
-setTimeout(() => schedulePendingLocalTranscriptionSweep("startup", { force: true }), 2000).unref?.();
+// queueTencentMeetingCloudDiscovery();
+// setTimeout(() => schedulePendingLocalTranscriptionSweep("startup", { force: true }), 2000).unref?.();
 
-const tencentMeetingPendingImportIntervalMs = Number(process.env.TENCENT_MEETING_PENDING_IMPORT_INTERVAL_MS || 5 * 60 * 1000);
-if (tencentMeetingPendingImportIntervalMs > 0) {
-  setInterval(() => {
-    queueTencentMeetingPendingImports().catch((error) => {
-      console.warn("Tencent Meeting pending import scan failed:", error instanceof Error ? error.message : error);
-    });
-  }, Math.max(60 * 1000, tencentMeetingPendingImportIntervalMs)).unref();
-}
+// const tencentMeetingPendingImportIntervalMs = Number(process.env.TENCENT_MEETING_PENDING_IMPORT_INTERVAL_MS || 5 * 60 * 1000);
+// if (tencentMeetingPendingImportIntervalMs > 0) {
+//   setInterval(() => {
+//     queueTencentMeetingPendingImports().catch((error) => {
+//       console.warn("Tencent Meeting pending import scan failed:", error instanceof Error ? error.message : error);
+//     });
+//   }, Math.max(60 * 1000, tencentMeetingPendingImportIntervalMs)).unref();
+// }
 
-const tencentMeetingCloudDiscoveryIntervalMs = Number(process.env.TENCENT_MEETING_CLOUD_DISCOVERY_INTERVAL_MS || 10 * 60 * 1000);
-if (tencentMeetingCloudDiscoveryIntervalMs > 0) {
-  setInterval(() => {
-    queueTencentMeetingCloudDiscovery();
-  }, Math.max(2 * 60 * 1000, tencentMeetingCloudDiscoveryIntervalMs)).unref();
-}
+// const tencentMeetingCloudDiscoveryIntervalMs = Number(process.env.TENCENT_MEETING_CLOUD_DISCOVERY_INTERVAL_MS || 10 * 60 * 1000);
+// if (tencentMeetingCloudDiscoveryIntervalMs > 0) {
+//   setInterval(() => {
+//     queueTencentMeetingCloudDiscovery();
+//   }, Math.max(2 * 60 * 1000, tencentMeetingCloudDiscoveryIntervalMs)).unref();
+// }
