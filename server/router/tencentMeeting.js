@@ -1,6 +1,7 @@
 import express from "express";
 import logger from "../utils/log.js";
 import { parseJsonObject } from "../utils/common.mjs";
+import { requestTencentMeetingStsTokenIfNeeded, tencentMeetingVerifiedPlaintext } from "../utils/tencentMeeting.mjs";
 
 const router = express.Router();
 
@@ -36,10 +37,35 @@ router.post("/cloud-recordings/sync", async (request, response, next) => {
   }
 });
 
+router.post("/sts-token/request", async (_request, response, next) => {
+  try {
+    const result = await requestTencentMeetingStsTokenIfNeeded();
+    if (!result.requested) {
+      const missingOperator = result.reason === "missing_operator_id";
+      response.status(missingOperator ? 503 : 502).json({
+        ok: false,
+        requested: false,
+        error: missingOperator
+          ? "未配置腾讯会议 STS Operator ID"
+          : "腾讯会议 STS Token 申请失败",
+      });
+      return;
+    }
+    response.json({
+      ok: true,
+      requested: true,
+      message: "STS Token 申请已提交，请等待腾讯会议回调",
+    });
+  } catch (error) {
+    next(error);
+  }
+});
+
 router.get("/webhook", (request, response) => {
-  const { tencentMeetingVerifiedPlaintext } = dependencies;
+  logger.debug("get /webhook: ", {message: "step 1"})
   try {
     const plaintext = tencentMeetingVerifiedPlaintext(request, request.query.check_str);
+    logger.debug("get /webhook plaintext: ", {message: plaintext})
     response.status(200).type("text/plain").send(plaintext);
   } catch (error) {
     console.warn("[Tencent Meeting] webhook GET rejected:", error instanceof Error ? error.message : error);
@@ -48,10 +74,13 @@ router.get("/webhook", (request, response) => {
 });
 
 router.post("/webhook", async (request, response) => {
-  const { tencentMeetingVerifiedPlaintext, appendTencentMeetingWebhookEvent, importTencentMeetingStsTokenPayload, importTencentMeetingWebhookPayload, queueTencentMeetingCloudDiscovery } = dependencies;
+  const { appendTencentMeetingWebhookEvent, importTencentMeetingStsTokenPayload, importTencentMeetingWebhookPayload, queueTencentMeetingCloudDiscovery } = dependencies;
   try {
     const plaintext = tencentMeetingVerifiedPlaintext(request, request.body?.data);
+    logger.info("tencentmeeting webhook plaintext: ", {message: plaintext})
     const payload = parseJsonObject(plaintext);
+    logger.info("tencentmeeting webhook payload: ", {message: JSON.stringify(payload)})
+    // 记录腾讯会议webhhook日志
     await appendTencentMeetingWebhookEvent({
       receivedAt: new Date().toISOString(),
       event: payload?.event || payload?.Event || payload?.event_type || "",
@@ -59,18 +88,28 @@ router.post("/webhook", async (request, response) => {
       payload: payload || plaintext,
     });
     response.status(200).type("text/plain").send("successfully received callback");
-    if (payload) {
-      Promise.resolve()
-        .then(async () => {
-          await importTencentMeetingStsTokenPayload(payload);
-          await importTencentMeetingWebhookPayload(payload);
-          queueTencentMeetingCloudDiscovery();
-        })
-        .catch((error) => console.warn("[Tencent Meeting] webhook background import failed:", error instanceof Error ? error.message : error));
-    } else {
-      console.warn("[Tencent Meeting] webhook decrypted but did not contain JSON payload.");
-    }
+    logger.debug("成功响应腾讯会议webhook: ", {message: '继续后续逻辑'})
+    // if (payload) {
+    //   Promise.resolve()
+    //     .then(async () => {
+    //       // 处理 common.sts-token 事件：提取并持久化腾讯会议返回的 STS Token，
+    //       // 更新进程内 Token 缓存，并在保存成功后重新调度此前因缺少权限而挂起的导入任务。
+    //       await importTencentMeetingStsTokenPayload(payload);
+
+    //       // 处理录音相关 Webhook：从回调中提取录音文件和会议信息，
+    //       // 创建或更新本地录音记录，并按事件内容调度后续的音频、转写同步流程。
+    //       await importTencentMeetingWebhookPayload(payload);
+
+    //       // Webhook 只代表单次事件，可能缺少完整录制信息或存在漏推；
+    //       // 因此额外触发一次云录制发现，用腾讯会议 API 对近期录制列表进行补充和状态校准。
+    //       queueTencentMeetingCloudDiscovery();
+    //     })
+    //     .catch((error) => console.warn("[Tencent Meeting] webhook background import failed:", error instanceof Error ? error.message : error));
+    // } else {
+    //   console.warn("[Tencent Meeting] webhook decrypted but did not contain JSON payload.");
+    // }
   } catch (error) {
+    logger.error("tencentmeeting webhook failed: ", {message: error.message})
     console.warn("[Tencent Meeting] webhook POST rejected:", error instanceof Error ? error.message : error);
     response.status(error.statusCode || 400).type("text/plain").send("invalid callback");
   }

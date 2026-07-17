@@ -139,6 +139,34 @@ button {
   cursor: pointer;
 }
 
+.sts-token-request-button {
+  display: inline-flex;
+  min-height: 38px;
+  align-items: center;
+  gap: 7px;
+  padding: 0 14px;
+  border: 1px solid rgba(25, 28, 33, 0.12);
+  border-radius: 999px;
+  color: #ffffff;
+  background: rgba(25, 28, 33, 0.92);
+  box-shadow: 0 8px 22px rgba(25, 28, 33, 0.14);
+  font-size: 12px;
+  font-weight: 750;
+  cursor: pointer;
+  transition: transform 160ms ease, opacity 160ms ease;
+}
+
+.sts-token-request-button:hover,
+.sts-token-request-button:focus-visible {
+  transform: translateY(-1px);
+}
+
+.sts-token-request-button:disabled {
+  cursor: wait;
+  opacity: 0.58;
+  transform: none;
+}
+
 .zustand-user-result {
   position: relative;
   width: min(330px, calc(100vw - 32px));

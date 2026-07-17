@@ -19,7 +19,7 @@
       "name": "Server: Nodemon",
       "runtimeExecutable": "${workspaceFolder}/server/node_modules/.bin/nodemon",
       "program": "${workspaceFolder}/server/index.mjs",
-      "cwd": "${workspaceFolder}",
+      "cwd": "${workspaceFolder}/server",
       "envFile": "${workspaceFolder}/.env.dev.local",
       "console": "internalConsole",
       "restart": true,

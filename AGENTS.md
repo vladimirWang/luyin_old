@@ -24,4 +24,6 @@ Records menu decisions: the avatar dropdown uses a compact, content-driven width
 
 Detail component decisions: keep the chat-history panel in `client/src/pages/Detail/components` as a controlled component. Its owner controls visibility through `open` and `onClose`, while panel-only state such as the history/favorites tab remains inside the panel.
 
+Server router dependency decisions: functions needed by server routes should be imported directly from focused utility modules whenever practical. Do not pass importable utility functions through router `configure()` dependency objects; reserve configuration injection for behavior that genuinely belongs to the application composition root or would otherwise create circular dependencies.
+
 Visual direction: login and not-found screens follow the recording-list reference style—cool gray-blue atmospheric background, oversized heavy black display type, translucent white cards with generous radii, near-black primary actions, coral secondary accents, circular outline-icon controls, and soft low-contrast shadows.

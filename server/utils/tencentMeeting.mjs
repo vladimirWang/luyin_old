@@ -1,8 +1,166 @@
 import crypto from "node:crypto";
+import { mkdir, readFile, writeFile } from "node:fs/promises";
+import path from "node:path";
 import logger from "./log.js";
 import { normalizeTencentMeetingEncryptedData, tencentMeetingDecryptData } from "./tencentMeetingCrypto.mjs";
-import { splitEnvList } from "./common.mjs";
+import { firstEnv, parseJsonObject, splitEnvList } from "./common.mjs";
 import { decodedTencentMeetingAesKeyLength } from "./algo.js";
+import { projectRoot } from "../config.js";
+
+let stsTokenRequestInFlight = null;
+const stsTokenCache = { loaded: false, value: "", expiresAt: 0, reqId: "" };
+const stsTokenPath = path.join(projectRoot, "storage", "tencent-meeting-sts-token.json");
+
+export async function requestTencentMeetingStsTokenIfNeeded() {
+  const operatorId = process.env.TENCENT_MEETING_STS_OPERATOR_ID
+  if (!operatorId) {
+    return { requested: false, reason: "missing_operator_id" };
+  }
+  if (stsTokenRequestInFlight) return stsTokenRequestInFlight;
+
+  stsTokenRequestInFlight = (async () => {
+    // const validTime = Number(firstEnv("TENCENT_MEETING_STS_VALID_TIME_HOURS", "WEMEET_STS_VALID_TIME_HOURS") || 24);
+    const body = {
+      operator_id: operatorId,
+      operator_id_type: 1,
+      // valid_time: [6, 12, 24].includes(validTime) ? validTime : 24,
+      valid_time: 24
+    };
+    console.log("sts token request: ", JSON.stringify(body))
+    try {
+      await tencentMeetingApiRequest("POST", "/v1/app/sts-token", body, { skipStsToken: true });
+      return { requested: true };
+    } catch (error) {
+      logger.warn("[Tencent Meeting] STS token request failed", {
+        message: error instanceof Error ? error.message : String(error),
+      });
+      return { requested: false, reason: "request_failed" };
+    } finally {
+      stsTokenRequestInFlight = null;
+    }
+  })();
+
+  return stsTokenRequestInFlight;
+}
+
+function tencentMeetingStsExpireMs(value) {
+  const number = Number(value || 0);
+  if (!Number.isFinite(number) || number <= 0) return 0;
+  return number > 10_000_000_000 ? number : number * 1000;
+}
+
+export async function loadTencentMeetingStsToken() {
+  const envToken = firstEnv("TENCENT_MEETING_STS_TOKEN", "WEMEET_STS_TOKEN");
+  if (envToken) {
+    const envExpiresAt = tencentMeetingStsExpireMs(firstEnv("TENCENT_MEETING_STS_EXPIRE_TS", "WEMEET_STS_EXPIRE_TS")) || Date.now() + 1000 * 60 * 30;
+    return isTencentMeetingStsTokenFresh({ value: envToken, expiresAt: envExpiresAt }) ? envToken : "";
+  }
+
+  if (stsTokenCache.loaded) {
+    return isTencentMeetingStsTokenFresh(stsTokenCache) ? stsTokenCache.value : "";
+  }
+
+  stsTokenCache.loaded = true;
+  try {
+    const raw = await readFile(stsTokenPath, "utf8");
+    const parsed = parseJsonObject(raw) || {};
+    stsTokenCache.value = String(parsed.value || parsed.sts_token || "");
+    stsTokenCache.expiresAt = tencentMeetingStsExpireMs(parsed.expiresAt || parsed.expire_ts);
+    stsTokenCache.reqId = String(parsed.reqId || parsed.req_id || "");
+  } catch {
+    stsTokenCache.value = "";
+    stsTokenCache.expiresAt = 0;
+    stsTokenCache.reqId = "";
+  }
+  return isTencentMeetingStsTokenFresh(stsTokenCache) ? stsTokenCache.value : "";
+}
+
+export async function saveTencentMeetingStsToken(tokenInfo = {}) {
+  logger.debug("save sts token step2: ", {message: JSON.stringify(tokenInfo)})
+  const value = String(tokenInfo.sts_token || tokenInfo.stsToken || tokenInfo.token || "").trim();
+  if (!value) return false;
+  const expiresAt = tencentMeetingStsExpireMs(tokenInfo.expire_ts || tokenInfo.expireTs || tokenInfo.expiresAt);
+  const reqId = String(tokenInfo.req_id || tokenInfo.reqId || "").trim();
+  const record = {
+    value,
+    expiresAt,
+    reqId,
+    updatedAt: new Date().toISOString(),
+  };
+  await mkdir(path.dirname(stsTokenPath), { recursive: true });
+  logger.debug("save sts token makedir success: ", {message: ''})
+  await writeFile(stsTokenPath, `${JSON.stringify(record, null, 2)}\n`, "utf8");
+  logger.debug("save sts token save success: ", {message: ''})
+  stsTokenCache.loaded = true;
+  stsTokenCache.value = value;
+  stsTokenCache.expiresAt = expiresAt;
+  stsTokenCache.reqId = reqId;
+  return true;
+}
+
+export function tencentMeetingApiConfig() {
+  const secretId = firstEnv("TENCENT_MEETING_SECRET_ID", "WEMEET_SECRET_ID");
+  const secretKey = firstEnv("TENCENT_MEETING_SECRET_KEY", "WEMEET_SECRET_KEY");
+  const appId = firstEnv("TENCENT_MEETING_ENTERPRISE_ID", "WEMEET_ENTERPRISE_ID", "TENCENT_MEETING_APP_ID", "WEMEET_APP_ID");
+  const sdkId = firstEnv("TENCENT_MEETING_SDK_ID", "TENCENT_MEETING_APPLICATION_ID", "WEMEET_SDK_ID", "WEMEET_APPLICATION_ID");
+  return {
+    baseUrl: firstEnv("TENCENT_MEETING_API_BASE_URL", "WEMEET_API_BASE_URL") || "https://api.meeting.qq.com",
+    secretId,
+    secretKey,
+    appId,
+    sdkId,
+  };
+}
+
+export async function tencentMeetingApiHeaders(method, uri, bodyText = "", options = {}) {
+  const config = tencentMeetingApiConfig();
+  if (!config.secretId || !config.secretKey || !config.appId) {
+    throw new Error("Tencent Meeting API is not configured.");
+  }
+
+  const timestamp = String(Math.floor(Date.now() / 1000));
+  const nonce = String(crypto.randomInt(100000, 2147483647));
+  const headerString = `X-TC-Key=${config.secretId}&X-TC-Nonce=${nonce}&X-TC-Timestamp=${timestamp}`;
+  const stringToSign = [String(method || "GET").toUpperCase(), headerString, uri, bodyText].join("\n");
+  const hexDigest = crypto.createHmac("sha256", config.secretKey).update(stringToSign).digest("hex");
+  const signature = Buffer.from(hexDigest, "utf8").toString("base64");
+  const headers = {
+    "Content-Type": "application/json",
+    "X-TC-Key": config.secretId,
+    "X-TC-Timestamp": timestamp,
+    "X-TC-Nonce": nonce,
+    "X-TC-Signature": signature,
+    "X-TC-Registered": firstEnv("TENCENT_MEETING_REGISTERED", "WEMEET_REGISTERED") || "1",
+    AppId: config.appId,
+  };
+  const sendSdkId = firstEnv("TENCENT_MEETING_SEND_SDK_ID", "WEMEET_SEND_SDK_ID");
+  if (config.sdkId && sendSdkId !== "false") headers.SdkId = config.sdkId;
+  if (!options.skipStsToken) {
+    const stsToken = await loadTencentMeetingStsToken();
+    if (stsToken) headers["STS-Token"] = stsToken;
+  }
+  return headers;
+}
+
+export async function tencentMeetingApiRequest(method, uri, body = null, options = {}) {
+  const config = tencentMeetingApiConfig();
+  const bodyText = body ? JSON.stringify(body) : "";
+  const response = await fetch(`${config.baseUrl.replace(/\/+$/, "")}${uri}`, {
+    method,
+    headers: await tencentMeetingApiHeaders(method, uri, bodyText, options),
+    body: bodyText || undefined,
+    signal: AbortSignal.timeout(Math.max(5000, Number(process.env.TENCENT_MEETING_API_TIMEOUT_MS || 30000))),
+  });
+  const text = await response.text();
+  const payload = parseJsonObject(text) || { raw: text };
+  const apiError = payload?.error_info || payload?.errorInfo || payload?.error;
+  const apiErrorCode = apiError?.new_error_code || apiError?.error_code || apiError?.code || payload?.code;
+  if (!response.ok || apiErrorCode) {
+    const message = apiError?.message || apiError?.msg || payload?.message || text || response.statusText;
+    throw new Error(`Tencent Meeting API ${method} ${uri} failed: ${response.status} ${apiErrorCode || ""} ${String(message).slice(0, 160)}`.trim());
+  }
+  return payload;
+}
 
 export function expandTencentMeetingKeyCandidates(keys) {
   const output = [];

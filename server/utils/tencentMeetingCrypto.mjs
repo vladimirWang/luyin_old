@@ -1,3 +1,5 @@
+import crypto from "node:crypto";
+
 
 // 说明：对外部输入或模型输出做规整与安全清理。
 export function normalizeTencentMeetingEncryptedData(value) {

@@ -184,3 +184,23 @@ model DailyMeetingBrief {
   @@unique([dateKey, clientId], map: "daily_meeting_briefs_date_client_unique")
   @@map("daily_meeting_briefs")
 }
+
+model TencentMeetingWebhookEvent {
+  id             String    @id @default(cuid()) @db.VarChar(30)
+  uniqueSequence String?   @map("unique_sequence") @db.VarChar(160)
+  eventType      String?   @map("event_type") @db.VarChar(120)
+  payload        Json
+  status         String    @default("pending") @db.VarChar(32)
+  attempts       Int       @default(0)
+  receivedAt     DateTime  @default(now()) @map("received_at") @db.Timestamp(0)
+  lastAttemptAt  DateTime? @map("last_attempt_at") @db.Timestamp(0)
+  processedAt    DateTime? @map("processed_at") @db.Timestamp(0)
+  errorMessage   String?   @map("error_message") @db.LongText
+  createdAt      DateTime  @default(now()) @map("created_at") @db.Timestamp(0)
+  updatedAt      DateTime  @default(now()) @updatedAt @map("updated_at") @db.Timestamp(0)
+
+  // @@unique([uniqueSequence], map: "tm_webhook_events_sequence_unique")
+  @@index([status, createdAt], map: "tm_webhook_events_status_created_index")
+  @@index([eventType, receivedAt], map: "tm_webhook_events_type_received_index")
+  @@map("tencent_meeting_webhook_events")
+}

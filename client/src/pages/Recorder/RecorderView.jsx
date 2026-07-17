@@ -1,21 +1,44 @@
 import { useState } from "react";
-import { Mic, UserRound, X } from "lucide-react";
-import { formatDuration } from "../../utils/index.js";
+import { KeyRound, Mic, UserRound, X } from "lucide-react";
+import { api, formatDuration, showToast } from "../../utils/index.js";
 import { useWecomAuthStore } from "../../stores/useWecomAuthStore.js";
 import { WaveCanvas } from "./WaveCanvas.jsx";
 import { useRecorder } from "./useRecorder.js";
 
 export function RecorderView({ createUploadCard, uploadRecordingSegments }) {
   const [queriedUser, setQueriedUser] = useState(null);
+  const [stsTokenRequesting, setStsTokenRequesting] = useState(false);
   const { elapsedMs, isRecording, level, recordingError, toggleRecording } = useRecorder({
     createUploadCard,
     uploadRecordingSegments,
   });
   const ringLevel = isRecording ? Math.max(0.04, Math.min(1, level)) : 0;
 
+  async function requestStsToken() {
+    if (stsTokenRequesting) return;
+    setStsTokenRequesting(true);
+    try {
+      const result = await api("/api/tencent-meeting/sts-token/request", { method: "POST" });
+      showToast(result.message || "STS Token 申请已提交");
+    } catch (error) {
+      showToast(error instanceof Error ? error.message : "STS Token 申请失败");
+    } finally {
+      setStsTokenRequesting(false);
+    }
+  }
+
   return (
     <section className="screen recorder-screen" aria-label="录音">
       <div className="zustand-user-query">
+        <button
+          className="sts-token-request-button"
+          type="button"
+          onClick={requestStsToken}
+          disabled={stsTokenRequesting}
+        >
+          <KeyRound size={16} />
+          {stsTokenRequesting ? "申请中…" : "申请 STS Token"}
+        </button>
         {/* <button
           className="zustand-user-query-button"
           type="button"

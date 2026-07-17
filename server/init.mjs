@@ -1,7 +1,6 @@
 import { attachmentDir, audioDir, ensureStorage, loadDb, tempDir, transcriptDir, ttsDir, updateDb } from "./db.mjs";
-
 export async function init() {
-    const task1 = ensureStorage()
+    const taskEnsureStorage = ensureStorage()
 
-    return Promise.all([task1])
+    return Promise.all([taskEnsureStorage])
 }

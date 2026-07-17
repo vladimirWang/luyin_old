@@ -2,7 +2,8 @@ import { copyFile, mkdir, readFile, rename, rm, writeFile } from "node:fs/promis
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import logger from "./utils/log.js";
-
+import { tencentMeetingWebhookDir } from "./config.js";
+console.log("-------------tencentMeetingWebhookDir: ", tencentMeetingWebhookDir)
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
 export const dataDir = path.join(__dirname, "data");
@@ -179,7 +180,13 @@ export async function ensureStorage() {
   const task5 = mkdir(transcriptDir, { recursive: true });
   const task6 = mkdir(ttsDir, { recursive: true });
   const task7 = mkdir(tempDir, { recursive: true });
-  return Promise.all([task1, task2, task3, task4, task5, task6, task7]);
+  const task8 = mkdir(tencentMeetingWebhookDir, {recursive: true})
+
+  // const tencentMeetingStsTokenPath = path.join(projectRoot, "storage", "tencent-meeting-sts-token.json");
+  // const task9 = mkdir(path.dirname(tencentMeetingStsTokenPath), { recursive: true });
+  return Promise.all([task1, task2, task3, task4, task5, task6, task7, task8,
+    // task9
+  ]);
   
   // TODO 待删除 多余判断
   // if (mysqlEnabled()) return;
