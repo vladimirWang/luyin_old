@@ -121,41 +121,57 @@ async function handleMeetingOutlineRequest(req, res, next) {
   }
 }
 
-router.get("/", async (request, response) => {
+router.get("/", async (request, response, next) => {
   const { schedulePendingLocalTranscriptionSweep, findSegments, publicRecording } = dependencies;
-  const db = await loadDb();
-  const clientId = requestClientIdBetter(request);
-  const clientName = requestClientNameAndDecode(request);
-  const canDeleteAll = canDeleteAllRecordings();
-  const query = String(request.query.q || request.query.search || "").trim().toLowerCase();
-  const folderId = String(request.query.folderId || "all");
-  const recordings = [...db.recordings]
-    .sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt))
-    .filter((recording) => canDeleteAll || canReadRecording(recording, clientId))
-    .map((recording) => publicRecording(recording, findSegments(db, recording.id), clientId, clientName, { canDeleteAllRecordings: canDeleteAll }));
+  // const db = await loadDb();
+  // const clientId = requestClientIdBetter(request);
+  // const clientName = requestClientNameAndDecode(request);
+  // const canDeleteAll = canDeleteAllRecordings();
+  // const query = String(request.query.q || request.query.search || "").trim().toLowerCase();
+  const folderId = request.query.folderId || "all";
+  // const recordings = [...db.recordings]
+  //   .sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt))
+  //   .filter((recording) => canDeleteAll || canReadRecording(recording, clientId))
+  //   .map((recording) => publicRecording(recording, findSegments(db, recording.id), clientId, clientName, { canDeleteAllRecordings: canDeleteAll }));
 
-  const folderFiltered =
-    folderId === "all"
-      ? recordings.filter((recording) => !recording.deletedAt)
-      : folderId === "favorites"
-        ? recordings.filter((recording) => recording.favorite && !recording.deletedAt)
-        : folderId === "trash"
-          ? recordings.filter((recording) => recording.deletedAt)
-          : folderId === "uncategorized"
-            ? recordings.filter((recording) => !recording.folderId && !recording.deletedAt)
-            : recordings.filter((recording) => recording.folderId === folderId && !recording.deletedAt);
+  // const folderFiltered =
+  //   folderId === "all"
+  //     ? recordings.filter((recording) => !recording.deletedAt)
+  //     : folderId === "favorites"
+  //       ? recordings.filter((recording) => recording.favorite && !recording.deletedAt)
+  //       : folderId === "trash"
+  //         ? recordings.filter((recording) => recording.deletedAt)
+  //         : folderId === "uncategorized"
+  //           ? recordings.filter((recording) => !recording.folderId && !recording.deletedAt)
+  //           : recordings.filter((recording) => recording.folderId === folderId && !recording.deletedAt);
 
-  const filtered = query
-    ? folderFiltered
-        .map((recording) => ({ recording, score: recordingSearchScore(recording, query) }))
-        .filter((item) => item.score >= 18)
-        .sort((a, b) => b.score - a.score || new Date(b.recording.createdAt) - new Date(a.recording.createdAt))
-        .map((item) => item.recording)
-    : folderFiltered;
+  // const filtered = query
+  //   ? folderFiltered
+  //       .map((recording) => ({ recording, score: recordingSearchScore(recording, query) }))
+  //       .filter((item) => item.score >= 18)
+  //       .sort((a, b) => b.score - a.score || new Date(b.recording.createdAt) - new Date(a.recording.createdAt))
+  //       .map((item) => item.recording)
+  //   : folderFiltered;
 
-  // 改为定时扫描
-  // schedulePendingLocalTranscriptionSweep("recordings-list");
-  response.json({ recordings: filtered });
+  // // 改为定时扫描
+  // // schedulePendingLocalTranscriptionSweep("recordings-list");
+  try {
+    const recordings = await prisma.recording.findMany({
+      where: folderId === "all" ? { deletedAt: null } : { folderId, deletedAt: null },
+      orderBy: {
+        updatedAt: "desc",
+      },
+    });
+    response.json({
+      recordings: recordings.map((recording) => ({
+        ...recording,
+        durationMs: Number(recording.durationMs || 0n),
+        fileSize: Number(recording.fileSize || 0n),
+      })),
+    });
+  } catch (error) {
+    next(error);
+  }
 });
 
 router.post("/", upload.single("audio"), async (request, response, next) => {
@@ -246,7 +262,7 @@ router.post("/segments", upload.array("audio", 480), async (request, response, n
     await Promise.all(files.map((file) => removeFileIfExists(file.path)));
     const { storedFile, durationMs } = await verifiedStoredRecording(storagePath, request.body.durationMs);
 
-    const latestRecording = await prisma.Recording.findFirst({
+    const latestRecording = await prisma.recording.findFirst({
       orderBy: { seq: "desc" },
       select: { seq: true },
     });
@@ -281,7 +297,7 @@ router.post("/segments", upload.array("audio", 480), async (request, response, n
       userAgent: request.get("user-agent") || "",
     };
     logger.debug('request segements: ', {message: `request /segments lastSeq: ${latestRecording.seq}, durationMs: ${durationMs}`})
-    await prisma.Recording.create({
+    await prisma.recording.create({
       data: {
         id: recording.id,
         seq: recording.seq,

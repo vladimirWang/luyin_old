@@ -4514,7 +4514,7 @@ async function generateAndStoreMeetingOutline(recordingId, segments = [], option
 async function runTranscriptionJob(recordingId) {
   // const db = await loadDb();
   // const recording = findRecording(db, recordingId);
-  const recording = await prisma.Recording.findUnique({
+  const recording = await prisma.recording.findUnique({
     where: {
       id: recordingId
     }
@@ -4577,7 +4577,7 @@ async function runTranscriptionJob(recordingId) {
     if (autoTag) {
       newRecording.tag = autoTag
     }
-    logger.debug("typeof prisma.Recording: ", {message: `${prisma.Recording}, ${prisma.Recording.update}`})
+    logger.debug("typeof prisma.recording: ", {message: `${prisma.recording}, ${prisma.recording.update}`})
     // await prisma.Recording.update({
     //   where: {
     //     id: recordingId

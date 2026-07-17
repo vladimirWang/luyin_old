@@ -6,6 +6,11 @@ const { DATABASE_URL } = process.env;
 const globalForPrisma = globalThis;
 
 function getDatabaseConfig() {
+  // DATABASE_URL is the canonical connection setting for Prisma. In local
+  // development MYSQL_HOST can still be set to the Docker-only host `mysql`,
+  // so preferring the split MYSQL_* variables makes a host-run server time out.
+  if (DATABASE_URL) return DATABASE_URL;
+
   const baseConfig = {
     connectionLimit: 10,
     connectTimeout: process.env.NODE_ENV === "prod" ? 30000 : 10000,
@@ -27,6 +32,10 @@ function getDatabaseConfig() {
       database: process.env.MYSQL_DATABASE,
     };
   }
+
+  throw new Error(
+    "Database connection is not configured. Set DATABASE_URL or MYSQL_HOST/MYSQL_USER/MYSQL_PASSWORD/MYSQL_DATABASE.",
+  );
 }
 
 const adapter = new PrismaMariaDb(getDatabaseConfig());
