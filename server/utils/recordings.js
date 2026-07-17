@@ -2,6 +2,7 @@ import crypto from "node:crypto";
 import path from "node:path";
 import { existsSync, statSync } from "node:fs";
 import { attachmentDir, audioDir, tempDir, transcriptDir, ttsDir } from "../db.mjs";
+import { requestAccountPayload } from "./auth.mjs";
 
 const TENCENT_MEETING_SOURCE_PREFIX = "tencent-meeting";
 
@@ -45,17 +46,27 @@ export function requestClientName(request) {
   return String(header || param).trim();
 }
 
-export function requestCanDeleteAllRecordings(request) {
-  const flag = request.headers["x-can-delete-all"] || request.query?.canDeleteAll || "";
-  return ["1", "true", "yes"].includes(String(flag).toLowerCase());
-}
+/**
+ * 获取当前请求对应的用户名称，并安全解码 URL 编码的企业微信用户名。
+ *
+ * 已登录账号优先使用经过签名校验的 Token 用户名；否则依次读取企业微信用户
+ * 名和通用客户端名称。缺少名称时返回“未设置姓名”，返回值最长为 80 个字符。
+ * 无效的 URL 编码不会抛出异常，而是保留原始名称。
+ *
+ * @param {import("express").Request} request Express 请求对象。
+ * @returns {string} 可用于录音归属和页面展示的用户名称。
+ */
+export function requestClientNameAndDecode(request) {
+  const accountPayload = requestAccountPayload(request);
+  if (accountPayload?.username) return String(accountPayload.username).trim().slice(0, 80);
 
-export function canReadRecording(recording, clientId, clientName) {
-  if (!recording) return false;
-  if (recording.ownerClientId === clientId) return true;
-  if (recording.ownerName && recording.ownerName === clientName) return true;
-  if (recording.shared && !recording.deletedAt) return true;
-  return false;
+  const raw = String(request.get("x-wecom-user-name") || requestClientName(request) || "").trim();
+  if (!raw) return "未设置姓名";
+  try {
+    return (decodeURIComponent(raw) || "未设置姓名").slice(0, 80);
+  } catch {
+    return raw.slice(0, 80);
+  }
 }
 
 export function canManageRecording(recording, clientId, clientName) {

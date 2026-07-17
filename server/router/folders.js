@@ -1,4 +1,5 @@
 import express from "express";
+import { canDeleteAllRecordings, canReadRecording } from "../utils/common.mjs";
 
 const router = express.Router();
 
@@ -9,12 +10,11 @@ export function configure(deps) {
 }
 
 router.get("/", async (request, response) => {
-  const { loadDb, requestClientId, requestClientName, requestCanDeleteAllRecordings, canReadRecording, canReadFolder, publicFolder } = dependencies;
+  const { loadDb, requestClientId, canReadFolder, publicFolder } = dependencies;
   const db = await loadDb();
   const clientId = requestClientId(request);
-  const clientName = requestClientName(request);
-  const canDeleteAllRecordings = requestCanDeleteAllRecordings(request);
-  const readableRecordings = canDeleteAllRecordings ? db.recordings : db.recordings.filter((recording) => canReadRecording(recording, clientId, clientName));
+  const canDeleteAll = canDeleteAllRecordings();
+  const readableRecordings = canDeleteAll ? db.recordings : db.recordings.filter((recording) => canReadRecording(recording, clientId));
   const folders = [...db.folders]
     .filter((folder) => canReadFolder(folder, clientId))
     .sort((a, b) => new Date(a.createdAt) - new Date(b.createdAt))

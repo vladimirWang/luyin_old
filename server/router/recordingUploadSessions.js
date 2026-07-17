@@ -8,6 +8,7 @@ import { getTranscriptionMode } from "../transcription.mjs";
 import { audioDir, loadDb, tempDir, updateDb } from "../db.mjs";
 import { mergeAudioFilesToMp3 } from "../media.mjs";
 import {
+  requestClientNameAndDecode,
   safeUploadSessionId,
   uploadSessionPath,
   readUploadSessionMeta,
@@ -26,14 +27,14 @@ export function configure(root, deps) {
 }
 
 router.post("/", async (request, response, next) => {
-  const { requestClientId, requestClientName } = dependencies;
+  const { requestClientId } = dependencies;
   try {
     const sessionId = crypto.randomUUID();
     const dir = uploadSessionPath(sessionId);
     await mkdir(dir, { recursive: true });
     const now = new Date().toISOString();
     const ownerClientId = requestClientId(request);
-    const ownerName = requestClientName(request);
+    const ownerName = requestClientNameAndDecode(request);
     const meta = {
       id: sessionId,
       createdAt: now,

@@ -1,4 +1,5 @@
 import express from "express";
+import { requestClientNameAndDecode } from "../utils/recordings.js";
 
 const router = express.Router();
 
@@ -12,7 +13,6 @@ router.get("/today", async (request, response, next) => {
   const {
     dailyBriefDateParts,
     requestClientId,
-    requestClientName,
     loadDb,
     recordingsForBriefDate,
     findDailyBrief,
@@ -27,7 +27,7 @@ router.get("/today", async (request, response, next) => {
   try {
     const parts = dailyBriefDateParts();
     const clientId = requestClientId(request);
-    const clientName = requestClientName(request);
+    const clientName = requestClientNameAndDecode(request);
     const db = await loadDb();
     const recordings = recordingsForBriefDate(db, parts.date, clientId, clientName);
     const existing = findDailyBrief(db, parts.date, clientId);
@@ -70,7 +70,6 @@ router.post("/today", async (request, response, next) => {
   const {
     dailyBriefDateParts,
     requestClientId,
-    requestClientName,
     queueDailyBriefGeneration,
     loadDb,
     recordingsForBriefDate,
@@ -80,7 +79,7 @@ router.post("/today", async (request, response, next) => {
   try {
     const parts = dailyBriefDateParts();
     const clientId = requestClientId(request);
-    const clientName = requestClientName(request);
+    const clientName = requestClientNameAndDecode(request);
     const queued = await queueDailyBriefGeneration(parts.date, clientId, clientName);
     const db = await loadDb();
     const recordings = recordingsForBriefDate(db, parts.date, clientId, clientName);
@@ -94,7 +93,6 @@ router.post("/today", async (request, response, next) => {
 router.get("/", async (request, response, next) => {
   const {
     requestClientId,
-    requestClientName,
     loadDb,
     dailyBriefDateKeysForRecordings,
     dailyBriefOwnerKey,
@@ -106,7 +104,7 @@ router.get("/", async (request, response, next) => {
   } = dependencies;
   try {
     const clientId = requestClientId(request);
-    const clientName = requestClientName(request);
+    const clientName = requestClientNameAndDecode(request);
     const limit = Math.min(60, Math.max(1, Number(request.query.limit || 30)));
     const db = await loadDb();
     const dateKeys = new Set(dailyBriefDateKeysForRecordings(db, clientId, clientName));
@@ -136,7 +134,6 @@ router.get("/:date", async (request, response, next) => {
   const {
     normalizeDailyBriefDateParam,
     requestClientId,
-    requestClientName,
     dailyBriefPartsFromDateKey,
     loadDb,
     recordingsForBriefDate,
@@ -153,7 +150,7 @@ router.get("/:date", async (request, response, next) => {
       return;
     }
     const clientId = requestClientId(request);
-    const clientName = requestClientName(request);
+    const clientName = requestClientNameAndDecode(request);
     const parts = dailyBriefPartsFromDateKey(dateKey);
     const db = await loadDb();
     const recordings = recordingsForBriefDate(db, dateKey, clientId, clientName);
@@ -175,7 +172,6 @@ router.post("/:date", async (request, response, next) => {
   const {
     normalizeDailyBriefDateParam,
     requestClientId,
-    requestClientName,
     dailyBriefPartsFromDateKey,
     queueDailyBriefGeneration,
     loadDb,
@@ -190,7 +186,7 @@ router.post("/:date", async (request, response, next) => {
       return;
     }
     const clientId = requestClientId(request);
-    const clientName = requestClientName(request);
+    const clientName = requestClientNameAndDecode(request);
     const parts = dailyBriefPartsFromDateKey(dateKey);
     const queued = await queueDailyBriefGeneration(dateKey, clientId, clientName);
     const db = await loadDb();

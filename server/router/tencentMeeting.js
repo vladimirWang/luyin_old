@@ -77,9 +77,9 @@ router.post("/webhook", async (request, response) => {
   const { appendTencentMeetingWebhookEvent, importTencentMeetingStsTokenPayload, importTencentMeetingWebhookPayload, queueTencentMeetingCloudDiscovery } = dependencies;
   try {
     const plaintext = tencentMeetingVerifiedPlaintext(request, request.body?.data);
-    logger.info("tencentmeeting webhook plaintext: ", {message: plaintext})
+    logger.info("listen /webhook tencentmeeting webhook plaintext: ", {message: plaintext})
     const payload = parseJsonObject(plaintext);
-    logger.info("tencentmeeting webhook payload: ", {message: JSON.stringify(payload)})
+    logger.info("listen /webhook tencentmeeting webhook payload: ", {message: JSON.stringify(payload)})
     // 记录腾讯会议webhhook日志
     await appendTencentMeetingWebhookEvent({
       receivedAt: new Date().toISOString(),
@@ -88,26 +88,30 @@ router.post("/webhook", async (request, response) => {
       payload: payload || plaintext,
     });
     response.status(200).type("text/plain").send("successfully received callback");
-    logger.debug("成功响应腾讯会议webhook: ", {message: '继续后续逻辑'})
-    // if (payload) {
-    //   Promise.resolve()
-    //     .then(async () => {
-    //       // 处理 common.sts-token 事件：提取并持久化腾讯会议返回的 STS Token，
-    //       // 更新进程内 Token 缓存，并在保存成功后重新调度此前因缺少权限而挂起的导入任务。
-    //       await importTencentMeetingStsTokenPayload(payload);
+    logger.debug("listen /webhook 成功响应腾讯会议webhook: ", {message: '继续后续逻辑'})
+    if (payload) {
+      Promise.resolve()
+        .then(async () => {
+          // 处理 common.sts-token 事件：提取并持久化腾讯会议返回的 STS Token，
+          // 更新进程内 Token 缓存，并在保存成功后重新调度此前因缺少权限而挂起的导入任务。
+          await importTencentMeetingStsTokenPayload(payload);
+          logger.info("listen /webhook call importTencentMeetingStsTokenPayload success: ", {message: ''})
 
-    //       // 处理录音相关 Webhook：从回调中提取录音文件和会议信息，
-    //       // 创建或更新本地录音记录，并按事件内容调度后续的音频、转写同步流程。
-    //       await importTencentMeetingWebhookPayload(payload);
+          // 处理录音相关 Webhook：从回调中提取录音文件和会议信息，
+          // 创建或更新本地录音记录，并按事件内容调度后续的音频、转写同步流程。
+          await importTencentMeetingWebhookPayload(payload);
+          logger.info("listen /webhook call importTencentMeetingWebhookPayload success: ", {message: ''})
 
-    //       // Webhook 只代表单次事件，可能缺少完整录制信息或存在漏推；
-    //       // 因此额外触发一次云录制发现，用腾讯会议 API 对近期录制列表进行补充和状态校准。
-    //       queueTencentMeetingCloudDiscovery();
-    //     })
-    //     .catch((error) => console.warn("[Tencent Meeting] webhook background import failed:", error instanceof Error ? error.message : error));
-    // } else {
-    //   console.warn("[Tencent Meeting] webhook decrypted but did not contain JSON payload.");
-    // }
+          // Webhook 只代表单次事件，可能缺少完整录制信息或存在漏推；
+          // 因此额外触发一次云录制发现，用腾讯会议 API 对近期录制列表进行补充和状态校准。
+          queueTencentMeetingCloudDiscovery();
+        })
+        .catch((error) => {
+          console.warn("[Tencent Meeting] webhook background import failed:", error instanceof Error ? error.message : error)
+        });
+    } else {
+      console.warn("[Tencent Meeting] webhook decrypted but did not contain JSON payload.");
+    }
   } catch (error) {
     logger.error("tencentmeeting webhook failed: ", {message: error.message})
     console.warn("[Tencent Meeting] webhook POST rejected:", error instanceof Error ? error.message : error);

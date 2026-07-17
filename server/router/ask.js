@@ -1,4 +1,5 @@
 import express from "express";
+import { canReadRecording } from "../utils/common.mjs";
 
 const router = express.Router();
 
@@ -11,9 +12,7 @@ export function configure(deps) {
 router.post("/", async (request, response) => {
   const {
     requestClientId,
-    requestClientName,
     loadDb,
-    canReadRecording,
     findReusableQaMessage,
     publicQaMessage,
     scheduleQaJob,
@@ -24,7 +23,6 @@ router.post("/", async (request, response) => {
   } = dependencies;
 
   const clientId = requestClientId(request);
-  const clientName = requestClientName(request);
   const rawQuestion = String(request.body?.question || "").trim();
   const recordingId = String(request.body?.recordingId || "").trim();
   const recordingIds = Array.isArray(request.body?.recordingIds)
@@ -56,7 +54,7 @@ router.post("/", async (request, response) => {
   }
 
   const db = await loadDb();
-  const activeRecordings = db.recordings.filter((item) => !item.deletedAt && canReadRecording(item, clientId, clientName));
+  const activeRecordings = db.recordings.filter((item) => !item.deletedAt && canReadRecording(item, clientId));
   const selectedIds = recordingIds.length > 0 ? recordingIds : recordingId ? [recordingId] : [];
   const targetRecordings =
     selectedIds.length > 0 ? activeRecordings.filter((item) => selectedIds.includes(item.id)) : activeRecordings;

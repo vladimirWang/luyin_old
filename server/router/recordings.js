@@ -13,12 +13,14 @@ import {
 import { audioDir, loadDb, tempDir, updateDb } from "../db.mjs";
 import { convertAudioFileToMp3, fileInfo, mergeAudioFilesToMp3 } from "../media.mjs";
 import {
+  requestClientNameAndDecode,
   safeDownloadName,
   recordingSearchScore,
 } from "../utils/recordings.js";
 import { uploadWecomTemporaryFile } from "../utils/wecom.js";
 // import prisma from "../plugins/prisma.js";
 import {removeFileIfExists} from '../utils/file.js'
+import { canDeleteAllRecordings, canReadRecording } from "../utils/common.mjs";
 
 const prisma = await import('../plugins/prisma.cjs').then(m => m.default || m);
 
@@ -36,14 +38,14 @@ export function configure(root, deps) {
 }
 
 async function sendRecordingAudio(req, res, disposition = "inline") {
-  const { hasValidAudioDownloadToken, isTencentMeetingRecording, queueTencentMeetingImportSync, tencentMeetingSyncInfoFromRecording, requestClientId, requestClientName, findRecording, resolveRecordingAudioPath, canReadRecording } = dependencies;
+  const { hasValidAudioDownloadToken, isTencentMeetingRecording, queueTencentMeetingImportSync, tencentMeetingSyncInfoFromRecording, requestClientId, findRecording, resolveRecordingAudioPath } = dependencies;
   const db = await loadDb();
   const clientId = requestClientId(req);
-  const clientName = requestClientName(req);
+  const clientName = requestClientNameAndDecode(req);
   const recording = findRecording(db, req.params.id);
   const audioPath = recording ? resolveRecordingAudioPath(recording, projectRoot) : "";
   const tokenAllowed = recording ? hasValidAudioDownloadToken(req.query?.token, recording.id) : false;
-  if (!recording || (!tokenAllowed && !canReadRecording(recording, clientId, clientName))) {
+  if (!recording || (!tokenAllowed && !canReadRecording(recording, clientId))) {
     res.status(404).json({ error: "音频文件不存在" });
     return;
   }
@@ -74,12 +76,12 @@ async function sendRecordingAudio(req, res, disposition = "inline") {
 
 async function handleMeetingOutlineRequest(req, res, next) {
   try {
-    const { requestClientId, requestClientName, findRecording, canReadRecording, findSegments, canManageRecording, generateAndStoreMeetingOutline } = dependencies;
+    const { requestClientId, findRecording, findSegments, canManageRecording, generateAndStoreMeetingOutline } = dependencies;
     const db = await loadDb();
     const clientId = requestClientId(req);
-    const clientName = requestClientName(req);
+    const clientName = requestClientNameAndDecode(req);
     const recording = findRecording(db, req.params.id);
-    if (!recording || !canReadRecording(recording, clientId, clientName)) {
+    if (!recording || !canReadRecording(recording, clientId)) {
       res.status(404).json({ error: "录音不存在" });
       return;
     }
@@ -119,17 +121,17 @@ async function handleMeetingOutlineRequest(req, res, next) {
 }
 
 router.get("/", async (request, response) => {
-  const { schedulePendingLocalTranscriptionSweep, requestClientId, requestClientName, requestCanDeleteAllRecordings, canReadRecording, findSegments, publicRecording } = dependencies;
+  const { schedulePendingLocalTranscriptionSweep, requestClientId, findSegments, publicRecording } = dependencies;
   const db = await loadDb();
   const clientId = requestClientId(request);
-  const clientName = requestClientName(request);
-  const canDeleteAllRecordings = requestCanDeleteAllRecordings(request);
+  const clientName = requestClientNameAndDecode(request);
+  const canDeleteAll = canDeleteAllRecordings();
   const query = String(request.query.q || request.query.search || "").trim().toLowerCase();
   const folderId = String(request.query.folderId || "all");
   const recordings = [...db.recordings]
     .sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt))
-    .filter((recording) => canDeleteAllRecordings || canReadRecording(recording, clientId, clientName))
-    .map((recording) => publicRecording(recording, findSegments(db, recording.id), clientId, clientName, { canDeleteAllRecordings }));
+    .filter((recording) => canDeleteAll || canReadRecording(recording, clientId))
+    .map((recording) => publicRecording(recording, findSegments(db, recording.id), clientId, clientName, { canDeleteAllRecordings: canDeleteAll }));
 
   const folderFiltered =
     folderId === "all"
@@ -156,7 +158,7 @@ router.get("/", async (request, response) => {
 });
 
 router.post("/", upload.single("audio"), async (request, response, next) => {
-  const { queueTranscriptionJob, verifiedStoredRecording = fileInfo, requestClientId, requestClientName, publicRecording } = dependencies;
+  const { queueTranscriptionJob, verifiedStoredRecording = fileInfo, requestClientId, publicRecording } = dependencies;
   try {
     if (!request.file) {
       response.status(400).json({ error: "缺少录音文件" });
@@ -168,7 +170,7 @@ router.post("/", upload.single("audio"), async (request, response, next) => {
     const storagePath = path.join(audioDir, fileName);
     const now = new Date().toISOString();
     const ownerClientId = requestClientId(request);
-    const ownerName = requestClientName(request);
+    const ownerName = requestClientNameAndDecode(request);
     await convertAudioFileToMp3(request.file.path, storagePath);
     await removeFileIfExists(request.file.path);
     const { storedFile, durationMs } = await verifiedStoredRecording(storagePath, request.body.durationMs);
@@ -221,7 +223,7 @@ router.post("/", upload.single("audio"), async (request, response, next) => {
 
 router.post("/segments", upload.array("audio", 480), async (request, response, next) => {
   // response.status(200).json({message: 'fff'})
-  const { queueTranscriptionJob, verifiedStoredRecording = fileInfo, requestClientId, requestClientName, publicRecording } = dependencies;
+  const { queueTranscriptionJob, verifiedStoredRecording = fileInfo, requestClientId, publicRecording } = dependencies;
   logger.debug("post recording.segments", {message: `files.length: ${request.files.length}`});
   const files = Array.isArray(request.files) ? request.files : [];
   try {
@@ -235,7 +237,7 @@ router.post("/segments", upload.array("audio", 480), async (request, response, n
     const storagePath = path.join(audioDir, fileName);
     const now = new Date().toISOString();
     const ownerClientId = requestClientId(request);
-    const ownerName = requestClientName(request);
+    const ownerName = requestClientNameAndDecode(request);
     await mergeAudioFilesToMp3(
       files.map((file) => file.path),
       storagePath,
@@ -323,30 +325,30 @@ router.post("/segments", upload.array("audio", 480), async (request, response, n
 });
 
 router.get("/:id", async (request, response) => {
-  const { requestClientId, requestClientName, requestCanDeleteAllRecordings, findRecording, canReadRecording, findSegments, publicRecording } = dependencies;
+  const { requestClientId, findRecording, findSegments, publicRecording } = dependencies;
   const db = await loadDb();
   const clientId = requestClientId(request);
-  const clientName = requestClientName(request);
-  const canDeleteAllRecordings = requestCanDeleteAllRecordings(request);
+  const clientName = requestClientNameAndDecode(request);
+  const canDeleteAll = canDeleteAllRecordings();
   const recording = findRecording(db, request.params.id);
-  if (!recording || (!canDeleteAllRecordings && !canReadRecording(recording, clientId, clientName))) {
+  if (!recording || (!canDeleteAll && !canReadRecording(recording, clientId))) {
     response.status(404).json({ error: "录音不存在" });
     return;
   }
 
-  response.json({ recording: publicRecording(recording, findSegments(db, recording.id), clientId, clientName, { canDeleteAllRecordings }) });
+  response.json({ recording: publicRecording(recording, findSegments(db, recording.id), clientId, clientName, { canDeleteAllRecordings: canDeleteAll }) });
 });
 
 router.patch("/:id", async (request, response) => {
-  const { requestClientId, requestClientName, findRecording, canManageRecording, canReadRecording, findSegments, publicRecording } = dependencies;
+  const { requestClientId, findRecording, canManageRecording, findSegments, publicRecording } = dependencies;
   const clientId = requestClientId(request);
-  const clientName = requestClientName(request);
+  const clientName = requestClientNameAndDecode(request);
   const updated = await updateDb((db) => {
     const recording = findRecording(db, request.params.id);
     if (!recording) return null;
     const keys = Object.keys(request.body || {});
     const readerOnlyPatch = keys.length > 0 && keys.every((key) => key === "favorite");
-    if (!canManageRecording(recording, clientId, clientName) && !(readerOnlyPatch && canReadRecording(recording, clientId, clientName))) return null;
+    if (!canManageRecording(recording, clientId, clientName) && !(readerOnlyPatch && canReadRecording(recording, clientId))) return null;
     const now = new Date().toISOString();
 
     if (typeof request.body.name === "string") {
@@ -396,17 +398,17 @@ router.patch("/:id", async (request, response) => {
 });
 
 router.delete("/:id", async (request, response) => {
-  const { requestClientId, requestClientName, requestCanDeleteAllRecordings, findRecording, canManageRecording, canDeleteRecording } = dependencies;
+  const { requestClientId, findRecording, canManageRecording, canDeleteRecording } = dependencies;
   const clientId = requestClientId(request);
-  const clientName = requestClientName(request);
-  const canDeleteAllRecordings = requestCanDeleteAllRecordings(request);
+  const clientName = requestClientNameAndDecode(request);
+  const canDeleteAll = canDeleteAllRecordings();
   let filePath = "";
   let transcriptPath = "";
   const permanent = request.query.permanent === "true";
   const deleted = await updateDb((db) => {
     const recording = findRecording(db, request.params.id);
     if (!recording) return false;
-    if (!canDeleteAllRecordings && !(permanent ? canManageRecording(recording, clientId, clientName) : canDeleteRecording(recording, clientId, clientName))) return false;
+    if (!canDeleteAll && !(permanent ? canManageRecording(recording, clientId, clientName) : canDeleteRecording(recording, clientId, clientName))) return false;
 
     if (!permanent) {
       recording.deletedAt = new Date().toISOString();
@@ -448,13 +450,13 @@ router.get("/:id/audio.mp3", async (request, response) => {
 });
 
 router.post("/:id/audio-share-url", async (request, response) => {
-  const { createAudioDownloadToken, requestClientId, requestClientName, findRecording, resolveRecordingAudioPath, canReadRecording } = dependencies;
+  const { createAudioDownloadToken, requestClientId, findRecording, resolveRecordingAudioPath } = dependencies;
   const db = await loadDb();
   const clientId = requestClientId(request);
-  const clientName = requestClientName(request);
+  const clientName = requestClientNameAndDecode(request);
   const recording = findRecording(db, request.params.id);
   const audioPath = recording ? resolveRecordingAudioPath(recording, projectRoot) : "";
-  if (!recording || !canReadRecording(recording, clientId, clientName) || !audioPath) {
+  if (!recording || !canReadRecording(recording, clientId) || !audioPath) {
     response.status(404).json({ error: "audio file not found" });
     return;
   }
@@ -471,14 +473,14 @@ router.post("/:id/audio-share-url", async (request, response) => {
 });
 
 router.post("/:id/wecom-audio-media", async (request, response, next) => {
-  const { requestClientId, requestClientName, findRecording, resolveRecordingAudioPath, canReadRecording } = dependencies;
+  const { requestClientId, findRecording, resolveRecordingAudioPath } = dependencies;
   try {
     const db = await loadDb();
     const clientId = requestClientId(request);
-    const clientName = requestClientName(request);
+    const clientName = requestClientNameAndDecode(request);
     const recording = findRecording(db, request.params.id);
     const audioPath = recording ? resolveRecordingAudioPath(recording, projectRoot) : "";
-    if (!recording || !canReadRecording(recording, clientId, clientName) || !audioPath) {
+    if (!recording || !canReadRecording(recording, clientId) || !audioPath) {
       response.status(404).json({ error: "音频文件不存在" });
       return;
     }
@@ -499,12 +501,12 @@ router.post("/:id/wecom-audio-media", async (request, response, next) => {
 });
 
 router.get("/:id/transcript.txt", async (request, response) => {
-  const { requestClientId, requestClientName, findRecording, canReadRecording } = dependencies;
+  const { requestClientId, findRecording } = dependencies;
   const db = await loadDb();
   const clientId = requestClientId(request);
-  const clientName = requestClientName(request);
+  const clientName = requestClientNameAndDecode(request);
   const recording = findRecording(db, request.params.id);
-  if (!recording || !canReadRecording(recording, clientId, clientName) || !recording.transcriptPath || !existsSync(recording.transcriptPath)) {
+  if (!recording || !canReadRecording(recording, clientId) || !recording.transcriptPath || !existsSync(recording.transcriptPath)) {
     response.status(404).json({ error: "转写 TXT 不存在" });
     return;
   }
@@ -518,12 +520,12 @@ router.post("/:id/meeting-outline", handleMeetingOutlineRequest);
 
 router.get("/:id/meeting-outline.pdf", async (request, response, next) => {
   try {
-    const { requestClientId, requestClientName, findRecording, canReadRecording, findSegments, canManageRecording, generateAndStoreMeetingOutline, renderMeetingOutlinePdf } = dependencies;
+    const { requestClientId, findRecording, findSegments, canManageRecording, generateAndStoreMeetingOutline, renderMeetingOutlinePdf } = dependencies;
     const db = await loadDb();
     const clientId = requestClientId(request);
-    const clientName = requestClientName(request);
+    const clientName = requestClientNameAndDecode(request);
     const recording = findRecording(db, request.params.id);
-    if (!recording || !canReadRecording(recording, clientId, clientName)) {
+    if (!recording || !canReadRecording(recording, clientId)) {
       response.status(404).json({ error: "录音不存在" });
       return;
     }
@@ -555,11 +557,11 @@ router.get("/:id/meeting-outline.pdf", async (request, response, next) => {
 });
 
 router.post("/:id/transcribe", async (request, response) => {
-  const { queueTranscriptionJob, isTencentMeetingRecording, syncTencentMeetingBuiltInTranscript, tencentMeetingSyncInfoFromRecording, isLocalApiTranscriptionRecording, requestClientId, requestClientName, findRecording, canManageRecording } = dependencies;
+  const { queueTranscriptionJob, isTencentMeetingRecording, syncTencentMeetingBuiltInTranscript, tencentMeetingSyncInfoFromRecording, isLocalApiTranscriptionRecording, requestClientId, findRecording, canManageRecording } = dependencies;
   logger.info("[CALL] /api/recordings/:id/transcribe", {message: `request.params.id: ${request.params.id}`});
   const db = await loadDb();
   const clientId = requestClientId(request);
-  const clientName = requestClientName(request);
+  const clientName = requestClientNameAndDecode(request);
   const recording = findRecording(db, request.params.id);
   if (!recording || !canManageRecording(recording, clientId, clientName)) {
     response.status(404).json({ error: "录音不存在" });
@@ -601,9 +603,9 @@ router.post("/:id/transcribe", async (request, response) => {
 });
 
 router.post("/:id/restore", async (request, response) => {
-  const { requestClientId, requestClientName, findRecording, canManageRecording, findSegments, publicRecording } = dependencies;
+  const { requestClientId, findRecording, canManageRecording, findSegments, publicRecording } = dependencies;
   const clientId = requestClientId(request);
-  const clientName = requestClientName(request);
+  const clientName = requestClientNameAndDecode(request);
   const restored = await updateDb((db) => {
     const recording = findRecording(db, request.params.id);
     if (!recording) return null;
@@ -622,9 +624,9 @@ router.post("/:id/restore", async (request, response) => {
 });
 
 router.post("/:id/ask", async (request, response) => {
-  const { findReusableQaMessage, publicQaMessage, persistQaAttachments, cacheQaMessage, persistQaMessageSnapshot, scheduleQaJob, requestClientId, requestClientName, findRecording, canReadRecording } = dependencies;
+  const { findReusableQaMessage, publicQaMessage, persistQaAttachments, cacheQaMessage, persistQaMessageSnapshot, scheduleQaJob, requestClientId, findRecording } = dependencies;
   const clientId = requestClientId(request);
-  const clientName = requestClientName(request);
+  const clientName = requestClientNameAndDecode(request);
   const rawQuestion = String(request.body?.question || "").trim();
   const images = Array.isArray(request.body?.images) ? request.body.images.slice(0, 3) : [];
   const attachments = Array.isArray(request.body?.attachments)
@@ -653,7 +655,7 @@ router.post("/:id/ask", async (request, response) => {
 
   const db = await loadDb();
   const recording = findRecording(db, request.params.id);
-  if (!recording || !canReadRecording(recording, clientId, clientName)) {
+  if (!recording || !canReadRecording(recording, clientId)) {
     response.status(404).json({ error: "录音不存在" });
     return;
   }

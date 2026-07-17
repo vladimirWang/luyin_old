@@ -11,7 +11,8 @@ import { fileURLToPath } from "node:url";
 import multer from "multer";
 import PDFDocument from "pdfkit";
 import logger from "./utils/log.js";
-import { parseJsonObject, firstEnv, splitEnvList } from "./utils/common.mjs";
+import { requestAccountPayload, signAccountToken } from "./utils/auth.mjs";
+import { canReadRecording, parseJsonObject, firstEnv, splitEnvList } from "./utils/common.mjs";
 import {
   answerRecordingsQuestion,
   answerRecordingQuestion,
@@ -48,6 +49,7 @@ import { resolveRecordingAudioPath } from "./utils/recordings.js";
 import { wecomConfig } from "./utils/wecom.js";
 import {
   expandTencentMeetingKeyCandidates,
+  findTencentMeetingContainerDuplicate,
   loadTencentMeetingStsToken,
   saveTencentMeetingStsToken,
   tencentMeetingApiConfig,
@@ -72,10 +74,6 @@ let transcriptionJobChain = Promise.resolve();
 const DAILY_BRIEF_TIMEZONE = "Asia/Shanghai";
 const DAILY_BRIEF_TITLE = "今日会议简报";
 const dailyBriefScheduleState = { lastDate: "" };
-const accountTokenSecret =
-  process.env.ACCOUNT_TOKEN_SECRET ||
-  process.env.SESSION_SECRET ||
-  crypto.createHash("sha256").update(`${projectRoot}:account-token`).digest("hex");
 const ACCOUNT_TOKEN_TTL_MS = 1000 * 60 * 60 * 24 * 45;
 const MIN_VALID_RECORDING_DURATION_MS = 1000;
 
@@ -149,20 +147,6 @@ function requestClientId(request) {
   return `ip-${crypto.createHash("sha1").update(fallback).digest("hex").slice(0, 20)}`;
 }
 
-function requestClientName(request) {
-  const accountPayload = requestAccountPayload(request);
-  if (accountPayload?.username) return String(accountPayload.username).trim().slice(0, 80);
-  const raw = String(request.get("x-wecom-user-name") || request.get("x-client-name") || "").trim();
-  if (!raw) return "未设置姓名";
-  let decoded = raw;
-  try {
-    decoded = decodeURIComponent(raw);
-  } catch {
-    decoded = raw;
-  }
-  return (decoded || "未设置姓名").slice(0, 80);
-}
-
 function normalizeAccountUsername(value = "") {
   return String(value || "").trim().toLowerCase().replace(/\s+/g, "");
 }
@@ -190,8 +174,10 @@ function verifyPassword(password, account) {
 const DELETE_ALL_ACCOUNT_USERNAME = normalizeAccountUsername(process.env.DELETE_ALL_ACCOUNT_USERNAME || "zhangqi");
 const DELETE_ALL_ACCOUNT_PASSWORD = String(process.env.DELETE_ALL_ACCOUNT_PASSWORD || "1234598");
 
+// 是否可删除所有录音的特殊管理员账号
 function isDeleteAllAccountUsername(value = "") {
-  return Boolean(DELETE_ALL_ACCOUNT_USERNAME) && normalizeAccountUsername(value) === DELETE_ALL_ACCOUNT_USERNAME;
+  // return Boolean(DELETE_ALL_ACCOUNT_USERNAME) && normalizeAccountUsername(value) === DELETE_ALL_ACCOUNT_USERNAME;
+  return false;
 }
 
 function deleteAllAccountProfile(account = null) {
@@ -230,46 +216,6 @@ function ensureDeleteAllAccount(db) {
   };
   db.accounts.push(created);
   return created;
-}
-
-function requestCanDeleteAllRecordings(request) {
-  return isDeleteAllAccountUsername(requestAccountPayload(request)?.username);
-}
-
-function signAccountToken(payload) {
-  const body = Buffer.from(JSON.stringify(payload)).toString("base64url");
-  const signature = crypto.createHmac("sha256", accountTokenSecret).update(body).digest("base64url");
-  return `${body}.${signature}`;
-}
-
-function parseAccountToken(token = "") {
-  const raw = String(token || "").trim();
-  if (!raw || !raw.includes(".")) return null;
-  const [body, signature = ""] = raw.split(".");
-  const expected = crypto.createHmac("sha256", accountTokenSecret).update(body).digest("base64url");
-  const actualBuffer = Buffer.from(signature);
-  const expectedBuffer = Buffer.from(expected);
-  if (actualBuffer.length !== expectedBuffer.length || !crypto.timingSafeEqual(actualBuffer, expectedBuffer)) return null;
-  try {
-    const payload = JSON.parse(Buffer.from(body, "base64url").toString("utf8"));
-    if (!payload?.accountId || Number(payload.expiresAt || 0) < Date.now()) return null;
-    return payload;
-  } catch {
-    return null;
-  }
-}
-
-function requestAccountToken(request) {
-  return String(
-    request.get("x-auth-token") ||
-      request.get("authorization")?.replace(/^Bearer\s+/i, "") ||
-      request.query?.authToken ||
-      "",
-  ).trim();
-}
-
-function requestAccountPayload(request) {
-  return parseAccountToken(requestAccountToken(request));
 }
 
 function publicAccount(account) {
@@ -579,12 +525,6 @@ async function generateQwenTtsAudio(text, options = {}) {
   return job;
 }
 
-function canReadRecording(recording, clientId) {
-  const ownerClientId = String(recording.ownerClientId || "").trim();
-  const viewerClientId = String(clientId || "").trim();
-  return !ownerClientId || ownerClientId === viewerClientId || recording.shared !== false;
-}
-
 const audioDownloadTokenSecret =
   process.env.AUDIO_DOWNLOAD_TOKEN_SECRET ||
   process.env.SESSION_SECRET ||
@@ -741,9 +681,6 @@ configureRecordingsRouter(projectRoot, {
   scheduleQaJob,
   verifiedStoredRecording,
   requestClientId,
-  requestClientName,
-  requestCanDeleteAllRecordings,
-  canReadRecording,
   canManageRecording,
   canDeleteRecording,
   findRecording,
@@ -757,7 +694,6 @@ app.use("/api/recordings", recordingsRouter);
 
 configureRecordingUploadSessionsRouter(projectRoot, {
   requestClientId,
-  requestClientName,
   queueTranscriptionJob,
   verifiedStoredRecording,
   publicRecording,
@@ -797,7 +733,6 @@ app.use("/api/health", healthRouter);
 configureMeetingBriefsRouter({
   dailyBriefDateParts,
   requestClientId,
-  requestClientName,
   loadDb,
   recordingsForBriefDate,
   findDailyBrief,
@@ -837,9 +772,7 @@ app.use("/api/qa-messages", qaMessagesRouter);
 
 configureAskRouter({
   requestClientId,
-  requestClientName,
   loadDb,
-  canReadRecording,
   findReusableQaMessage,
   publicQaMessage,
   scheduleQaJob,
@@ -899,9 +832,6 @@ app.use("/api/auth", authRouter);
 configureFoldersRouter({
   loadDb,
   requestClientId,
-  requestClientName,
-  requestCanDeleteAllRecordings,
-  canReadRecording,
   canReadFolder,
   publicFolder,
   updateDb,
@@ -2650,20 +2580,7 @@ function queueTencentMeetingTranscriptSync(recordingId, info = {}) {
   return true;
 }
 
-/**
- * 将腾讯会议回调或云端查询得到的录制信息写入本地录音库。
- *
- * 同一批数据先按 recordFileId 去重，入库时再通过 source 查找已有录音，
- * 因此腾讯会议重复推送同一录制文件时会更新原记录，而不会创建重复记录。
- * 该函数会通过 Prisma 事务修改并持久化数据库，不是纯函数。
- *
- * @param {Array<object>} recordInfos 腾讯会议录制文件信息列表。
- * @param {string} userAgent 标记本次数据来源，便于后续排查导入渠道。
- * @returns {Promise<Array<{recordingId: string, recordFileId: string, created: boolean, info: object}>>}
- *   每条有效录制信息的写入结果；created 表示本次是否创建了新录音。
- */
 async function upsertTencentMeetingRecordingInfos(recordInfos = [], userAgent = "tencent-meeting-sync") {
-  // Webhook 可能重复携带同一录制文件，写库前先在当前批次内去重。
   const uniqueInfos = [];
   const seen = new Set();
   for (const info of recordInfos) {
@@ -2674,176 +2591,84 @@ async function upsertTencentMeetingRecordingInfos(recordInfos = [], userAgent = 
   }
   if (!uniqueInfos.length) return [];
 
-  const now = new Date();
-  logger.info("call upsertTencentMeetingRecordingInfos: ", {message: "开始插入或更新数据到recordings"})
-  return prisma.$transaction(async (transaction) => {
-    // 旧的数据保存流程会确保默认用户存在，并将腾讯会议录音关联到该用户。
-    await transaction.appUser.upsert({
-      where: { id: "default-user" },
-      update: {},
-      create: {
-        id: "default-user",
-        name: "未设置姓名",
-        company: "企业微信团队",
-        department: "产品与会议",
-        phone: "",
-        language: "中文",
-        recordsTitle: "我的录音",
-      },
-    });
+  const now = new Date().toISOString();
+  return updateDb((db) => {
+    if (!db.counters || typeof db.counters !== "object") db.counters = { recordingSeq: 0 };
+    if (!Array.isArray(db.recordings)) db.recordings = [];
 
-    const maxSeqResult = await transaction.recording.aggregate({ _max: { seq: true } });
-    let nextSeq = Number(maxSeqResult._max.seq || 0);
-    const results = [];
-
-    for (const eventInfo of uniqueInfos) {
-      // source 是腾讯会议录制文件在本地的稳定幂等键。
+    return uniqueInfos.map((eventInfo) => {
       const source = tencentMeetingSourceKey(eventInfo.recordFileId);
-      const rawDurationMs = Number(eventInfo.durationMs || 0);
-      const durationMs = Number.isFinite(rawDurationMs) ? Math.max(0, Math.trunc(rawDurationMs)) : 0;
-      const existing = await transaction.recording.findFirst({
-        where: { source },
-        include: { segments: { select: { id: true }, take: 1 } },
-      });
-
-      const meetingRecordId = String(eventInfo.meetingRecordId || eventInfo.meeting_record_id || "").trim();
-      const containerSource = meetingRecordId ? tencentMeetingSourceKey(meetingRecordId) : "";
-      let containerDuplicate = null;
-      if (meetingRecordId && meetingRecordId !== eventInfo.recordFileId) {
-        const candidates = await transaction.recording.findMany({
-          where: {
-            source: containerSource,
-            deletedAt: null,
-            ...(eventInfo.meetingId
-              ? {
-                  OR: [
-                    { tencentMeetingMeetingId: null },
-                    { tencentMeetingMeetingId: "" },
-                    { tencentMeetingMeetingId: eventInfo.meetingId },
-                  ],
-                }
-              : {}),
-            ...(eventInfo.meetingCode
-              ? {
-                  AND: [
-                    {
-                      OR: [
-                        { tencentMeetingMeetingCode: null },
-                        { tencentMeetingMeetingCode: "" },
-                        { tencentMeetingMeetingCode: eventInfo.meetingCode },
-                      ],
-                    },
-                  ],
-                }
-              : {}),
-          },
-          include: { segments: { select: { id: true }, take: 1 } },
-        });
-        containerDuplicate = candidates.find(
-          (candidate) =>
-            candidate.segments.length === 0 &&
-            !resolveRecordingAudioPath({ ...candidate, storagePath: candidate.storageKey }),
-        );
-      }
-
+      const existing = db.recordings.find((recording) => recording.source === source);
+      const containerDuplicate = findTencentMeetingContainerDuplicate(db, eventInfo);
       if (containerDuplicate) {
-        // 真实录制文件到达后，隐藏此前为同场会议创建的容器占位记录。
-        await transaction.recording.update({
-          where: { id: containerDuplicate.id },
-          data: {
-            deletedAt: now,
-            updatedAt: now,
-            errorMessage: "已由腾讯会议真实录制文件替代。",
-          },
-        });
+        containerDuplicate.deletedAt = now;
+        containerDuplicate.updatedAt = now;
+        containerDuplicate.errorMessage = "已由腾讯会议真实录制文件替代。";
       }
-
       if (existing) {
-        // 重复回调只补充或刷新已有记录，保留已经同步到本地的文件和转写信息。
-        const hasSegments = existing.segments.length > 0;
-        const updateData = {
-          updatedAt: now,
-          shared: true,
-          sharedAt: existing.sharedAt || now,
-          ownerName: eventInfo.ownerName || existing.ownerName || tencentMeetingImportOwnerName(),
-        };
-        if (eventInfo.subject) updateData.name = tencentMeetingPlaceholderName(eventInfo);
-        if (durationMs > 0 && Number(existing.durationMs || 0) < durationMs) {
-          updateData.durationMs = BigInt(durationMs);
+        existing.updatedAt = now;
+        existing.shared = true;
+        if (!existing.sharedAt) existing.sharedAt = now;
+        if (eventInfo.subject) existing.name = tencentMeetingPlaceholderName(eventInfo);
+        if (eventInfo.ownerName) existing.ownerName = eventInfo.ownerName;
+        if (eventInfo.durationMs > 0 && (!existing.durationMs || existing.durationMs < eventInfo.durationMs)) {
+          existing.durationMs = eventInfo.durationMs;
         }
-        if (eventInfo.creatorUserid) updateData.tencentMeetingCreatorUserid = eventInfo.creatorUserid;
-        if (eventInfo.meetingId) updateData.tencentMeetingMeetingId = eventInfo.meetingId;
-        if (eventInfo.meetingCode) updateData.tencentMeetingMeetingCode = eventInfo.meetingCode;
-        if (eventInfo.meetingRecordId) updateData.tencentMeetingMeetingRecordId = eventInfo.meetingRecordId;
-        if (eventInfo.sourceKind) updateData.tencentMeetingSourceKind = eventInfo.sourceKind;
-        if (existing.transcriptSource === "tencent-meeting" || !hasSegments) {
-          updateData.transcriptProvider = "tencent-meeting";
-        }
+        if (!existing.ownerName) existing.ownerName = tencentMeetingImportOwnerName();
+        if (eventInfo.creatorUserid) existing.tencentMeetingCreatorUserid = eventInfo.creatorUserid;
+        if (eventInfo.meetingId) existing.tencentMeetingMeetingId = eventInfo.meetingId;
+        if (eventInfo.meetingCode) existing.tencentMeetingMeetingCode = eventInfo.meetingCode;
+        if (eventInfo.meetingRecordId) existing.tencentMeetingMeetingRecordId = eventInfo.meetingRecordId;
+        if (eventInfo.sourceKind) existing.tencentMeetingSourceKind = eventInfo.sourceKind;
+        existing.transcriptProvider = existing.transcriptSource === "tencent-meeting" || !findSegments(db, existing.id).length ? "tencent-meeting" : existing.transcriptProvider;
         if (eventInfo.sourceKind === "cloud" && (!existing.tag || /录音笔|等待同步|已同步/.test(existing.tag))) {
-          updateData.tag = tencentMeetingImportTag(eventInfo, hasSegments ? "已同步转写" : "等待转写");
+          existing.tag = tencentMeetingImportTag(eventInfo, findSegments(db, existing.id).length ? "已同步转写" : "等待转写");
         }
-
-        await transaction.recording.update({ where: { id: existing.id }, data: updateData });
-        results.push({ recordingId: existing.id, recordFileId: eventInfo.recordFileId, created: false, info: eventInfo });
-        continue;
+        return { recordingId: existing.id, recordFileId: eventInfo.recordFileId, created: false, info: eventInfo };
       }
 
-      // 首次收到该 recordFileId 时，创建等待后续音频和转写同步的录音记录。
-      nextSeq += 1;
-      const recordingId = crypto.randomUUID();
-      await transaction.recording.create({
-        data: {
-          id: recordingId,
-          seq: nextSeq,
-          userId: "default-user",
-          folderId: null,
-          name: tencentMeetingPlaceholderName(eventInfo),
-          speakerName: "speaker-1",
-          speakerMapJson: JSON.stringify({}),
-          ownerClientId: tencentMeetingImportOwnerClientId(),
-          ownerName: eventInfo.ownerName || tencentMeetingImportOwnerName(),
-          shared: true,
-          sharedAt: now,
-          detectedLanguage: "",
-          translationText: "",
-          tag: tencentMeetingImportTag(eventInfo, "等待同步"),
-          durationMs: BigInt(durationMs),
-          mimeType: "audio/mpeg",
-          fileSize: 0n,
-          fileName: "",
-          storageProvider: "local",
-          storageKey: "",
-          transcriptPath: "",
-          transcriptRawPath: "",
-          transcriptCorrectedPath: "",
-          transcriptionMetaPath: "",
-          status: "uploaded",
-          favorite: false,
-          deletedAt: null,
-          transcriptProvider: "tencent-meeting",
-          transcriptSource: "",
-          transcribedAt: null,
-          meetingOutlineJson: null,
-          meetingOutlineStatus: "",
-          meetingOutlineError: "",
-          meetingOutlinedAt: null,
-          source,
-          tencentMeetingCreatorUserid: eventInfo.creatorUserid || "",
-          tencentMeetingMeetingId: eventInfo.meetingId || "",
-          tencentMeetingMeetingCode: eventInfo.meetingCode || "",
-          tencentMeetingMeetingRecordId: eventInfo.meetingRecordId || "",
-          tencentMeetingSourceKind: eventInfo.sourceKind || "",
-          errorMessage: "",
-          userAgent,
-          createdAt: new Date(tencentMeetingEventTimeMs(eventInfo.operateTime)),
-          updatedAt: now,
-        },
-      });
-      results.push({ recordingId, recordFileId: eventInfo.recordFileId, created: true, info: eventInfo });
-    }
-
-    return results;
-  }, { isolationLevel: "Serializable", maxWait: 10_000, timeout: 60_000 });
+      db.counters.recordingSeq += 1;
+      const seq = db.counters.recordingSeq;
+      const createdAt = new Date(tencentMeetingEventTimeMs(eventInfo.operateTime)).toISOString();
+      const recording = {
+        id: crypto.randomUUID(),
+        seq,
+        name: tencentMeetingPlaceholderName(eventInfo),
+        createdAt,
+        updatedAt: now,
+        durationMs: eventInfo.durationMs || 0,
+        mimeType: "audio/mpeg",
+        size: 0,
+        fileName: "",
+        storagePath: "",
+        transcriptPath: "",
+        favorite: false,
+        ownerClientId: tencentMeetingImportOwnerClientId(),
+        ownerName: eventInfo.ownerName || tencentMeetingImportOwnerName(),
+        shared: true,
+        sharedAt: now,
+        speakerName: "speaker-1",
+        speakerMap: {},
+        tag: tencentMeetingImportTag(eventInfo, "等待同步"),
+        deletedAt: null,
+        transcriptProvider: "tencent-meeting",
+        transcriptSource: "",
+        transcribedAt: "",
+        folderId: null,
+        status: "uploaded",
+        source,
+        tencentMeetingCreatorUserid: eventInfo.creatorUserid || "",
+        tencentMeetingMeetingId: eventInfo.meetingId || "",
+        tencentMeetingMeetingCode: eventInfo.meetingCode || "",
+        tencentMeetingMeetingRecordId: eventInfo.meetingRecordId || "",
+        tencentMeetingSourceKind: eventInfo.sourceKind || "",
+        errorMessage: "",
+        userAgent,
+      };
+      db.recordings.push(recording);
+      return { recordingId: recording.id, recordFileId: eventInfo.recordFileId, created: true, info: eventInfo };
+    });
+  });
 }
 
 async function importTencentMeetingWebhookPayload(payload) {
@@ -2870,7 +2695,7 @@ async function importTencentMeetingWebhookPayload(payload) {
 }
 
 function tencentMeetingDiscoveryWindow() {
-  const lookbackDays = Math.min(31, Math.max(1, Number(process.env.TENCENT_MEETING_CLOUD_LOOKBACK_DAYS || 7)));
+  const lookbackDays = Math.min(31, 7);
   const endMs = Date.now() + 1000 * 60 * 60 * 6;
   const startMs = endMs - lookbackDays * 24 * 60 * 60 * 1000;
   return {
@@ -2881,6 +2706,7 @@ function tencentMeetingDiscoveryWindow() {
 
 async function fetchTencentMeetingCloudRecordInfos() {
   if (!tencentMeetingApiConfigured()) return [];
+  // 申请token
   await requestTencentMeetingStsTokenIfPossible();
   const { startTime, endTime } = tencentMeetingDiscoveryWindow();
   const infos = [];
@@ -2893,11 +2719,12 @@ async function fetchTencentMeetingCloudRecordInfos() {
   };
 
   for (const operatorParams of tencentMeetingCandidateOperatorParams()) {
-    for (let page = 1; page <= Number(process.env.TENCENT_MEETING_CLOUD_DISCOVERY_MAX_PAGES || 8); page += 1) {
+    for (let page = 1; page <= 8; page += 1) {
+      // 拿到当前企业账户下所有用户的录制记录
       const uri = tencentMeetingQuery("/v1/corp/records", {
         start_time: startTime,
         end_time: endTime,
-        page_size: Number(process.env.TENCENT_MEETING_CLOUD_DISCOVERY_PAGE_SIZE || 20),
+        page_size: 20,
         page,
         ...operatorParams,
       });
@@ -2918,11 +2745,11 @@ async function fetchTencentMeetingCloudRecordInfos() {
   }
 
   for (const params of tencentMeetingCandidateDownloadIdentityParams({})) {
-    for (let page = 1; page <= Number(process.env.TENCENT_MEETING_CLOUD_DISCOVERY_MAX_PAGES || 8); page += 1) {
+    for (let page = 1; page <= 8; page += 1) {
       const uri = tencentMeetingQuery("/v1/records", {
         start_time: startTime,
         end_time: endTime,
-        page_size: Number(process.env.TENCENT_MEETING_CLOUD_DISCOVERY_PAGE_SIZE || 20),
+        page_size: 20,
         page,
         ...params,
       });
@@ -3002,7 +2829,7 @@ function tencentMeetingWebhookStatus() {
     apiConfigured: tencentMeetingApiConfigured(),
     cloudDiscovery: {
       enabled: Number(process.env.TENCENT_MEETING_CLOUD_DISCOVERY_INTERVAL_MS || 10 * 60 * 1000) !== 0,
-      lookbackDays: Math.min(31, Math.max(1, Number(process.env.TENCENT_MEETING_CLOUD_LOOKBACK_DAYS || 7))),
+      lookbackDays: Math.min(31, 7),
     },
     needs: {
       publicBaseUrl: !configuredPublicBaseUrl(),

@@ -5,6 +5,7 @@ import logger from "./log.js";
 import { normalizeTencentMeetingEncryptedData, tencentMeetingDecryptData } from "./tencentMeetingCrypto.mjs";
 import { firstEnv, parseJsonObject, splitEnvList } from "./common.mjs";
 import { decodedTencentMeetingAesKeyLength } from "./algo.js";
+import { resolveRecordingAudioPath } from "./recordings.js";
 import { projectRoot } from "../config.js";
 
 let stsTokenRequestInFlight = null;
@@ -190,6 +191,22 @@ export function expandTencentMeetingKeyCandidates(keys) {
   }
 
   return output.slice(0, 512);
+}
+
+export function findTencentMeetingContainerDuplicate(db, info = {}) {
+  const meetingRecordId = String(info.meetingRecordId || info.meeting_record_id || "").trim();
+  const recordFileId = String(info.recordFileId || info.record_file_id || "").trim();
+  if (!meetingRecordId || !recordFileId || meetingRecordId === recordFileId) return null;
+
+  return (db.recordings || []).find((recording) => {
+    if (recording.source !== `tencent-meeting:${meetingRecordId}`) return false;
+    if (recording.deletedAt) return false;
+    if (recording.tencentMeetingMeetingId && info.meetingId && recording.tencentMeetingMeetingId !== info.meetingId) return false;
+    if (recording.tencentMeetingMeetingCode && info.meetingCode && recording.tencentMeetingMeetingCode !== info.meetingCode) return false;
+
+    const hasSegments = (db.transcriptSegments || []).some((segment) => segment.recordingId === recording.id);
+    return !hasSegments && !resolveRecordingAudioPath(recording, projectRoot);
+  });
 }
 
 // 说明：对外部输入或模型输出做规整与安全清理。
