@@ -166,6 +166,7 @@ router.get("/", async (request, response, next) => {
     response.json({
       recordings: recordings.map((recording) => ({
         ...recording,
+        audioUrl: `${process.env.SERVER_URL}/static/audio/${recording.fileName}`,
         durationMs: Number(recording.durationMs || 0n),
         fileSize: Number(recording.fileSize || 0n),
       })),

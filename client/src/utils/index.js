@@ -45,9 +45,14 @@ export function mergeRequestHeaders(headers = {}, body = null) {
 }
 
 export function appendUrlParam(url, key, value) {
-  if (!value) return url;
-  const separator = url.includes("?") ? "&" : "?";
-  return `${url}${separator}${encodeURIComponent(key)}=${encodeURIComponent(value)}`;
+  try {
+    if (!value) return url;
+    const separator = url.includes("?") ? "&" : "?";
+    return `${url}${separator}${encodeURIComponent(key)}=${encodeURIComponent(value)}`;
+  } catch (err) {
+    console.log("call appendUrlParam failed: ", err.message)
+    return ''
+  }
 }
 
 export function mediaRequestUrl(url, version = "") {

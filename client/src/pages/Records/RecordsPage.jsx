@@ -115,6 +115,8 @@ import { isInWeCom } from '../../utils/wecom.js'
 import {useUploadManager} from '../../hooks/useUploadManager.js'
 import { useWecomAuthStore } from '../../stores/useWecomAuthStore.js'
 import {QA_ACTIVE_MESSAGE_KEY, DAILY_BRIEF_ACTIVE_KEY, PROFILE_STORAGE_KEY} from '../../constant.js'
+import {appendUrlParam} from '../../utils/index.js'
+
 const cardColors = ["coral", "indigo", "violet", "teal", "clay", "ink"];
 
 function getWecomUserId() {
@@ -134,17 +136,6 @@ function mergeRequestHeaders(headers = {}) {
   if (wecomUserId) next.set("X-Wecom-User-Id", encodeURIComponent(wecomUserId));
   if (wecomName) next.set("X-Wecom-User-Name", encodeURIComponent(wecomName));
   return next;
-}
-
-function appendUrlParam(url, key, value) {
-  if (!value) return url;
-  const separator = url.includes("?") ? "&" : "?";
-  return `${url}${separator}${encodeURIComponent(key)}=${encodeURIComponent(value)}`;
-}
-
-function mediaRequestUrl(url, version = "") {
-  const auth = getStoredAuth();
-  return appendUrlParam(appendUrlParam(appendUrlParam(url, "clientId", getClientId()), "authToken", auth?.token || ""), "v", version);
 }
 
 function normalizeDailyBriefTitle(value = "") {
@@ -390,417 +381,417 @@ function DailyBriefListView({
   );
 }
 
-function LegacyDetailView({ recording, transcriptionStatus, onBack, onRefreshRecording, onRename, onUpdateMeta }) {
-  const audioRef = useRef(null);
-  const [playing, setPlaying] = useState(false);
-  const [current, setCurrent] = useState(0);
-  const [duration, setDuration] = useState(recording?.durationMs ? recording.durationMs / 1000 : 0);
-  const [question, setQuestion] = useState("");
-  const [answers, setAnswers] = useState([]);
-  const [asking, setAsking] = useState(false);
-  const detailQaPollingRef = useRef(new Map());
-  const [draftName, setDraftName] = useState(recording?.name || "");
-  const [nameStatus, setNameStatus] = useState("saved");
-  const [draftTag, setDraftTag] = useState(recording?.tag || "");
-  const [tagStatus, setTagStatus] = useState("saved");
-  const [speakerDrafts, setSpeakerDrafts] = useState(() => speakerDraftsForRecording(recording));
-  const [selectedSpeakerKey, setSelectedSpeakerKey] = useState("");
-  const [transcriptExpanded, setTranscriptExpanded] = useState(false);
-  const speakers = useMemo(() => speakersForRecording(recording), [recording]);
+// function LegacyDetailView({ recording, transcriptionStatus, onBack, onRefreshRecording, onRename, onUpdateMeta }) {
+//   const audioRef = useRef(null);
+//   const [playing, setPlaying] = useState(false);
+//   const [current, setCurrent] = useState(0);
+//   const [duration, setDuration] = useState(recording?.durationMs ? recording.durationMs / 1000 : 0);
+//   const [question, setQuestion] = useState("");
+//   const [answers, setAnswers] = useState([]);
+//   const [asking, setAsking] = useState(false);
+//   const detailQaPollingRef = useRef(new Map());
+//   const [draftName, setDraftName] = useState(recording?.name || "");
+//   const [nameStatus, setNameStatus] = useState("saved");
+//   const [draftTag, setDraftTag] = useState(recording?.tag || "");
+//   const [tagStatus, setTagStatus] = useState("saved");
+//   const [speakerDrafts, setSpeakerDrafts] = useState(() => speakerDraftsForRecording(recording));
+//   const [selectedSpeakerKey, setSelectedSpeakerKey] = useState("");
+//   const [transcriptExpanded, setTranscriptExpanded] = useState(false);
+//   const speakers = useMemo(() => speakersForRecording(recording), [recording]);
 
-  useEffect(() => {
-    setPlaying(false);
-    setCurrent(0);
-    setDuration(recording?.durationMs ? recording.durationMs / 1000 : 0);
-    setAnswers([]);
-    setQuestion("");
-    setDraftName(recording?.name || "");
-    setNameStatus("saved");
-    setDraftTag(recording?.tag || "");
-    setTagStatus("saved");
-    setSpeakerDrafts(speakerDraftsForRecording(recording));
-    setSelectedSpeakerKey(speakersForRecording(recording)[0]?.key || "");
-    setTranscriptExpanded(false);
-  }, [recording?.id, recording?.name, recording?.durationMs, recording?.speakerName, recording?.tag, recording?.speakerMap, recording?.speakers]);
+//   useEffect(() => {
+//     setPlaying(false);
+//     setCurrent(0);
+//     setDuration(recording?.durationMs ? recording.durationMs / 1000 : 0);
+//     setAnswers([]);
+//     setQuestion("");
+//     setDraftName(recording?.name || "");
+//     setNameStatus("saved");
+//     setDraftTag(recording?.tag || "");
+//     setTagStatus("saved");
+//     setSpeakerDrafts(speakerDraftsForRecording(recording));
+//     setSelectedSpeakerKey(speakersForRecording(recording)[0]?.key || "");
+//     setTranscriptExpanded(false);
+//   }, [recording?.id, recording?.name, recording?.durationMs, recording?.speakerName, recording?.tag, recording?.speakerMap, recording?.speakers]);
 
-  useEffect(
-    () => () => {
-      detailQaPollingRef.current.forEach((timer) => window.clearTimeout(timer));
-      detailQaPollingRef.current.clear();
-    },
-    [],
-  );
+//   useEffect(
+//     () => () => {
+//       detailQaPollingRef.current.forEach((timer) => window.clearTimeout(timer));
+//       detailQaPollingRef.current.clear();
+//     },
+//     [],
+//   );
 
-  if (!recording) {
-    return (
-      <section className="screen detail-screen">
-        <button className="ghost-back" type="button" onClick={onBack}>
-          <ArrowLeft size={20} />
-          返回
-        </button>
-        <div className="empty-state">
-          <div className="empty-icon">
-            <ListMusic size={40} />
-          </div>
-          <h2>还没有可查看的详情</h2>
-          <p>录一段音后，详情页会显示播放、转写和提问。</p>
-        </div>
-      </section>
-    );
-  }
+//   if (!recording) {
+//     return (
+//       <section className="screen detail-screen">
+//         <button className="ghost-back" type="button" onClick={onBack}>
+//           <ArrowLeft size={20} />
+//           返回
+//         </button>
+//         <div className="empty-state">
+//           <div className="empty-icon">
+//             <ListMusic size={40} />
+//           </div>
+//           <h2>还没有可查看的详情</h2>
+//           <p>录一段音后，详情页会显示播放、转写和提问。</p>
+//         </div>
+//       </section>
+//     );
+//   }
 
-  function seekTo(ms) {
-    const audio = audioRef.current;
-    if (!audio) return;
-    audio.currentTime = Math.max(0, ms / 1000);
-    setCurrent(audio.currentTime);
-    audio.play().catch(() => {});
-  }
+//   function seekTo(ms) {
+//     const audio = audioRef.current;
+//     if (!audio) return;
+//     audio.currentTime = Math.max(0, ms / 1000);
+//     setCurrent(audio.currentTime);
+//     audio.play().catch(() => {});
+//   }
 
-  function skip(seconds) {
-    const audio = audioRef.current;
-    if (!audio) return;
-    audio.currentTime = Math.max(0, Math.min(audio.duration || duration || 0, audio.currentTime + seconds));
-  }
+//   function skip(seconds) {
+//     const audio = audioRef.current;
+//     if (!audio) return;
+//     audio.currentTime = Math.max(0, Math.min(audio.duration || duration || 0, audio.currentTime + seconds));
+//   }
 
-  function togglePlay() {
-    const audio = audioRef.current;
-    if (!audio) return;
-    if (audio.paused) audio.play().catch(() => {});
-    else audio.pause();
-  }
+//   function togglePlay() {
+//     const audio = audioRef.current;
+//     if (!audio) return;
+//     if (audio.paused) audio.play().catch(() => {});
+//     else audio.pause();
+//   }
 
-  async function askRecording(event) {
-    event.preventDefault();
-    const trimmed = question.trim();
-    if (!trimmed || asking) return;
+//   async function askRecording(event) {
+//     event.preventDefault();
+//     const trimmed = question.trim();
+//     if (!trimmed || asking) return;
 
-    setAsking(true);
-    try {
-      const payload = await api(`/api/recordings/${recording.id}/ask`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ question: trimmed }),
-      });
-      setAnswers((currentAnswers) => [payload.message, ...currentAnswers]);
-      setQuestion("");
-      if (payload.message?.pending) pollDetailQaMessage(payload.message.id, 0);
-    } finally {
-      setAsking(false);
-    }
-  }
+//     setAsking(true);
+//     try {
+//       const payload = await api(`/api/recordings/${recording.id}/ask`, {
+//         method: "POST",
+//         headers: { "Content-Type": "application/json" },
+//         body: JSON.stringify({ question: trimmed }),
+//       });
+//       setAnswers((currentAnswers) => [payload.message, ...currentAnswers]);
+//       setQuestion("");
+//       if (payload.message?.pending) pollDetailQaMessage(payload.message.id, 0);
+//     } finally {
+//       setAsking(false);
+//     }
+//   }
 
-  function pollDetailQaMessage(id, attempt = 0) {
-    if (!id || detailQaPollingRef.current.has(id)) return;
-    const timer = window.setTimeout(async () => {
-      detailQaPollingRef.current.delete(id);
-      try {
-        const payload = await api(`/api/qa-messages/${encodeURIComponent(id)}`);
-        if (payload.message) {
-          setAnswers((currentAnswers) =>
-            currentAnswers.map((item) => (item.id === payload.message.id ? { ...item, ...payload.message } : item)),
-          );
-          if (payload.message.pending && attempt < 180) pollDetailQaMessage(id, attempt + 1);
-        }
-      } catch {
-        if (attempt < 30) pollDetailQaMessage(id, attempt + 1);
-      }
-    }, attempt === 0 ? 900 : 1800);
-    detailQaPollingRef.current.set(id, timer);
-  }
+//   function pollDetailQaMessage(id, attempt = 0) {
+//     if (!id || detailQaPollingRef.current.has(id)) return;
+//     const timer = window.setTimeout(async () => {
+//       detailQaPollingRef.current.delete(id);
+//       try {
+//         const payload = await api(`/api/qa-messages/${encodeURIComponent(id)}`);
+//         if (payload.message) {
+//           setAnswers((currentAnswers) =>
+//             currentAnswers.map((item) => (item.id === payload.message.id ? { ...item, ...payload.message } : item)),
+//           );
+//           if (payload.message.pending && attempt < 180) pollDetailQaMessage(id, attempt + 1);
+//         }
+//       } catch {
+//         if (attempt < 30) pollDetailQaMessage(id, attempt + 1);
+//       }
+//     }, attempt === 0 ? 900 : 1800);
+//     detailQaPollingRef.current.set(id, timer);
+//   }
 
-  async function transcribeAgain() {
-    if (!canUseTranscribeAction) return;
-    await api(`/api/recordings/${recording.id}/transcribe`, { method: "POST" });
-    onRefreshRecording(recording.id);
-  }
+//   async function transcribeAgain() {
+//     if (!canUseTranscribeAction) return;
+//     await api(`/api/recordings/${recording.id}/transcribe`, { method: "POST" });
+//     onRefreshRecording(recording.id);
+//   }
 
-  async function commitDetailMeta() {
-    const tag = draftTag.trim();
-    setDraftTag(tag);
-    if (tag !== (recording.tag || "")) {
-      setTagStatus("saving");
-      try {
-        await onUpdateMeta(recording.id, { tag });
-        setTagStatus("saved");
-      } catch {
-        setTagStatus("dirty");
-      }
-      return;
-    }
-    setTagStatus("saved");
-  }
+//   async function commitDetailMeta() {
+//     const tag = draftTag.trim();
+//     setDraftTag(tag);
+//     if (tag !== (recording.tag || "")) {
+//       setTagStatus("saving");
+//       try {
+//         await onUpdateMeta(recording.id, { tag });
+//         setTagStatus("saved");
+//       } catch {
+//         setTagStatus("dirty");
+//       }
+//       return;
+//     }
+//     setTagStatus("saved");
+//   }
 
-  async function commitDetailName() {
-    const nextName = draftName.trim() || recording.name;
-    setDraftName(nextName);
-    if (nextName !== recording.name) {
-      setNameStatus("saving");
-      try {
-        await onRename(recording.id, nextName);
-        setNameStatus("saved");
-      } catch {
-        setNameStatus("dirty");
-      }
-      return;
-    }
-    setNameStatus("saved");
-  }
+//   async function commitDetailName() {
+//     const nextName = draftName.trim() || recording.name;
+//     setDraftName(nextName);
+//     if (nextName !== recording.name) {
+//       setNameStatus("saving");
+//       try {
+//         await onRename(recording.id, nextName);
+//         setNameStatus("saved");
+//       } catch {
+//         setNameStatus("dirty");
+//       }
+//       return;
+//     }
+//     setNameStatus("saved");
+//   }
 
-  function updateSpeakerDraft(key, value) {
-    setSpeakerDrafts((currentDrafts) => ({ ...currentDrafts, [key]: value }));
-  }
+//   function updateSpeakerDraft(key, value) {
+//     setSpeakerDrafts((currentDrafts) => ({ ...currentDrafts, [key]: value }));
+//   }
 
-  function commitSpeakerName(key) {
-    const nextName = (speakerDrafts[key] || "").trim() || "说话人";
-    const nextSpeakerMap = {
-      ...(recording.speakerMap || {}),
-      [key]: nextName,
-    };
-    setSpeakerDrafts((currentDrafts) => ({ ...currentDrafts, [key]: nextName }));
-    onUpdateMeta(recording.id, { speakerMap: nextSpeakerMap, speakerName: speakers[0]?.key === key ? nextName : recording.speakerName });
-  }
+//   function commitSpeakerName(key) {
+//     const nextName = (speakerDrafts[key] || "").trim() || "说话人";
+//     const nextSpeakerMap = {
+//       ...(recording.speakerMap || {}),
+//       [key]: nextName,
+//     };
+//     setSpeakerDrafts((currentDrafts) => ({ ...currentDrafts, [key]: nextName }));
+//     onUpdateMeta(recording.id, { speakerMap: nextSpeakerMap, speakerName: speakers[0]?.key === key ? nextName : recording.speakerName });
+//   }
 
-  const transcriptText = recording.transcriptText || recording.transcript.map((line) => line.text).join("\n");
-  const transcriptHealth = recording.transcriptHealth || transcriptionStatus || {};
-  const transcriptionApiEnabled = transcriptHealth.apiEnabled !== false;
-  const canUseTranscribeAction = transcriptionApiEnabled || recording.tencentMeeting?.imported;
-  const isFallbackTranscript = Boolean(transcriptHealth.isFallback);
+//   const transcriptText = recording.transcriptText || recording.transcript.map((line) => line.text).join("\n");
+//   const transcriptHealth = recording.transcriptHealth || transcriptionStatus || {};
+//   const transcriptionApiEnabled = transcriptHealth.apiEnabled !== false;
+//   const canUseTranscribeAction = transcriptionApiEnabled || recording.tencentMeeting?.imported;
+//   const isFallbackTranscript = Boolean(transcriptHealth.isFallback);
 
-  return (
-    <section className="screen detail-screen" aria-label="录音详情">
-      <header className="detail-header">
-        <button className="ghost-back" type="button" onClick={onBack}>
-          <ArrowLeft size={20} />
-          记录
-        </button>
-        <span className={`detail-status ${recording.status}`}>
-          {recordingDetailStatusLabel(recording)}
-        </span>
-      </header>
+//   return (
+//     <section className="screen detail-screen" aria-label="录音详情">
+//       <header className="detail-header">
+//         <button className="ghost-back" type="button" onClick={onBack}>
+//           <ArrowLeft size={20} />
+//           记录
+//         </button>
+//         <span className={`detail-status ${recording.status}`}>
+//           {recordingDetailStatusLabel(recording)}
+//         </span>
+//       </header>
 
-      <div className="detail-title-row">
-        <div>
-          <p className="eyebrow">录音 {String(recording.seq).padStart(3, "0")}</p>
-          <input
-            className={`detail-title-input ${nameStatus}`}
-            aria-label="录音名称"
-            value={draftName}
-            onChange={(event) => {
-              setDraftName(event.target.value);
-              setNameStatus("dirty");
-            }}
-            onBlur={commitDetailName}
-            onKeyDown={(event) => {
-              if (event.key === "Enter") event.currentTarget.blur();
-            }}
-          />
-        </div>
-        <span className={`favorite-badge ${recording.favorite ? "on" : ""}`}>
-          <Star size={16} fill={recording.favorite ? "currentColor" : "none"} />
-          {recording.favorite ? "已收藏" : "普通"}
-        </span>
-      </div>
+//       <div className="detail-title-row">
+//         <div>
+//           <p className="eyebrow">录音 {String(recording.seq).padStart(3, "0")}</p>
+//           <input
+//             className={`detail-title-input ${nameStatus}`}
+//             aria-label="录音名称"
+//             value={draftName}
+//             onChange={(event) => {
+//               setDraftName(event.target.value);
+//               setNameStatus("dirty");
+//             }}
+//             onBlur={commitDetailName}
+//             onKeyDown={(event) => {
+//               if (event.key === "Enter") event.currentTarget.blur();
+//             }}
+//           />
+//         </div>
+//         <span className={`favorite-badge ${recording.favorite ? "on" : ""}`}>
+//           <Star size={16} fill={recording.favorite ? "currentColor" : "none"} />
+//           {recording.favorite ? "已收藏" : "普通"}
+//         </span>
+//       </div>
 
-      <div className="detail-meta-editor">
-        <label>
-          标记
-          <div className={`tag-save-field ${tagStatus}`}>
-            <input
-              value={draftTag}
-              onChange={(event) => {
-                setDraftTag(event.target.value);
-                setTagStatus("dirty");
-              }}
-              onBlur={() => {
-                commitDetailMeta();
-              }}
-              onKeyDown={(event) => {
-                if (event.key === "Enter") event.currentTarget.blur();
-              }}
-              placeholder="例如：物业、会议、客户"
-            />
-            <button
-              type="button"
-              disabled={tagStatus === "saving"}
-              onMouseDown={(event) => event.preventDefault()}
-              onClick={commitDetailMeta}
-            >
-              {tagStatus === "saving" ? <LoaderCircle className="spin-icon" size={15} /> : <Check size={15} />}
-              <span>{tagStatus === "dirty" ? "保存" : tagStatus === "saving" ? "保存中" : "已保存"}</span>
-            </button>
-          </div>
-        </label>
-      </div>
+//       <div className="detail-meta-editor">
+//         <label>
+//           标记
+//           <div className={`tag-save-field ${tagStatus}`}>
+//             <input
+//               value={draftTag}
+//               onChange={(event) => {
+//                 setDraftTag(event.target.value);
+//                 setTagStatus("dirty");
+//               }}
+//               onBlur={() => {
+//                 commitDetailMeta();
+//               }}
+//               onKeyDown={(event) => {
+//                 if (event.key === "Enter") event.currentTarget.blur();
+//               }}
+//               placeholder="例如：物业、会议、客户"
+//             />
+//             <button
+//               type="button"
+//               disabled={tagStatus === "saving"}
+//               onMouseDown={(event) => event.preventDefault()}
+//               onClick={commitDetailMeta}
+//             >
+//               {tagStatus === "saving" ? <LoaderCircle className="spin-icon" size={15} /> : <Check size={15} />}
+//               <span>{tagStatus === "dirty" ? "保存" : tagStatus === "saving" ? "保存中" : "已保存"}</span>
+//             </button>
+//           </div>
+//         </label>
+//       </div>
 
-      <div className="speaker-editor" aria-label="说话人">
-        {speakers.map((speaker) => (
-          <div className={selectedSpeakerKey === speaker.key ? "speaker-editor-row active" : "speaker-editor-row"} key={speaker.key}>
-            <button type="button" onClick={() => setSelectedSpeakerKey((current) => (current === speaker.key ? "" : speaker.key))}>
-              <UserRound size={15} />
-              <span>{formatDuration(speaker.totalMs)}</span>
-            </button>
-            <input
-              value={speakerDrafts[speaker.key] || speaker.name}
-              onChange={(event) => updateSpeakerDraft(speaker.key, event.target.value)}
-              onBlur={() => commitSpeakerName(speaker.key)}
-              onKeyDown={(event) => {
-                if (event.key === "Enter") event.currentTarget.blur();
-              }}
-              aria-label={`${speaker.name}名称`}
-            />
-          </div>
-        ))}
-      </div>
+//       <div className="speaker-editor" aria-label="说话人">
+//         {speakers.map((speaker) => (
+//           <div className={selectedSpeakerKey === speaker.key ? "speaker-editor-row active" : "speaker-editor-row"} key={speaker.key}>
+//             <button type="button" onClick={() => setSelectedSpeakerKey((current) => (current === speaker.key ? "" : speaker.key))}>
+//               <UserRound size={15} />
+//               <span>{formatDuration(speaker.totalMs)}</span>
+//             </button>
+//             <input
+//               value={speakerDrafts[speaker.key] || speaker.name}
+//               onChange={(event) => updateSpeakerDraft(speaker.key, event.target.value)}
+//               onBlur={() => commitSpeakerName(speaker.key)}
+//               onKeyDown={(event) => {
+//                 if (event.key === "Enter") event.currentTarget.blur();
+//               }}
+//               aria-label={`${speaker.name}名称`}
+//             />
+//           </div>
+//         ))}
+//       </div>
 
-      <div className="player-panel">
-        <audio
-          ref={audioRef}
-            src={mediaRequestUrl(recording.audioUrl, recording.updatedAt || recording.createdAt)}
-          controlsList="nodownload noremoteplayback"
-          disablePictureInPicture
-          disableRemotePlayback
-          onPlay={() => setPlaying(true)}
-          onPause={() => setPlaying(false)}
-          onEnded={() => setPlaying(false)}
-          onLoadedMetadata={(event) => setDuration(event.currentTarget.duration || recording.durationMs / 1000)}
-          onTimeUpdate={(event) => setCurrent(event.currentTarget.currentTime)}
-        />
-        <div className="mini-wave">
-          {Array.from({ length: 28 }).map((_, index) => (
-            <span key={index} style={{ "--bar": `${24 + ((index * 37) % 58)}%` }} />
-          ))}
-        </div>
-        <input
-          className="progress"
-          type="range"
-          min="0"
-          max={duration || 1}
-          step="0.1"
-          value={Math.min(current, duration || 1)}
-          onChange={(event) => seekTo(Number(event.target.value) * 1000)}
-          aria-label="播放进度"
-        />
-        <div className="time-row">
-          <span>{formatDuration(current * 1000)}</span>
-          <span>{formatDuration((duration || 0) * 1000)}</span>
-        </div>
-        <div className="player-controls">
-          <IconButton label="后退十秒" onClick={() => skip(-10)}>
-            <Rewind size={23} />
-          </IconButton>
-          <button className="play-button" type="button" onClick={togglePlay} aria-label={playing ? "暂停" : "播放"}>
-            {playing ? <Pause size={28} fill="currentColor" /> : <Play size={28} fill="currentColor" />}
-          </button>
-          <IconButton label="快进十秒" onClick={() => skip(10)}>
-            <FastForward size={23} />
-          </IconButton>
-        </div>
-      </div>
+//       <div className="player-panel">
+//         <audio
+//           ref={audioRef}
+//             src={mediaRequestUrl(recording.audioUrl, recording.updatedAt || recording.createdAt)}
+//           controlsList="nodownload noremoteplayback"
+//           disablePictureInPicture
+//           disableRemotePlayback
+//           onPlay={() => setPlaying(true)}
+//           onPause={() => setPlaying(false)}
+//           onEnded={() => setPlaying(false)}
+//           onLoadedMetadata={(event) => setDuration(event.currentTarget.duration || recording.durationMs / 1000)}
+//           onTimeUpdate={(event) => setCurrent(event.currentTarget.currentTime)}
+//         />
+//         <div className="mini-wave">
+//           {Array.from({ length: 28 }).map((_, index) => (
+//             <span key={index} style={{ "--bar": `${24 + ((index * 37) % 58)}%` }} />
+//           ))}
+//         </div>
+//         <input
+//           className="progress"
+//           type="range"
+//           min="0"
+//           max={duration || 1}
+//           step="0.1"
+//           value={Math.min(current, duration || 1)}
+//           onChange={(event) => seekTo(Number(event.target.value) * 1000)}
+//           aria-label="播放进度"
+//         />
+//         <div className="time-row">
+//           <span>{formatDuration(current * 1000)}</span>
+//           <span>{formatDuration((duration || 0) * 1000)}</span>
+//         </div>
+//         <div className="player-controls">
+//           <IconButton label="后退十秒" onClick={() => skip(-10)}>
+//             <Rewind size={23} />
+//           </IconButton>
+//           <button className="play-button" type="button" onClick={togglePlay} aria-label={playing ? "暂停" : "播放"}>
+//             {playing ? <Pause size={28} fill="currentColor" /> : <Play size={28} fill="currentColor" />}
+//           </button>
+//           <IconButton label="快进十秒" onClick={() => skip(10)}>
+//             <FastForward size={23} />
+//           </IconButton>
+//         </div>
+//       </div>
 
-      <div className="detail-lower">
-        <div className={transcriptExpanded ? "transcript-panel expanded" : "transcript-panel collapsed"}>
-          <div className="panel-heading">
-            <div>
-              <h2>转写内容</h2>
-              <span className={isFallbackTranscript ? "transcript-health warn" : "transcript-health"}>
-                {recording.tencentMeeting?.imported && !transcriptionApiEnabled
-                  ? "腾讯会议自带转写"
-                  : !transcriptionApiEnabled
-                  ? "录音 API 转写已停用"
-                  : isFallbackTranscript
-                  ? "模拟转写，需要重新转写"
-                  : transcriptHealth.configured === false
-                    ? "真实转写未配置"
-                    : `转写服务：${recording.transcriptProvider || transcriptionStatus?.mode || "local"}`}
-              </span>
-            </div>
-            <div className="transcript-actions">
-              <button type="button" onClick={() => setTranscriptExpanded((current) => !current)}>
-                {transcriptExpanded ? <ChevronUp size={16} /> : <ChevronDown size={16} />}
-                {transcriptExpanded ? "收起" : "展开"}
-              </button>
-              {canUseTranscribeAction ? (
-                <button type="button" onClick={transcribeAgain}>
-                  <RefreshCw size={16} />
-                  {recording.tencentMeeting?.imported && !transcriptionApiEnabled ? "同步转写" : "重新转写"}
-                </button>
-              ) : null}
-            </div>
-          </div>
-          {transcriptHealth.message ? <p className={isFallbackTranscript ? "transcript-warning" : "transcript-note"}>{transcriptHealth.message}</p> : null}
-          {transcriptText ? (
-            <div className="transcript-full">
-              <h3>全文</h3>
-              <p>{transcriptText}</p>
-            </div>
-          ) : null}
-          <div className="transcript-lines">
-            {recording.transcript.length > 0 ? (
-              recording.transcript.map((line) => (
-                <button
-                  className={`transcript-line${selectedSpeakerKey && line.speakerKey === selectedSpeakerKey ? " is-highlight" : ""}${
-                    selectedSpeakerKey && line.speakerKey !== selectedSpeakerKey ? " is-dim" : ""
-                  }`}
-                  key={line.id}
-                  type="button"
-                  onClick={() => seekTo(line.startMs)}
-                >
-                  <span>{formatTimecode(line.startMs)}</span>
-                  <strong>
-                    <em>{line.speakerName || recording.speakerName || "说话人 1"}</em>
-                    {line.text}
-                  </strong>
-                </button>
-              ))
-            ) : (
-              <p className="muted-copy">服务器正在分析音频，稍后刷新即可查看转写。</p>
-            )}
-          </div>
-        </div>
+//       <div className="detail-lower">
+//         <div className={transcriptExpanded ? "transcript-panel expanded" : "transcript-panel collapsed"}>
+//           <div className="panel-heading">
+//             <div>
+//               <h2>转写内容</h2>
+//               <span className={isFallbackTranscript ? "transcript-health warn" : "transcript-health"}>
+//                 {recording.tencentMeeting?.imported && !transcriptionApiEnabled
+//                   ? "腾讯会议自带转写"
+//                   : !transcriptionApiEnabled
+//                   ? "录音 API 转写已停用"
+//                   : isFallbackTranscript
+//                   ? "模拟转写，需要重新转写"
+//                   : transcriptHealth.configured === false
+//                     ? "真实转写未配置"
+//                     : `转写服务：${recording.transcriptProvider || transcriptionStatus?.mode || "local"}`}
+//               </span>
+//             </div>
+//             <div className="transcript-actions">
+//               <button type="button" onClick={() => setTranscriptExpanded((current) => !current)}>
+//                 {transcriptExpanded ? <ChevronUp size={16} /> : <ChevronDown size={16} />}
+//                 {transcriptExpanded ? "收起" : "展开"}
+//               </button>
+//               {canUseTranscribeAction ? (
+//                 <button type="button" onClick={transcribeAgain}>
+//                   <RefreshCw size={16} />
+//                   {recording.tencentMeeting?.imported && !transcriptionApiEnabled ? "同步转写" : "重新转写"}
+//                 </button>
+//               ) : null}
+//             </div>
+//           </div>
+//           {transcriptHealth.message ? <p className={isFallbackTranscript ? "transcript-warning" : "transcript-note"}>{transcriptHealth.message}</p> : null}
+//           {transcriptText ? (
+//             <div className="transcript-full">
+//               <h3>全文</h3>
+//               <p>{transcriptText}</p>
+//             </div>
+//           ) : null}
+//           <div className="transcript-lines">
+//             {recording.transcript.length > 0 ? (
+//               recording.transcript.map((line) => (
+//                 <button
+//                   className={`transcript-line${selectedSpeakerKey && line.speakerKey === selectedSpeakerKey ? " is-highlight" : ""}${
+//                     selectedSpeakerKey && line.speakerKey !== selectedSpeakerKey ? " is-dim" : ""
+//                   }`}
+//                   key={line.id}
+//                   type="button"
+//                   onClick={() => seekTo(line.startMs)}
+//                 >
+//                   <span>{formatTimecode(line.startMs)}</span>
+//                   <strong>
+//                     <em>{line.speakerName || recording.speakerName || "说话人 1"}</em>
+//                     {line.text}
+//                   </strong>
+//                 </button>
+//               ))
+//             ) : (
+//               <p className="muted-copy">服务器正在分析音频，稍后刷新即可查看转写。</p>
+//             )}
+//           </div>
+//         </div>
 
-        <div className="ask-panel">
-          <form className="ask-form" onSubmit={askRecording}>
-            <Search size={18} />
-            <input value={question} onChange={(event) => setQuestion(event.target.value)} placeholder="对这条录音提问" />
-            <button type="submit" aria-label="发送问题" disabled={asking}>
-              {asking ? <LoaderCircle className="spin-icon" size={18} /> : <Send className="send-icon" size={18} />}
-            </button>
-          </form>
+//         <div className="ask-panel">
+//           <form className="ask-form" onSubmit={askRecording}>
+//             <Search size={18} />
+//             <input value={question} onChange={(event) => setQuestion(event.target.value)} placeholder="对这条录音提问" />
+//             <button type="submit" aria-label="发送问题" disabled={asking}>
+//               {asking ? <LoaderCircle className="spin-icon" size={18} /> : <Send className="send-icon" size={18} />}
+//             </button>
+//           </form>
 
-          {answers.length > 0 ? (
-            <div className="answer-list">
-              {answers.map((item) => (
-                <article key={item.id} className="answer-card">
-                  <strong>{item.question}</strong>
-                  <p>{item.pending ? "正在思考，答案生成后会自动显示。" : item.answer}</p>
-                  {!item.pending && Array.isArray(item.citations) && item.citations.length > 0 ? (
-                    <div className="answer-citations" aria-label="回答索引">
-                      {item.citations.map((citation) => (
-                        <button
-                          type="button"
-                          key={`${citation.segmentId}-${citation.startMs}`}
-                          onClick={() => seekTo(citation.startMs)}
-                        >
-                          <span>{formatTimecode(citation.startMs)}</span>
-                          <em>{citation.text}</em>
-                        </button>
-                      ))}
-                    </div>
-                  ) : !item.pending && typeof item.jumpToMs === "number" ? (
-                    <button type="button" onClick={() => seekTo(item.jumpToMs)}>
-                      定位到 {formatTimecode(item.jumpToMs)}
-                    </button>
-                  ) : null}
-                </article>
-              ))}
-            </div>
-          ) : null}
-        </div>
-      </div>
-    </section>
-  );
-}
+//           {answers.length > 0 ? (
+//             <div className="answer-list">
+//               {answers.map((item) => (
+//                 <article key={item.id} className="answer-card">
+//                   <strong>{item.question}</strong>
+//                   <p>{item.pending ? "正在思考，答案生成后会自动显示。" : item.answer}</p>
+//                   {!item.pending && Array.isArray(item.citations) && item.citations.length > 0 ? (
+//                     <div className="answer-citations" aria-label="回答索引">
+//                       {item.citations.map((citation) => (
+//                         <button
+//                           type="button"
+//                           key={`${citation.segmentId}-${citation.startMs}`}
+//                           onClick={() => seekTo(citation.startMs)}
+//                         >
+//                           <span>{formatTimecode(citation.startMs)}</span>
+//                           <em>{citation.text}</em>
+//                         </button>
+//                       ))}
+//                     </div>
+//                   ) : !item.pending && typeof item.jumpToMs === "number" ? (
+//                     <button type="button" onClick={() => seekTo(item.jumpToMs)}>
+//                       定位到 {formatTimecode(item.jumpToMs)}
+//                     </button>
+//                   ) : null}
+//                 </article>
+//               ))}
+//             </div>
+//           ) : null}
+//         </div>
+//       </div>
+//     </section>
+//   );
+// }
 
 function ShareSheet({ share, onCopy, onClose }) {
   if (!share) return null;

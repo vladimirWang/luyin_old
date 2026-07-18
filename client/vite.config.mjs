@@ -71,22 +71,37 @@ const vendorChunkGroups = [
   },
 ];
 
-export default defineConfig({
-  optimizeDeps: {
-    include: ["react", "react-dom/client"],
-  },
-  server: server0,
-  plugins: [react()],
-  build: {
-    rolldownOptions: {
-      output: {
-        codeSplitting: {
-          groups: vendorChunkGroups,
+export default defineConfig(({ command, mode }) => {
+  const isDevServer = command === "serve";
+  const isDebugBuild = command === "build" && mode === "debug";
+
+  return {
+    optimizeDeps: {
+      include: ["react", "react-dom/client"],
+    },
+    server: server0,
+    dev: isDevServer
+      ? {
+          sourcemap: {
+            js: true,
+            css: true,
+          },
+        }
+      : undefined,
+    plugins: [react()],
+    build: {
+      sourcemap: isDebugBuild,
+      minify: isDebugBuild ? false : undefined,
+      rolldownOptions: {
+        output: {
+          codeSplitting: {
+            groups: vendorChunkGroups,
+          },
+          chunkFileNames: "assets/[name]-[hash].js",
+          entryFileNames: "assets/[name]-[hash].js",
+          assetFileNames: "assets/[name]-[hash][extname]",
         },
-        chunkFileNames: "assets/[name]-[hash].js",
-        entryFileNames: "assets/[name]-[hash].js",
-        assetFileNames: "assets/[name]-[hash][extname]",
       },
     },
-  },
+  };
 });

@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef } from "react";
+import { useState, useEffect, useRef, useMemo } from "react";
 import {
   Star,
   Trash2,
@@ -200,7 +200,11 @@ export function RecordsView({
   })();
   const canExpandFolders = folderItems.length > collapsedFolderItems.length || folderItems.length > 3;
   const visibleFolderItems = foldersExpanded && canExpandFolders ? folderItems : collapsedFolderItems;
-  const previewRecording = recordings.find((item) => item.id === expandedRecordingId && !item.deletedAt) || null;
+
+  const previewRecording = useMemo(() => {
+    return recordings.find((item) => item.id === expandedRecordingId)
+  }, [recordings, expandedRecordingId])
+  
   const recordColumns = cardScale < 0.62 ? 6 : cardScale < 0.86 ? 4 : 2;
   const compactCards = recordColumns >= 4;
   const denseCards = recordColumns >= 6;

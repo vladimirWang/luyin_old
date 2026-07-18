@@ -7,7 +7,6 @@ import {
   isTencentMeetingNoTranscript,
   meetingReportBlocks,
   api,
-  mediaRequestUrl,
 } from "../../utils/index.js";
 
 export function RecordPreviewOverlay({ recording, onClose, onAsk, onShare, onRetranscribe }) {
@@ -342,10 +341,12 @@ export function RecordPreviewOverlay({ recording, onClose, onAsk, onShare, onRet
             ref={audioRef}
             className="hidden-audio"
             preload="metadata"
-            src={mediaRequestUrl(recording.audioUrl, recording.updatedAt || recording.createdAt)}
+            src={recording.audioUrl}
             onLoadedMetadata={(event) => {
               const duration = event.currentTarget.duration;
-              setPreviewDuration(Number.isFinite(duration) ? duration : recording.durationMs / 1000 || 0);
+              console.log("on load meta data: ", event.currentTarget)
+              setPreviewDuration(duration)
+              // setPreviewDuration(Number.isFinite(duration) ? duration : recording.durationMs / 1000 || 0);
             }}
             onTimeUpdate={(event) => setPreviewCurrent(event.currentTarget.currentTime || 0)}
             onPlay={() => setPreviewPlaying(true)}

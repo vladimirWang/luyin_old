@@ -3762,21 +3762,25 @@ app.get("/", (req, res) => {
   res.send('ok')
 })
 
-const publicDir = path.resolve(import.meta.dirname, "../public");
-if (existsSync(publicDir)) {
-  app.use(express.static(publicDir));
-}
+// const publicDir = path.resolve(import.meta.dirname, "../public");
+// if (existsSync(publicDir)) {
+//   app.use(express.static(publicDir));
+// }
 
-if (existsSync(distDir)) {
-  app.use(express.static(distDir));
-  app.use((request, response, next) => {
-    if (request.path.startsWith("/api")) {
-      next();
-      return;
-    }
-    response.sendFile(path.join(distDir, "index.html"));
-  });
-}
+// if (existsSync(distDir)) {
+//   app.use(express.static(distDir));
+//   app.use((request, response, next) => {
+//     if (request.path.startsWith("/api")) {
+//       next();
+//       return;
+//     }
+//     response.sendFile(path.join(distDir, "index.html"));
+//   });
+// }
+
+const storagePath = path.resolve(__dirname, 'storage')
+logger.info("storage path: ", {message: storagePath})
+app.use("/static", express.static(storagePath));
 
 app.use((error, request, response, _next) => {
   logger.error("server.unhandled_error", {message: `method: ${request?.method}, path: ${request?.path}, originalUrl: ${request?.originalUrl}`});

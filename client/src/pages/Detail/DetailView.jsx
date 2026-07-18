@@ -51,6 +51,7 @@ import {DailyMeetingBriefMessage} from './components/DailyMeetingBriefMessage.js
 import { ChatHistoryPanel } from "./components/ChatHistoryPanel.jsx";
 import {QA_ACTIVE_MESSAGE_KEY, DAILY_BRIEF_ACTIVE_KEY} from '../../constant.js'
 import {todayDateKey} from '../../utils/date.js'
+import {mediaRequestUrl} from '../../utils/index.js'
 
 const EMPTY_RECORDINGS = Object.freeze([]);
 
