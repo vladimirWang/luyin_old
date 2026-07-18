@@ -13,6 +13,7 @@ import {
   cardColors,
 } from "../../utils/index.js";
 import {IconButton} from '../../components/IconButton.jsx'
+import dayjs from 'dayjs'
 
 export function RecordCard({
   recording,
@@ -299,7 +300,7 @@ export function RecordCard({
         />
         {/* <div style={{color: 'red', fontSize: 12}}>id{recording.id}</div> */}
         <div className="record-meta">
-          <span>上传时间 {formatClockTime(recording.createdAt)}</span>
+          <span>{dayjs(recording.createdAt).format("YYYY-MM-DD")}</span>
         </div>
 
         <div className="card-mark-row" onClick={(event) => event.stopPropagation()}>
