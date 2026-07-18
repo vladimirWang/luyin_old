@@ -9,11 +9,12 @@ export function configure(deps) {
   dependencies = deps;
 }
 
-router.get("/", async (_request, response) => {
+router.get("/", async (request, response) => {
   const { getTranscriptionDiagnostics, ttsDiagnostics } = dependencies;
   const diagnostics = getTranscriptionDiagnostics();
   response.json({
     ok: true,
+    info: request.app.info,
     storage: process.env.DATABASE_URL || process.env.MYSQL_HOST ? "mysql" : "filesystem-json",
     transcribeMode: diagnostics.mode,
     transcribeConfigured: diagnostics.configured,

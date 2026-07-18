@@ -3,7 +3,7 @@ import logger from "./log.js";
 
 let wecomTokenCache = { value: "", expiresAt: 0 };
 
-export function wecomConfig() {
+export function getWecomConfig() {
   return {
     appid: process.env.WECOM_CORP_ID || "",
     agentid: process.env.WECOM_AGENT_ID || "",
@@ -147,4 +147,9 @@ export async function uploadWecomTemporaryFile(filePath, fileName, contentType =
     createdAt: payload.created_at || "",
     type: payload.type || "file",
   };
+}
+
+export function hasWecomConfig() {
+  const config = getWecomConfig();
+  return Boolean(config.appid && config.agentid && config.corpSecret && config.redirectUri);
 }

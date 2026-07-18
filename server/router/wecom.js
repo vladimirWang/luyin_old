@@ -1,14 +1,8 @@
 import express from "express";
 import logger from "../utils/log.js";
-import { getWecomUserByCode, wecomConfig } from "../utils/wecom.js";
+import { getWecomUserByCode, hasWecomConfig, getWecomConfig } from "../utils/wecom.js";
 
 const router = express.Router();
-
-let dependencies = {};
-
-export function configure(deps) {
-  dependencies = deps;
-}
 
 function normalizeRedirectUri(value) {
   try {
@@ -22,7 +16,8 @@ function normalizeRedirectUri(value) {
 }
 
 router.get("/login-config", (request, response) => {
-  const config = wecomConfig();
+  const config = getWecomConfig();
+  console.error("------------we--config: ", config)
   const redirectUri = normalizeRedirectUri(config.redirectUri);
   response.json({
     configured: Boolean(config.appid && config.agentid && config.corpSecret && redirectUri),
@@ -33,7 +28,7 @@ router.get("/login-config", (request, response) => {
 });
 
 router.get("/oauth-url", (request, response) => {
-  const config = wecomConfig();
+  const config = getWecomConfig();
   if (!config.appid || !config.corpSecret) {
     response.json({ configured: false });
     return;
@@ -57,7 +52,6 @@ router.get("/oauth-url", (request, response) => {
 
 router.get("/me", async (request, response, next) => {
   logger.info("request /wecom/me", { message: "start" });
-  const { hasWecomConfig } = dependencies;
   try {
     const code = String(request.query.code || "").trim();
     if (!code || !hasWecomConfig()) {

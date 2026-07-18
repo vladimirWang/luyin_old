@@ -22,11 +22,9 @@ export async function requestTencentMeetingStsTokenIfNeeded() {
   if (stsTokenRequestInFlight) return stsTokenRequestInFlight;
 
   stsTokenRequestInFlight = (async () => {
-    // const validTime = Number(firstEnv("TENCENT_MEETING_STS_VALID_TIME_HOURS", "WEMEET_STS_VALID_TIME_HOURS") || 24);
     const body = {
       operator_id: operatorId,
       operator_id_type: 1,
-      // valid_time: [6, 12, 24].includes(validTime) ? validTime : 24,
       valid_time: 24
     };
     console.log("sts token request: ", JSON.stringify(body))
@@ -55,8 +53,7 @@ function tencentMeetingStsExpireMs(value) {
 export async function loadTencentMeetingStsToken() {
   const envToken = firstEnv("TENCENT_MEETING_STS_TOKEN", "WEMEET_STS_TOKEN");
   if (envToken) {
-    const envExpiresAt = tencentMeetingStsExpireMs(firstEnv("TENCENT_MEETING_STS_EXPIRE_TS", "WEMEET_STS_EXPIRE_TS")) || Date.now() + 1000 * 60 * 30;
-    return isTencentMeetingStsTokenFresh({ value: envToken, expiresAt: envExpiresAt }) ? envToken : "";
+    return isTencentMeetingStsTokenFresh({ value: envToken, expiresAt: Date.now() + 1000 * 60 * 30 }) ? envToken : "";
   }
 
   if (stsTokenCache.loaded) {
@@ -107,7 +104,7 @@ export function tencentMeetingApiConfig() {
   const appId = firstEnv("TENCENT_MEETING_ENTERPRISE_ID", "WEMEET_ENTERPRISE_ID", "TENCENT_MEETING_APP_ID", "WEMEET_APP_ID");
   const sdkId = firstEnv("TENCENT_MEETING_SDK_ID", "TENCENT_MEETING_APPLICATION_ID", "WEMEET_SDK_ID", "WEMEET_APPLICATION_ID");
   return {
-    baseUrl: firstEnv("TENCENT_MEETING_API_BASE_URL", "WEMEET_API_BASE_URL") || "https://api.meeting.qq.com",
+    baseUrl: "https://api.meeting.qq.com",
     secretId,
     secretKey,
     appId,
@@ -133,7 +130,7 @@ export async function tencentMeetingApiHeaders(method, uri, bodyText = "", optio
     "X-TC-Timestamp": timestamp,
     "X-TC-Nonce": nonce,
     "X-TC-Signature": signature,
-    "X-TC-Registered": firstEnv("TENCENT_MEETING_REGISTERED", "WEMEET_REGISTERED") || "1",
+    "X-TC-Registered": "1",
     AppId: config.appId,
   };
   const sendSdkId = firstEnv("TENCENT_MEETING_SEND_SDK_ID", "WEMEET_SEND_SDK_ID");
@@ -1061,11 +1058,11 @@ export function tencentMeetingStsOperatorId() {
 }
 
 export function tencentMeetingImportOwnerClientId() {
-  return firstEnv("TENCENT_MEETING_IMPORT_OWNER_CLIENT_ID", "TENCENT_MEETING_OWNER_CLIENT_ID") || "tencent-meeting";
+  return "tencent-meeting";
 }
 
 export function tencentMeetingImportOwnerName() {
-  return firstEnv("TENCENT_MEETING_IMPORT_OWNER_NAME", "TENCENT_MEETING_OWNER_NAME") || "腾讯会议录音笔";
+  return "腾讯会议录音笔";
 }
 
 export function tencentMeetingSourceKey(recordFileId) {

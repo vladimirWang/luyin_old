@@ -12,7 +12,7 @@ import multer from "multer";
 import PDFDocument from "pdfkit";
 import logger from "./utils/log.js";
 import { requestAccountPayload, signAccountToken, normalizeAccountUsername, accountClientId, passwordHash, verifyPassword } from "./utils/auth.mjs";
-import { canReadRecording, parseJsonObject, firstEnv, splitEnvList, envFlag, firstNonEmptyValue, asArray, boundedNumber, normalizeTtsText, detectTtsAudioFormat, userSafeErrorMessage, userSafeTranscriptionError } from "./utils/common.mjs";
+import { canReadRecording, parseJsonObject, splitEnvList, envFlag, firstNonEmptyValue, asArray, boundedNumber, normalizeTtsText, detectTtsAudioFormat, userSafeErrorMessage, userSafeTranscriptionError } from "./utils/common.mjs";
 import {
   answerRecordingsQuestion,
   answerRecordingQuestion,
@@ -35,7 +35,7 @@ import recordingsRouter, { configure as configureRecordingsRouter } from "./rout
 import recordingUploadSessionsRouter, { configure as configureRecordingUploadSessionsRouter } from "./router/recordingUploadSessions.js";
 import tencentMeetingRouter, { configure as configureTencentMeetingRouter } from "./router/tencentMeeting.js";
 import ttsRouter, { configure as configureTtsRouter } from "./router/tts.js";
-import wecomRouter, { configure as configureWecomRouter } from "./router/wecom.js";
+import wecomRouter from "./router/wecom.js";
 import healthRouter, { configure as configureHealthRouter } from "./router/health.js";
 import meetingBriefsRouter, { configure as configureMeetingBriefsRouter } from "./router/meetingBriefs.js";
 import qaMessagesRouter, { configure as configureQaMessagesRouter } from "./router/qaMessages.js";
@@ -46,7 +46,6 @@ import transcriptionRouter, { configure as configureTranscriptionRouter } from "
 import authRouter, { configure as configureAuthRouter } from "./router/auth.js";
 import foldersRouter, { configure as configureFoldersRouter } from "./router/folders.js";
 import { requestClientIdBetter, resolveRecordingAudioPath } from "./utils/recordings.js";
-import { wecomConfig } from "./utils/wecom.js";
 import {
   expandTencentMeetingKeyCandidates,
   findTencentMeetingContainerDuplicate,
@@ -167,11 +166,7 @@ const host = process.env.HOST || "0.0.0.0";
 const httpsPort = Number(process.env.HTTPS_PORT || 0);
 
 const app = express();
-
-function hasWecomConfig() {
-  const config = wecomConfig();
-  return Boolean(config.appid && config.agentid && config.corpSecret && config.redirectUri);
-}
+app.info = "peter";
 
 function createPasswordRecord(password) {
   const salt = crypto.randomBytes(16).toString("base64url");
@@ -581,6 +576,8 @@ let pendingLocalTranscriptionSweepAt = 0;
 app.use(cors());
 app.use(express.json({ limit: "12mb" }));
 
+app.globalConfi = {"wecomConfig": 123}
+
 // 加全局请求日志
 app.use((request, response, next) => {
   const startedAt = Date.now();
@@ -679,9 +676,6 @@ configureTtsRouter({
 });
 app.use("/api/tts", ttsRouter);
 
-configureWecomRouter({
-  hasWecomConfig,
-});
 app.use("/api/wecom", wecomRouter);
 
 configureHealthRouter({
@@ -823,11 +817,10 @@ async function requestTencentMeetingStsTokenIfPossible() {
   if (tencentMeetingStsTokenRequestInFlight) return tencentMeetingStsTokenRequestInFlight;
 
   tencentMeetingStsTokenRequestInFlight = (async () => {
-    const validTime = Number(firstEnv("TENCENT_MEETING_STS_VALID_TIME_HOURS", "WEMEET_STS_VALID_TIME_HOURS") || 24);
     const body = {
       operator_id: operatorId,
       operator_id_type: 1,
-      valid_time: [6, 12, 24].includes(validTime) ? validTime : 24,
+      valid_time: 24,
     };
     try {
       await tencentMeetingApiRequest("POST", "/v1/app/sts-token", body, { skipStsToken: true });
@@ -1124,6 +1117,7 @@ async function findTencentMeetingDownloadTarget(info) {
     };
   }
   const { startTime, endTime } = tencentMeetingSearchWindow(info);
+  logger.log("[call] findTencentMeetingDownloadTarget ", {message: `startTime: ${startTime}, endTime: ${endTime}`})
   const identityParams = tencentMeetingCandidateDownloadIdentityParams(info);
   if (!identityParams.length) return null;
   await requestTencentMeetingStsTokenIfPossible();
