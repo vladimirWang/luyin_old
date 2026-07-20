@@ -50,6 +50,7 @@ services:
     volumes:
       - ./client/dist:/usr/share/nginx/html:ro
       - ./client/ssl:/etc/nginx/ssl:ro
+      - ./server/storage:/app/server/storage:ro
     restart: unless-stopped
     
   mysql:
