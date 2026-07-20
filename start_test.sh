@@ -1,41 +1,11 @@
 #!/bin/bash
+set -euo pipefail
 
-set -e
+COMPOSE=(docker compose --env-file .env.test -f docker-compose.test.yml)
 
-echo "=========================================="
-echo "  启动录音应用测试环境"
-echo "=========================================="
+echo "启动阿里云测试环境完整服务栈..."
+"${COMPOSE[@]}" up -d --build --wait --wait-timeout 180
 
-SCRIPT_DIR=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
-cd "$SCRIPT_DIR"
-
-echo ""
-echo "[1/3] 检查环境..."
-if ! command -v docker &> /dev/null; then
-    echo "❌ Docker 未安装或未启动"
-    exit 1
-fi
-
-if ! docker compose version &> /dev/null; then
-    echo "❌ Docker Compose 未安装"
-    exit 1
-fi
-
-echo "✅ Docker 环境就绪"
-
-echo ""
-echo "[2/3] 构建镜像..."
-docker compose --env-file .env.test -f docker-compose.test.yml up -d --build
-
-echo ""
-echo "=========================================="
-echo "  测试环境已启动"
-echo "=========================================="
-echo ""
-echo "前端访问: http://localhost:5173"
-echo "API地址: http://localhost:5173/api"
-echo ""
-echo "停止服务: docker compose -f docker-compose.test.yml down"
-echo ""
-echo "[3/3] 输出服务日志（Ctrl+C 退出日志跟踪，服务会继续运行）..."
-docker compose --env-file .env.test -f docker-compose.test.yml logs -f --tail=20
+echo "测试环境已启动：MySQL、后端、Python 服务和 Nginx 均由 Docker Compose 管理。"
+echo "查看状态：${COMPOSE[*]} ps"
+echo "查看日志：${COMPOSE[*]} logs -f"

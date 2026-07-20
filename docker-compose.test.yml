@@ -3,8 +3,8 @@ services:
     build:
       context: ./server
       dockerfile: Dockerfile
-    ports:
-      - "8787:8787"
+    expose:
+      - "8787"
     env_file:
       - .env.test
     environment:
@@ -12,19 +12,29 @@ services:
       HOST: 0.0.0.0
       HTTPS_PORT: 0
       MYSQL_HOST: mysql
+      MYSQL_PORT: 3306
       FFMPEG_PATH: /usr/bin/ffmpeg
       FFPROBE_PATH: /usr/bin/ffprobe
+    depends_on:
+      mysql:
+        condition: service_healthy
     volumes:
       - test-app-logs:/app/logs
       - test-app-storage:/app/server/storage
-    restart: unless-stopped  
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:8787/api/health').then(r=>{if(!r.ok)process.exit(1)}).catch(()=>process.exit(1))"]
+      interval: 30s
+      timeout: 5s
+      retries: 10
+      start_period: 40s
 
   py_server:
     build:
       context: ./py_server
       dockerfile: Dockerfile
-    ports:
-      - "8000:8000"
+    expose:
+      - "8000"
     env_file:
       - .env.test
     restart: unless-stopped
@@ -44,13 +54,16 @@ services:
       context: ./client
       dockerfile: Dockerfile.test
     ports:
-      - "7000:443"
+      - "${NGINX_HTTP_PORT:-80}:80"
+      - "${NGINX_HTTPS_PORT:-443}:443"
     depends_on:
-      - app
+      app:
+        condition: service_healthy
+      py_server:
+        condition: service_healthy
     volumes:
-      - ./client/dist:/usr/share/nginx/html:ro
       - ./client/ssl:/etc/nginx/ssl:ro
-      - ./server/storage:/app/server/storage:ro
+      - test-app-storage:/app/server/storage:ro
     restart: unless-stopped
     
   mysql:
@@ -58,12 +71,12 @@ services:
     environment:
       MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD:-123456}
       MYSQL_DATABASE: ${MYSQL_DATABASE:-wecom_recorder_test}
-    ports:
-      - "3307:3306"
+    expose:
+      - "3306"
     volumes:
       - mysql-data:/var/lib/mysql
     healthcheck:
-      test: ["CMD-SHELL", "mysqladmin ping -h 127.0.0.1 -uroot -p${MYSQL_ROOT_PASSWORD} --silent"]
+      test: ["CMD-SHELL", "mysqladmin ping -h 127.0.0.1 -uroot -p$${MYSQL_ROOT_PASSWORD} --silent"]
       interval: 10s
       timeout: 5s
       retries: 10
