@@ -1,4 +1,4 @@
-FROM node:22-bookworm
+FROM node:22-bookworm-slim
 
 WORKDIR /app
 
@@ -8,8 +8,7 @@ RUN apt-get update \
 
 COPY package.json pnpm-lock.yaml .npmrc ./server/
 ARG INSTALL_DEV=false
-RUN corepack enable && corepack prepare pnpm@9.15.9 --activate \
-  && if [ "$INSTALL_DEV" = "true" ]; then \
+RUN corepack enable && if [ "$INSTALL_DEV" = "true" ]; then \
        pnpm --dir server install --frozen-lockfile; \
      else \
        pnpm --dir server install --prod --frozen-lockfile; \
