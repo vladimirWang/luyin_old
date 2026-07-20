@@ -784,6 +784,37 @@ export function tencentMeetingTranscriptSpeakerName(paragraph = {}, fallback = "
   return fallback || "未知发言人";
 }
 
+function tencentMeetingTranscriptSpeakerKey(value = "") {
+  const identity = String(value || "").trim();
+  if (!identity || identity === "未知发言人") return "speaker-1";
+  return `speaker-${crypto.createHash("sha1").update(identity).digest("hex").slice(0, 12)}`;
+}
+
+function tencentMeetingTranscriptResult(segments = [], rawText = "") {
+  const speakerMap = {};
+  for (const segment of segments) {
+    if (segment.speakerKey && segment.speakerName) speakerMap[segment.speakerKey] = segment.speakerName;
+  }
+  const transcriptText =
+    String(rawText || "").trim() ||
+    segments
+      .map((segment) => `${segment.speakerName ? `【${segment.speakerName}】` : ""}${segment.text || ""}`)
+      .join("\n")
+      .trim();
+  return {
+    segments,
+    rawText: transcriptText,
+    correctedText: transcriptText,
+    speakerMap,
+  };
+}
+
+function tencentMeetingTranscriptOffsetMs(value) {
+  if (value === undefined || value === null || value === "") return Number.NaN;
+  const number = Number(value);
+  return Number.isFinite(number) && number >= 0 ? number : Number.NaN;
+}
+
 export function tencentMeetingTranscriptSegmentsFromPayload(payload = {}, durationMs = 0) {
   const paragraphs = tencentMeetingTranscriptParagraphsFromPayload(payload);
   const segments = [];
@@ -792,16 +823,18 @@ export function tencentMeetingTranscriptSegmentsFromPayload(payload = {}, durati
     if (!text) continue;
 
     const speakerName = tencentMeetingTranscriptSpeakerName(paragraph);
-    const startTimeMs = tencentMeetingTimestampMs(paragraph.start_time || paragraph.startTime || paragraph.begin_time);
-    const endTimeMs = tencentMeetingTimestampMs(paragraph.end_time || paragraph.endTime || paragraph.finish_time);
+    const speakerIdentity = paragraph.speaker_id || paragraph.speakerId || speakerName;
+    const startTimeMs = tencentMeetingTranscriptOffsetMs(paragraph.start_time ?? paragraph.startTime ?? paragraph.begin_time);
+    const endTimeMs = tencentMeetingTranscriptOffsetMs(paragraph.end_time ?? paragraph.endTime ?? paragraph.finish_time);
 
     const duration = Number.isFinite(endTimeMs) && Number.isFinite(startTimeMs) ? endTimeMs - startTimeMs : 0;
-    const actualStartTimeMs = Number.isFinite(startTimeMs) ? startTimeMs : (segments.length ? segments[segments.length - 1].endTimeMs : 0);
+    const actualStartTimeMs = Number.isFinite(startTimeMs) ? startTimeMs : (segments.length ? segments[segments.length - 1].endMs : 0);
     const actualEndTimeMs = Number.isFinite(endTimeMs) ? endTimeMs : actualStartTimeMs + Math.max(duration, 100);
 
     segments.push({
-      startTimeMs: Math.max(0, actualStartTimeMs),
-      endTimeMs: Math.max(0, actualEndTimeMs),
+      startMs: Math.max(0, actualStartTimeMs),
+      endMs: Math.max(0, actualEndTimeMs),
+      speakerKey: tencentMeetingTranscriptSpeakerKey(speakerIdentity),
       speakerName,
       text,
     });
@@ -809,12 +842,12 @@ export function tencentMeetingTranscriptSegmentsFromPayload(payload = {}, durati
 
   if (durationMs > 0) {
     for (const segment of segments) {
-      segment.startTimeMs = Math.min(segment.startTimeMs, durationMs);
-      segment.endTimeMs = Math.min(segment.endTimeMs, durationMs);
+      segment.startMs = Math.min(segment.startMs, durationMs);
+      segment.endMs = Math.min(segment.endMs, durationMs);
     }
   }
 
-  return segments;
+  return tencentMeetingTranscriptResult(segments);
 }
 
 export function tencentMeetingTranscriptSegmentsFromText(text = "", durationMs = 0) {
@@ -831,8 +864,9 @@ export function tencentMeetingTranscriptSegmentsFromText(text = "", durationMs =
     if (speakerMatch) {
       if (currentText) {
         segments.push({
-          startTimeMs: 0,
-          endTimeMs: 0,
+          startMs: 0,
+          endMs: 0,
+          speakerKey: tencentMeetingTranscriptSpeakerKey(currentSpeaker),
           speakerName: currentSpeaker || "未知发言人",
           text: currentText.trim(),
         });
@@ -851,8 +885,9 @@ export function tencentMeetingTranscriptSegmentsFromText(text = "", durationMs =
 
   if (currentText) {
     segments.push({
-      startTimeMs: 0,
-      endTimeMs: 0,
+      startMs: 0,
+      endMs: 0,
+      speakerKey: tencentMeetingTranscriptSpeakerKey(currentSpeaker),
       speakerName: currentSpeaker || "未知发言人",
       text: currentText.trim(),
     });
@@ -863,15 +898,15 @@ export function tencentMeetingTranscriptSegmentsFromText(text = "", durationMs =
     if (totalTextLength > 0) {
       let accumulatedTimeMs = 0;
       for (const segment of segments) {
-        segment.startTimeMs = accumulatedTimeMs;
-        segment.endTimeMs = accumulatedTimeMs + Math.round((segment.text.length / totalTextLength) * durationMs);
-        accumulatedTimeMs = segment.endTimeMs;
+        segment.startMs = accumulatedTimeMs;
+        segment.endMs = accumulatedTimeMs + Math.round((segment.text.length / totalTextLength) * durationMs);
+        accumulatedTimeMs = segment.endMs;
       }
-      segments[segments.length - 1].endTimeMs = durationMs;
+      segments[segments.length - 1].endMs = durationMs;
     }
   }
 
-  return segments;
+  return tencentMeetingTranscriptResult(segments, text);
 }
 
 export function tencentMeetingNameFromDetail(record = {}, file = {}, fallback = "") {

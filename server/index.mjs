@@ -1412,7 +1412,9 @@ async function fetchTencentMeetingBuiltInTranscript(info = {}, durationMs = 0) {
       }
     } catch (error) {
       failureKinds.push(tencentMeetingTranscriptErrorKind(error));
-      console.warn("[Tencent Meeting] built-in transcript lookup skipped:", error instanceof Error ? error.message : error);
+      if (!isTencentMeetingTranscriptUnavailableError(error)) {
+        console.warn("[Tencent Meeting] built-in transcript lookup skipped:", error instanceof Error ? error.message : error);
+      }
     }
 
     try {
@@ -1430,7 +1432,9 @@ async function fetchTencentMeetingBuiltInTranscript(info = {}, durationMs = 0) {
       }
     } catch (error) {
       failureKinds.push(tencentMeetingTranscriptErrorKind(error));
-      console.warn("[Tencent Meeting] transcript paragraph lookup skipped:", error instanceof Error ? error.message : error);
+      if (!isTencentMeetingTranscriptUnavailableError(error)) {
+        console.warn("[Tencent Meeting] transcript paragraph lookup skipped:", error instanceof Error ? error.message : error);
+      }
     }
   }
 
@@ -4124,9 +4128,11 @@ replayMissingTencentMeetingRecordingWebhooks()
 //   console.error("Artifact migration failed", error);
 // });
 
-// queueTencentMeetingPendingImports().catch((error) => {
-//   console.error("Tencent Meeting pending import scan failed", error);
-// });
+setTimeout(() => {
+  queueTencentMeetingPendingImports().catch((error) => {
+    console.error("Tencent Meeting pending import scan failed", error);
+  });
+}, 5000).unref?.();
 
 // queueTencentMeetingCloudDiscovery();
 setTimeout(() => {
@@ -4146,14 +4152,14 @@ setInterval(() => {
   });
 }, MEETING_OUTLINE_SWEEP_INTERVAL_MS).unref?.();
 
-// const tencentMeetingPendingImportIntervalMs = Number(process.env.TENCENT_MEETING_PENDING_IMPORT_INTERVAL_MS || 5 * 60 * 1000);
-// if (tencentMeetingPendingImportIntervalMs > 0) {
-//   setInterval(() => {
-//     queueTencentMeetingPendingImports().catch((error) => {
-//       console.warn("Tencent Meeting pending import scan failed:", error instanceof Error ? error.message : error);
-//     });
-//   }, Math.max(60 * 1000, tencentMeetingPendingImportIntervalMs)).unref();
-// }
+const tencentMeetingPendingImportIntervalMs = Number(process.env.TENCENT_MEETING_PENDING_IMPORT_INTERVAL_MS || 5 * 60 * 1000);
+if (tencentMeetingPendingImportIntervalMs > 0) {
+  setInterval(() => {
+    queueTencentMeetingPendingImports().catch((error) => {
+      console.warn("Tencent Meeting pending import scan failed:", error instanceof Error ? error.message : error);
+    });
+  }, Math.max(60 * 1000, tencentMeetingPendingImportIntervalMs)).unref();
+}
 
 // const tencentMeetingCloudDiscoveryIntervalMs = Number(process.env.TENCENT_MEETING_CLOUD_DISCOVERY_INTERVAL_MS || 10 * 60 * 1000);
 // if (tencentMeetingCloudDiscoveryIntervalMs > 0) {
