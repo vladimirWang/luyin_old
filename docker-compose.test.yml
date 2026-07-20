@@ -29,25 +29,25 @@ services:
       retries: 10
       start_period: 40s
 
-  py_server:
-    build:
-      context: ./py_server
-      dockerfile: Dockerfile
-    expose:
-      - "8000"
-    env_file:
-      - .env.test
-    restart: unless-stopped
-    healthcheck:
-      test:
-        - CMD
-        - /app/.venv/bin/python
-        - -c
-        - "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/', timeout=5)"
-      interval: 30s
-      timeout: 10s
-      retries: 3
-      start_period: 30s
+  # py_server:
+  #   build:
+  #     context: ./py_server
+  #     dockerfile: Dockerfile
+  #   expose:
+  #     - "8000"
+  #   env_file:
+  #     - .env.test
+  #   restart: unless-stopped
+  #   healthcheck:
+  #     test:
+  #       - CMD
+  #       - /app/.venv/bin/python
+  #       - -c
+  #       - "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/', timeout=5)"
+  #     interval: 30s
+  #     timeout: 10s
+  #     retries: 3
+  #     start_period: 30s
 
   nginx:
     build:
@@ -59,8 +59,8 @@ services:
     depends_on:
       app:
         condition: service_healthy
-      py_server:
-        condition: service_healthy
+      # py_server:
+      #   condition: service_healthy
     volumes:
       - ./client/ssl:/etc/nginx/ssl:ro
       - test-app-storage:/app/server/storage:ro
