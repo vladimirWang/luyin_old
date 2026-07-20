@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef } from "react";
+import { useState, useEffect, useMemo, useRef } from "react";
 import { ChevronUp, ChevronDown, RefreshCw, Pause, Play, Share2, Volume2 } from "lucide-react";
 import {
   formatTimecode,
@@ -40,34 +40,50 @@ export function RecordPreviewOverlay({ recording, onClose, onAsk, onShare, onRet
     recording?.meetingOutlineError,
   ]);
 
-  const transcriptLines = recording?.transcript || [];
-  const transcriptStatus = String(recording?.status || "");
-  const isTranscribing =
-    ["uploading", "uploaded", "queued", "pending", "processing", "transcribing"].includes(transcriptStatus) ||
-    isTencentMeetingWaitingTranscript(recording);
-  const isTranscriptGenerating =
-    transcriptLines.length === 0 &&
-    isTranscribing &&
-    recording?.status !== "failed" &&
-    !recording?.transcriptHealth?.isFallback &&
-    !isTencentMeetingNoTranscript(recording);
-  const transcriptionApiEnabled = recording?.transcriptHealth?.apiEnabled !== false;
-  const canUseTranscribeAction = transcriptionApiEnabled || recording?.tencentMeeting?.imported;
-  const canRetranscribe =
-    canUseTranscribeAction &&
-    recording?.canManage !== false &&
-    typeof onRetranscribe === "function" &&
-    (recording?.status === "failed" ||
-      recording?.transcriptHealth?.isFallback ||
-      (transcriptLines.length === 0 && !isTranscriptGenerating));
-  const outlineCount = meetingOutline
-    ? (meetingOutline.sections?.length || 0) +
+  const transcriptState = useMemo(() => {
+    const transcriptLines = Array.isArray(recording?.transcript) ? recording.transcript : [];
+    const transcriptStatus = String(recording?.status || "");
+    const isTranscribing =
+      ["uploading", "uploaded", "queued", "pending", "processing", "transcribing"].includes(transcriptStatus) ||
+      isTencentMeetingWaitingTranscript(recording);
+    const isTranscriptGenerating =
+      transcriptLines.length === 0 &&
+      isTranscribing &&
+      transcriptStatus !== "failed" &&
+      !recording?.transcriptHealth?.isFallback &&
+      !isTencentMeetingNoTranscript(recording);
+    const transcriptionApiEnabled = recording?.transcriptHealth?.apiEnabled !== false;
+    const canUseTranscribeAction = transcriptionApiEnabled || recording?.tencentMeeting?.imported;
+    const canRetranscribe =
+      canUseTranscribeAction &&
+      recording?.canManage !== false &&
+      typeof onRetranscribe === "function" &&
+      (transcriptStatus === "failed" ||
+        recording?.transcriptHealth?.isFallback ||
+        (transcriptLines.length === 0 && !isTranscriptGenerating));
+
+    return {
+      transcriptLines,
+      isTranscriptGenerating,
+      canRetranscribe,
+    };
+  }, [recording, onRetranscribe]);
+  const { transcriptLines, isTranscriptGenerating, canRetranscribe } = transcriptState;
+  const outlineCount = useMemo(() => {
+    if (!meetingOutline) return 0;
+    return (
+      (meetingOutline.sections?.length || 0) +
       (meetingOutline.mainPoints?.length || 0) +
       (meetingOutline.keyPoints?.length || 0) +
       (meetingOutline.decisions?.length || 0) +
       (meetingOutline.actionItems?.length || 0) +
       (meetingOutline.risks?.length || 0)
-    : 0;
+    );
+  }, [meetingOutline]);
+  const meetingReport = useMemo(
+    () => meetingReportBlocks(meetingOutline?.reportMarkdown || ""),
+    [meetingOutline?.reportMarkdown],
+  );
 
   function seekTo(ms) {
     const audio = audioRef.current;
@@ -242,7 +258,7 @@ export function RecordPreviewOverlay({ recording, onClose, onAsk, onShare, onRet
                   <>
                     {meetingOutline.reportMarkdown ? (
                       <article className="meeting-report">
-                        {meetingReportBlocks(meetingOutline.reportMarkdown).map((block) => {
+                        {meetingReport.map((block) => {
                           if (block.type === "heading") return <h3 key={block.id}>{block.text}</h3>;
                           if (block.type === "bullet") return <p className="meeting-report-bullet" key={block.id}>{block.text}</p>;
                           if (block.type === "table") return <p className="meeting-report-table" key={block.id}>{block.text}</p>;

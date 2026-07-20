@@ -14,7 +14,7 @@ export default function AppRouter() {
       <Routes>
         <Route path="/login" element={<WeComLogin />} />
         <Route element={<ProtectedRoute />}>
-          <Route path="/" element={<Navigate to="/recorder" replace />} />
+          <Route path="/" element={<Navigate to="/records" replace />} />
           <Route element={<App />}>
             {/* <Route path="/recorder" element={<Recorder />} /> */}
             <Route path="/records" element={<Records />} />
