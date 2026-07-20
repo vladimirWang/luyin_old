@@ -1,7 +1,7 @@
 import express from "express";
 import logger from "../utils/log.js";
 import { parseJsonObject } from "../utils/common.mjs";
-import { requestTencentMeetingStsTokenIfNeeded, tencentMeetingVerifiedPlaintext, tencentMeetingWebhookStatus } from "../utils/tencentMeeting.mjs";
+import { requestTencentMeetingStsTokenIfNeeded, tencentMeetingVerifiedPlaintext, tencentMeetingWebhookStatus, importTencentMeetingStsTokenPayload } from "../utils/tencentMeeting.mjs";
 
 const router = express.Router();
 
@@ -73,7 +73,12 @@ router.get("/webhook", (request, response) => {
 });
 
 router.post("/webhook", async (request, response) => {
-  const { appendTencentMeetingWebhookEvent, importTencentMeetingStsTokenPayload, importTencentMeetingWebhookPayload, queueTencentMeetingCloudDiscovery } = dependencies;
+  const {
+    appendTencentMeetingWebhookEvent,
+    importTencentMeetingWebhookPayload,
+    queueTencentMeetingCloudDiscovery,
+    queueTencentMeetingPendingImports,
+  } = dependencies;
   try {
     const plaintext = tencentMeetingVerifiedPlaintext(request, request.body?.data);
     logger.info("listen /webhook tencentmeeting webhook plaintext: ", {message: plaintext})
@@ -89,12 +94,14 @@ router.post("/webhook", async (request, response) => {
     response.status(200).type("text/plain").send("successfully received callback");
     logger.debug("listen /webhook 成功响应腾讯会议webhook: ", {message: '继续后续逻辑'})
     if (payload) {
-      Promise.resolve()
+      void Promise.resolve()
         .then(async () => {
-          // 处理 common.sts-token 事件：提取并持久化腾讯会议返回的 STS Token，
-          // 更新进程内 Token 缓存，并在保存成功后重新调度此前因缺少权限而挂起的导入任务。
-          await importTencentMeetingStsTokenPayload(payload);
-          logger.info("listen /webhook call importTencentMeetingStsTokenPayload success: ", {message: ''})
+          if (payload.event === "common.sts-token") {
+            // 保存 STS Token；只有实际保存成功后才恢复此前挂起的同步任务。
+            const saved = await importTencentMeetingStsTokenPayload(payload);
+            logger.info("listen /webhook call importTencentMeetingStsTokenPayload success: ", {message: `saved: ${saved}`})
+            if (saved) await queueTencentMeetingPendingImports();
+          }
 
           // 处理录音相关 Webhook：从回调中提取录音文件和会议信息，
           // 创建或更新本地录音记录，并按事件内容调度后续的音频、转写同步流程。

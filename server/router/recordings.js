@@ -29,8 +29,6 @@ const prisma = await import('../plugins/prisma.cjs').then(m => m.default || m);
 const router = express.Router();
 const upload = multer({ dest: tempDir });
 
-const TENCENT_MEETING_SOURCE_PREFIX = "tencent-meeting";
-
 let projectRoot = "";
 let dependencies = {};
 

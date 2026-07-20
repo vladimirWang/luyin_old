@@ -7,8 +7,7 @@ import { firstEnv, parseJsonObject, splitEnvList, firstNonEmptyValue, asArray, b
 import { decodedTencentMeetingAesKeyLength } from "./algo.js";
 import { resolveRecordingAudioPath } from "./recordings.js";
 import { projectRoot } from "../config.js";
-
-const TENCENT_MEETING_SOURCE_PREFIX = "tencent-meeting:";
+import {TENCENT_MEETING_SOURCE_PREFIX} from '../constant.js'
 
 let stsTokenRequestInFlight = null;
 const stsTokenCache = { loaded: false, value: "", expiresAt: 0, reqId: "" };
@@ -230,7 +229,7 @@ function tencentMeetingCallbackSignature(token, timestamp, nonce, data) {
 
 // 说明：校验腾讯会议 webhook 签名并解密密文，只接受可信回调。
 export function tencentMeetingVerifiedPlaintext(request, encryptedData) {
-  logger.info("[CALL] tencentMeetingVerifiedPlaintext ", {message: encryptedData})
+  logger.info("[CALL] tencentMeetingVerifiedPlaintext encryptedData ", {message: encryptedData})
   const config = tencentMeetingWebhookConfig();
   if (!config.tokens.length || !config.encodingAesKeys.length) {
     const error = new Error("Tencent Meeting webhook is not configured.");
@@ -990,7 +989,7 @@ export function tencentMeetingInfoFromRecordFile(record = {}, file = {}, fallbac
 
 export function tencentMeetingSyncInfoFromRecording(recording = {}) {
   return {
-    recordFileId: String(recording.source || "").slice(TENCENT_MEETING_SOURCE_PREFIX.length),
+    recordFileId: String(recording.source || "").slice(TENCENT_MEETING_SOURCE_PREFIX.length+1),
     meetingRecordId: recording.tencentMeetingMeetingRecordId || "",
     sourceKind:
       recording.tencentMeetingSourceKind ||
@@ -1037,7 +1036,7 @@ export function tencentMeetingSummaryFallbackEnabled(info = {}) {
 }
 
 export function tencentMeetingAudioSyncEnabled() {
-  const explicit = firstEnv("TENCENT_MEETING_AUDIO_SYNC_ENABLED", "WEMEET_AUDIO_SYNC_ENABLED");
+  const explicit = process.env.TENCENT_MEETING_AUDIO_SYNC_ENABLED;
   if (explicit) return /^(1|true|yes|on)$/i.test(explicit);
   return tencentMeetingApiConfigured();
 }
@@ -1066,7 +1065,7 @@ export function tencentMeetingImportOwnerName() {
 }
 
 export function tencentMeetingSourceKey(recordFileId) {
-  return `${TENCENT_MEETING_SOURCE_PREFIX}${String(recordFileId || "").trim()}`;
+  return `${TENCENT_MEETING_SOURCE_PREFIX}:${String(recordFileId || "").trim()}`;
 }
 
 export function tencentMeetingApiConfigured() {
@@ -1182,4 +1181,23 @@ export function tencentMeetingWebhookStatus() {
       apiCredentials: !tencentMeetingApiConfigured(),
     },
   };
+}
+
+
+export async function importTencentMeetingStsTokenPayload(payload = {}) {
+  // const event = String(payload.event || payload.Event || payload.event_type || "").trim();
+  // console.log("call importTencentMeetingStsTokenPayload, event: ", event)
+  // console.log("call importTencentMeetingStsTokenPayload, payload: ", payload)
+  // if (event !== "common.sts-token") return;
+  // const saveTasks = asArray(payload.payload).map(item => {
+  //   return saveTencentMeetingStsToken(item?.token_info)
+  // })
+  // return Promise.all(saveTasks)
+  const event = String(payload.event || "").trim();
+  if (event !== "common.sts-token") return false;
+  let saved = false;
+  for (const item of asArray(payload.payload)) {
+    if (await saveTencentMeetingStsToken(item?.token_info)) saved = true;
+  }
+  return saved;
 }

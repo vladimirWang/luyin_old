@@ -45,12 +45,11 @@ import profileRouter, { configure as configureProfileRouter } from "./router/pro
 import transcriptionRouter, { configure as configureTranscriptionRouter } from "./router/transcription.js";
 import authRouter, { configure as configureAuthRouter } from "./router/auth.js";
 import foldersRouter, { configure as configureFoldersRouter } from "./router/folders.js";
-import { requestClientIdBetter, resolveRecordingAudioPath } from "./utils/recordings.js";
+import { requestClientIdBetter, resolveRecordingAudioPath, resolveRecordingAudioPathBetter } from "./utils/recordings.js";
 import {
   expandTencentMeetingKeyCandidates,
   findTencentMeetingContainerDuplicate,
   loadTencentMeetingStsToken,
-  saveTencentMeetingStsToken,
   tencentMeetingApiConfig,
   tencentMeetingApiRequest,
   tencentMeetingEventTimeMs,
@@ -114,7 +113,7 @@ import {
 // import prisma from './plugins/prisma.js';
 import {removeFileIfExists} from './utils/file.js'
 import {projectRoot, tencentMeetingWebhookDir} from './config.js'
-
+import {TENCENT_MEETING_SOURCE_PREFIX} from './constant.js'
 const prisma = await import('./plugins/prisma.cjs').then(m => m.default || m);
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -566,7 +565,6 @@ const upload = multer({
 const tencentMeetingImportJobs = new Set();
 const tencentMeetingTranscriptJobs = new Set();
 let tencentMeetingCloudDiscoveryJob = null;
-const TENCENT_MEETING_SOURCE_PREFIX = "tencent-meeting:";
 const LOCAL_TRANSCRIPTION_STALE_MS = 2 * 60 * 1000;
 const LOCAL_TRANSCRIPTION_SWEEP_INTERVAL_MS = 30 * 1000;
 const LOCAL_TRANSCRIPTION_SWEEP_LIMIT = 8;
@@ -662,9 +660,9 @@ app.use("/api/recording-upload-sessions", recordingUploadSessionsRouter);
 
 configureTencentMeetingRouter({
   queueTencentMeetingCloudDiscovery,
+  queueTencentMeetingPendingImports,
   importTencentMeetingCloudRecordingsFromApi,
   appendTencentMeetingWebhookEvent,
-  importTencentMeetingStsTokenPayload,
   importTencentMeetingWebhookPayload,
 });
 app.use("/api/tencent-meeting", tencentMeetingRouter);
@@ -788,26 +786,6 @@ async function appendTencentMeetingWebhookEvent(entry) {
   // await mkdir(tencentMeetingWebhookDir, { recursive: true });
   const filePath = path.join(tencentMeetingWebhookDir, `${new Date().toISOString().slice(0, 10)}.jsonl`);
   await writeFile(filePath, `${JSON.stringify(entry)}\n`, { flag: "a" });
-}
-
-async function importTencentMeetingStsTokenPayload(payload = {}) {
-  const event = String(payload.event || payload.Event || payload.event_type || "").trim();
-  console.log("call importTencentMeetingStsTokenPayload, event: ", event)
-  console.log("call importTencentMeetingStsTokenPayload, payload: ", payload)
-  if (event !== "common.sts-token") return false;
-  let saved = false;
-  for (const item of asArray(payload.payload)) {
-    logger.debug("save sts token: ", {message: JSON.stringify(item)})
-    if (await saveTencentMeetingStsToken(item?.token_info || item?.tokenInfo || item)) {
-      saved = true;
-    }
-  }
-  if (saved) {
-    queueTencentMeetingPendingImports().catch((error) =>
-      console.warn("[Tencent Meeting] pending import retry after STS token failed:", error instanceof Error ? error.message : error),
-    );
-  }
-  return saved;
 }
 
 async function requestTencentMeetingStsTokenIfPossible() {
@@ -1802,22 +1780,31 @@ function queueTencentMeetingCloudDiscovery() {
   return true;
 }
 
+/**
+ * 恢复尚未下载音频或尚未同步转写的腾讯会议录音任务。
+ */
 async function queueTencentMeetingPendingImports() {
-  const db = await loadDb();
-  const pendingAudio = tencentMeetingAudioSyncEnabled()
-    ? (db.recordings || [])
-        .filter((recording) => {
-          if (!String(recording.source || "").startsWith(TENCENT_MEETING_SOURCE_PREFIX)) return false;
-          if (recording.deletedAt) return false;
-          return !resolveRecordingAudioPath(recording);
-        })
-        .sort(newestTencentMeetingRecordingFirst)
-        .slice(0, tencentMeetingPendingBatchSize("TENCENT_MEETING_PENDING_AUDIO_BATCH_SIZE", 6))
-    : [];
+  const pendingAudio = [];
+  if (tencentMeetingAudioSyncEnabled()) {
+    const recordings = await prisma.recording.findMany({
+      where: {
+        source: { startsWith: TENCENT_MEETING_SOURCE_PREFIX },
+        deletedAt: null,
+      },
+      orderBy: { createdAt: "desc" },
+    });
+    pendingAudio.push(
+      ...recordings
+        .filter((recording) => !resolveRecordingAudioPathBetter(recording, projectRoot))
+        .slice(0, tencentMeetingPendingBatchSize("TENCENT_MEETING_PENDING_AUDIO_BATCH_SIZE", 6)),
+    );
+  }
+
   for (const recording of pendingAudio) {
     queueTencentMeetingImportSync(recording.id, tencentMeetingSyncInfoFromRecording(recording));
   }
 
+  const db = await loadDb();
   const pendingTranscripts = (db.recordings || [])
     .filter((recording) => needsTencentMeetingTranscriptSync(db, recording))
     .sort(newestTencentMeetingRecordingFirst)

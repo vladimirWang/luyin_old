@@ -4,8 +4,6 @@ import { existsSync, statSync } from "node:fs";
 import { attachmentDir, audioDir, tempDir, transcriptDir, ttsDir } from "../db.mjs";
 import { requestAccountPayload } from "./auth.mjs";
 
-const TENCENT_MEETING_SOURCE_PREFIX = "tencent-meeting";
-
 export function safeDownloadName(name) {
   if (!name) return "recording";
   return String(name).trim().replace(/[\\/:*?"<>|]+/g, "_").replace(/\s+/g, "_");
@@ -176,4 +174,24 @@ export function resolveRecordingAudioPath(recording, projectRoot) {
     }
   }
   return "";
+}
+
+// 拿到录音文件的绝对路径
+export function resolveRecordingAudioPathBetter(recording, projectRoot) {
+  const storagePath = String(recording?.storageKey || "").trim();
+  if (!storagePath) return "";
+
+  if (!path.isAbsolute(storagePath) && !projectRoot) {
+    return "";
+  }
+
+  const resolvedPath = path.isAbsolute(storagePath)
+    ? storagePath
+    : path.resolve(projectRoot, storagePath);
+
+  try {
+    return statSync(resolvedPath).isFile() ? resolvedPath : "";
+  } catch {
+    return "";
+  }
 }
