@@ -64,6 +64,7 @@ services:
     volumes:
       - ./client/ssl:/etc/nginx/ssl:ro
       - test-app-storage:/app/server/storage:ro
+      - ./client/dist:/usr/share/nginx/html
     restart: unless-stopped
     
   mysql:
