@@ -5,11 +5,10 @@ import path from "node:path";
 import { mkdir, readdir, rename, rm, writeFile } from "node:fs/promises";
 import logger from "../utils/log.js";
 import { getTranscriptionMode } from "../transcription.mjs";
-import { audioDir, loadDb, tempDir, updateDb } from "../db.mjs";
+import { audioDir, tempDir, updateDb } from "../db.mjs";
 import { mergeAudioFilesToMp3 } from "../media.mjs";
 import {
-  requestClientIdBetter,
-  requestClientNameAndDecode,
+  requestTrustedWecomOwner,
   safeUploadSessionId,
   uploadSessionPath,
   readUploadSessionMeta,
@@ -29,16 +28,21 @@ export function configure(root, deps) {
 
 router.post("/", async (request, response, next) => {
   try {
+    const trustedOwner = requestTrustedWecomOwner(request);
+    if (!trustedOwner) {
+      response.status(401).json({ error: "企业微信登录已失效，请重新登录" });
+      return;
+    }
     const sessionId = crypto.randomUUID();
     const dir = uploadSessionPath(sessionId);
     await mkdir(dir, { recursive: true });
     const now = new Date().toISOString();
-    const ownerClientId = requestClientIdBetter(request);
-    const ownerName = requestClientNameAndDecode(request);
+    const { userId, ownerClientId, ownerName } = trustedOwner;
     const meta = {
       id: sessionId,
       createdAt: now,
       updatedAt: now,
+      userId,
       ownerClientId,
       ownerName,
       name: String(request.body?.name || "").trim(),
@@ -57,10 +61,16 @@ router.post("/", async (request, response, next) => {
 router.post("/:sessionId/segments", upload.array("audio", 80), async (request, response, next) => {
   const files = Array.isArray(request.files) ? request.files : [];
   try {
+    const trustedOwner = requestTrustedWecomOwner(request);
+    if (!trustedOwner) {
+      await Promise.all(files.map((file) => removeFileIfExists(file.path)));
+      response.status(401).json({ error: "企业微信登录已失效，请重新登录" });
+      return;
+    }
     const sessionId = safeUploadSessionId(request.params.sessionId);
     const dir = uploadSessionPath(sessionId);
     const meta = await readUploadSessionMeta(sessionId);
-    if (!dir || !meta || meta.ownerClientId !== requestClientIdBetter(request)) {
+    if (!dir || !meta || meta.ownerClientId !== trustedOwner.ownerClientId) {
       await Promise.all(files.map((file) => removeFileIfExists(file.path)));
       response.status(404).json({ error: "上传会话不存在" });
       return;
@@ -92,10 +102,15 @@ router.post("/:sessionId/segments", upload.array("audio", 80), async (request, r
 
 router.delete("/:sessionId", async (request, response, next) => {
   try {
+    const trustedOwner = requestTrustedWecomOwner(request);
+    if (!trustedOwner) {
+      response.status(401).json({ error: "企业微信登录已失效，请重新登录" });
+      return;
+    }
     const sessionId = safeUploadSessionId(request.params.sessionId);
     const dir = uploadSessionPath(sessionId);
     const meta = await readUploadSessionMeta(sessionId);
-    if (!dir || !meta || meta.ownerClientId !== requestClientIdBetter(request)) {
+    if (!dir || !meta || meta.ownerClientId !== trustedOwner.ownerClientId) {
       response.status(404).json({ error: "上传会话不存在" });
       return;
     }
@@ -109,10 +124,15 @@ router.delete("/:sessionId", async (request, response, next) => {
 router.post("/:sessionId/finalize", async (request, response, next) => {
   const { queueTranscriptionJob, verifiedStoredRecording, publicRecording } = dependencies;
   try {
+    const trustedOwner = requestTrustedWecomOwner(request);
+    if (!trustedOwner) {
+      response.status(401).json({ error: "企业微信登录已失效，请重新登录" });
+      return;
+    }
     const sessionId = safeUploadSessionId(request.params.sessionId);
     const dir = uploadSessionPath(sessionId);
     const meta = await readUploadSessionMeta(sessionId);
-    if (!dir || !meta || meta.ownerClientId !== requestClientIdBetter(request)) {
+    if (!dir || !meta || meta.ownerClientId !== trustedOwner.ownerClientId) {
       response.status(404).json({ error: "上传会话不存在" });
       return;
     }
@@ -149,6 +169,7 @@ router.post("/:sessionId/finalize", async (request, response, next) => {
         storagePath,
         transcriptPath: "",
         favorite: false,
+        userId: meta.userId,
         ownerClientId: meta.ownerClientId,
         ownerName: meta.ownerName || "未设置姓名",
         shared: false,

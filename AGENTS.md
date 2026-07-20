@@ -20,10 +20,16 @@ Shared constant decisions: keep cross-route persistence keys and storage identif
 
 Database startup decisions: `docker-entrypoint.sh` selects the Prisma schema strategy with `PRISMA_SCHEMA_MODE`. Use `push` for development schema synchronization and `migrate` for checked-in production migrations; missing or unknown values must fall back to `prisma migrate deploy`, never to a destructive push option.
 
+Recording persistence decisions: Prisma is the only data-access implementation for `Recording` and `TranscriptSegment` reads, creates, updates, soft deletes, restores, and permanent deletes. Legacy aggregate helpers may remain temporarily for non-recording entities, but they must delegate recording persistence to the Prisma repository and must never issue raw `SELECT`, `DELETE`, or `INSERT` statements against `recordings` or `transcript_segments`.
+
 Records menu decisions: the avatar dropdown uses a compact, content-driven width with mobile viewport bounds instead of a fixed width, and its icon-only action buttons center their icons.
 
 Detail component decisions: keep the chat-history panel in `client/src/pages/Detail/components` as a controlled component. Its owner controls visibility through `open` and `onClose`, while panel-only state such as the history/favorites tab remains inside the panel.
 
 Server router dependency decisions: functions needed by server routes should be imported directly from focused utility modules whenever practical. Do not pass importable utility functions through router `configure()` dependency objects; reserve configuration injection for behavior that genuinely belongs to the application composition root or would otherwise create circular dependencies.
+
+Tencent Meeting webhook payload decisions: handle the canonical `payload.event` and `item.token_info` fields only; do not add aliases for alternative event or token-info field names. Keep `TENCENT_MEETING_SOURCE_PREFIX` equal to `"tencent-meeting"` without the colon, and add or skip the separator explicitly where a full source key is built or parsed.
+
+Recording ownership decisions: `ownerName` is an immutable producer-name snapshot, not a client-editable label. Manual uploads must derive `userId`, `ownerClientId`, and `ownerName` from a server-signed Enterprise WeChat identity obtained during OAuth; never trust name or user-ID request headers for ownership. Tencent Meeting imports use the creator/owner display name returned by Tencent Meeting and may resolve a missing name from the verified Enterprise WeChat directory using the creator userid. Because recorder `recording.audio-completed` callbacks omit identity, correlate them with the nearest preceding `recording.started` context from the persisted webhook history and only replace an empty or generic Tencent recorder owner name. One started context may apply to multiple subsequent audio-completed files until a newer started event arrives or the context expires.
 
 Visual direction: login and not-found screens follow the recording-list reference style—cool gray-blue atmospheric background, oversized heavy black display type, translucent white cards with generous radii, near-black primary actions, coral secondary accents, circular outline-icon controls, and soft low-contrast shadows.

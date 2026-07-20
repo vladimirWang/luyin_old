@@ -1,7 +1,53 @@
+import crypto from "node:crypto";
 import { readFile } from "node:fs/promises";
 import logger from "./log.js";
+import { projectRoot } from "../config.js";
 
 let wecomTokenCache = { value: "", expiresAt: 0 };
+const wecomSessionSecret =
+  process.env.WECOM_SESSION_SECRET
+  crypto.createHash("sha256").update(`${projectRoot}:wecom-session`).digest("hex");
+const WECOM_SESSION_TTL_MS = Math.max(60 * 60 * 1000, Number(process.env.WECOM_SESSION_TTL_MS || 24 * 60 * 60 * 1000));
+
+export function signWecomIdentity(identity = {}) {
+  const payload = {
+    appUserId: String(identity.appUserId || "").trim(),
+    wecomUserId: String(identity.wecomUserId || identity.userId || "").trim(),
+    name: String(identity.name || "").trim().slice(0, 120),
+    expiresAt: Date.now() + WECOM_SESSION_TTL_MS,
+  };
+  if (!payload.appUserId || !payload.wecomUserId || !payload.name) return null;
+  const body = Buffer.from(JSON.stringify(payload)).toString("base64url");
+  const signature = crypto.createHmac("sha256", wecomSessionSecret).update(body).digest("base64url");
+  return { token: `${body}.${signature}`, expiresAt: payload.expiresAt };
+}
+
+export function parseWecomIdentityToken(token = "") {
+  const raw = String(token || "").trim();
+  if (!raw.includes(".")) return null;
+  const [body, signature = ""] = raw.split(".");
+  const expected = crypto.createHmac("sha256", wecomSessionSecret).update(body).digest("base64url");
+  const actualBuffer = Buffer.from(signature);
+  const expectedBuffer = Buffer.from(expected);
+  if (actualBuffer.length !== expectedBuffer.length || !crypto.timingSafeEqual(actualBuffer, expectedBuffer)) return null;
+  try {
+    const payload = JSON.parse(Buffer.from(body, "base64url").toString("utf8"));
+    if (!payload?.appUserId || !payload?.wecomUserId || !payload?.name || Number(payload.expiresAt || 0) <= Date.now()) return null;
+    return payload;
+  } catch {
+    return null;
+  }
+}
+
+export function requestWecomIdentity(request) {
+  const token = String(request.get("x-wecom-auth-token") || "").trim();
+  return parseWecomIdentityToken(token);
+}
+
+export function wecomOwnerClientId(identity = {}) {
+  const userId = String(identity.wecomUserId || identity.userId || "").trim();
+  return userId ? `wecom-${userId}`.slice(0, 120) : "";
+}
 
 export function getWecomConfig() {
   return {
@@ -95,17 +141,25 @@ export async function getWecomUserByCode(code) {
       departments: [],
     };
   }
+  return getWecomUserByUserId(userId, token);
+}
+
+export async function getWecomUserByUserId(userId, accessToken = "") {
+  const normalizedUserId = String(userId || "").trim();
+  if (!normalizedUserId) return null;
+  const token = accessToken || (await getWecomAccessToken());
+  if (!token) return null;
   // 使用 UserId 获取企业通讯录中的成员姓名、部门等详细资料。
   const userResponse = await fetch(
-    `https://qyapi.weixin.qq.com/cgi-bin/user/get?access_token=${encodeURIComponent(token)}&userid=${encodeURIComponent(userId)}`,
+    `https://qyapi.weixin.qq.com/cgi-bin/user/get?access_token=${encodeURIComponent(token)}&userid=${encodeURIComponent(normalizedUserId)}`,
   );
   const user = await userResponse.json();
   if (user.errcode) throw new Error(user.errmsg || "企业微信成员信息获取失败");
 
   return {
-    userId,
+    userId: normalizedUserId,
     openUserId: user.open_userid || "",
-    name: user.name || user.alias || userId,
+    name: user.name || user.alias || normalizedUserId,
     department: Array.isArray(user.department) ? user.department.join(",") : "",
     departments: Array.isArray(user.department) ? user.department : [],
     departmentOrder: Array.isArray(user.order) ? user.order : [],

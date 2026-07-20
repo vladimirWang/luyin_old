@@ -96,16 +96,23 @@ router.post("/webhook", async (request, response) => {
     if (payload) {
       void Promise.resolve()
         .then(async () => {
+          // recording.started 云录制开始
+          // recording.started 云录制停止
+          // recording.completed 云录制完成
+          // recording.audio-completed 录音笔上传完成
+          // common.sts-token token签发
           if (payload.event === "common.sts-token") {
             // 保存 STS Token；只有实际保存成功后才恢复此前挂起的同步任务。
             const saved = await importTencentMeetingStsTokenPayload(payload);
             logger.info("listen /webhook call importTencentMeetingStsTokenPayload success: ", {message: `saved: ${saved}`})
             if (saved) await queueTencentMeetingPendingImports();
+          } else if (payload.event === 'recording.completed') {
+            // 处理录音相关 Webhook：从回调中提取录音文件和会议信息，
+            // 创建或更新本地录音记录，并按事件内容调度后续的音频、转写同步流程。
+            await importTencentMeetingWebhookPayload(payload);
+          } else if (payload.event === 'recording.audio-completed') {
+            await importTencentMeetingWebhookPayload(payload);
           }
-
-          // 处理录音相关 Webhook：从回调中提取录音文件和会议信息，
-          // 创建或更新本地录音记录，并按事件内容调度后续的音频、转写同步流程。
-          await importTencentMeetingWebhookPayload(payload);
           logger.info("listen /webhook call importTencentMeetingWebhookPayload success: ", {message: ''})
 
           // Webhook 只代表单次事件，可能缺少完整录制信息或存在漏推；

@@ -1,8 +1,10 @@
 import express from "express";
+import crypto from "node:crypto";
 import logger from "../utils/log.js";
-import { getWecomUserByCode, hasWecomConfig, getWecomConfig } from "../utils/wecom.js";
+import { getWecomUserByCode, hasWecomConfig, getWecomConfig, signWecomIdentity } from "../utils/wecom.js";
 
 const router = express.Router();
+const prisma = await import("../plugins/prisma.cjs").then((module) => module.default || module);
 
 function normalizeRedirectUri(value) {
   try {
@@ -17,7 +19,6 @@ function normalizeRedirectUri(value) {
 
 router.get("/login-config", (request, response) => {
   const config = getWecomConfig();
-  console.error("------------we--config: ", config)
   const redirectUri = normalizeRedirectUri(config.redirectUri);
   response.json({
     configured: Boolean(config.appid && config.agentid && config.corpSecret && redirectUri),
@@ -61,7 +62,43 @@ router.get("/me", async (request, response, next) => {
     }
     logger.info("request /wecom/me", {message: `start get user by code`})
     const user = await getWecomUserByCode(code);
-    response.json({ configured: true, authenticated: Boolean(user?.name), user });
+    if (!user?.userId || !user?.name) {
+      response.json({ configured: true, authenticated: false, user: null });
+      return;
+    }
+    const appUser = await prisma.appUser.upsert({
+      where: { wecomUserId: user.userId },
+      create: {
+        id: crypto.randomUUID(),
+        wecomUserId: user.userId,
+        name: user.name,
+        company: "企业微信",
+        department: user.department || "",
+      },
+      update: {
+        name: user.name,
+        department: user.department || "",
+      },
+    });
+    const session = signWecomIdentity({
+      appUserId: appUser.id,
+      wecomUserId: user.userId,
+      name: user.name,
+    });
+    if (!session) {
+      response.status(500).json({ configured: true, authenticated: false, user: null, error: "企业微信身份凭证生成失败" });
+      return;
+    }
+    response.json({
+      configured: true,
+      authenticated: true,
+      user: {
+        ...user,
+        appUserId: appUser.id,
+        authToken: session.token,
+        authExpiresAt: session.expiresAt,
+      },
+    });
   } catch (error) {
     next(error);
   }

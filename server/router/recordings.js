@@ -15,6 +15,7 @@ import { convertAudioFileToMp3, fileInfo, mergeAudioFilesToMp3 } from "../media.
 import {
   requestClientIdBetter,
   requestClientNameAndDecode,
+  requestTrustedWecomOwner,
   safeDownloadName,
   recordingSearchScore,
 } from "../utils/recordings.js";
@@ -161,10 +162,12 @@ router.get("/", async (request, response, next) => {
         updatedAt: "desc",
       },
     });
+    logger.info("---------------test: ----------------", {message: "1418"})
     response.json({
       recordings: recordings.map((recording) => ({
         ...recording,
-        audioUrl: `${process.env.SERVER_URL}/static/audio/${recording.fileName}`,
+        // audioUrl: `${process.env.SERVER_URL}/static/audio/${recording.fileName}`,
+        audioUrl: `/static/audio/${recording.fileName}`,
         durationMs: Number(recording.durationMs || 0n),
         fileSize: Number(recording.fileSize || 0n),
       })),
@@ -181,13 +184,18 @@ router.post("/", upload.single("audio"), async (request, response, next) => {
       response.status(400).json({ error: "缺少录音文件" });
       return;
     }
+    const trustedOwner = requestTrustedWecomOwner(request);
+    if (!trustedOwner) {
+      await removeFileIfExists(request.file.path);
+      response.status(401).json({ error: "企业微信登录已失效，请重新登录" });
+      return;
+    }
 
     const id = crypto.randomUUID();
     const fileName = `${id}.mp3`;
     const storagePath = path.join(audioDir, fileName);
     const now = new Date().toISOString();
-    const ownerClientId = requestClientIdBetter(request);
-    const ownerName = requestClientNameAndDecode(request);
+    const { userId, ownerClientId, ownerName } = trustedOwner;
     await convertAudioFileToMp3(request.file.path, storagePath);
     await removeFileIfExists(request.file.path);
     const { storedFile, durationMs } = await verifiedStoredRecording(storagePath, request.body.durationMs);
@@ -207,6 +215,7 @@ router.post("/", upload.single("audio"), async (request, response, next) => {
         storagePath,
         transcriptPath: "",
         favorite: false,
+        userId,
         ownerClientId,
         ownerName,
         shared: false,
@@ -248,13 +257,18 @@ router.post("/segments", upload.array("audio", 480), async (request, response, n
       response.status(400).json({ error: "缺少录音片段" });
       return;
     }
+    const trustedOwner = requestTrustedWecomOwner(request);
+    if (!trustedOwner) {
+      await Promise.all(files.map((file) => removeFileIfExists(file.path)));
+      response.status(401).json({ error: "企业微信登录已失效，请重新登录" });
+      return;
+    }
 
     const id = crypto.randomUUID();
     const fileName = `${id}.mp3`;
     const storagePath = path.join(audioDir, fileName);
     const now = new Date().toISOString();
-    const ownerClientId = requestClientIdBetter(request);
-    const ownerName = requestClientNameAndDecode(request);
+    const { userId, ownerClientId, ownerName } = trustedOwner;
     await mergeAudioFilesToMp3(
       files.map((file) => file.path),
       storagePath,
@@ -280,6 +294,7 @@ router.post("/segments", upload.array("audio", 480), async (request, response, n
       storagePath,
       transcriptPath: "",
       favorite: false,
+      userId,
       ownerClientId,
       ownerName,
       shared: false,
@@ -312,6 +327,7 @@ router.post("/segments", upload.array("audio", 480), async (request, response, n
         storageKey: recording.storagePath,
         transcriptPath: recording.transcriptPath,
         favorite: recording.favorite,
+        user: { connect: { id: recording.userId } },
         ownerClientId: recording.ownerClientId,
         ownerName: recording.ownerName,
         shared: recording.shared,
@@ -323,7 +339,7 @@ router.post("/segments", upload.array("audio", 480), async (request, response, n
         transcriptProvider: recording.transcriptProvider,
         transcriptSource: recording.transcriptSource,
         transcribedAt: null,
-        folderId: recording.folderId,
+        ...(recording.folderId ? { folder: { connect: { id: recording.folderId } } } : {}),
         status: recording.status,
         source: recording.source,
         userAgent: recording.userAgent,

@@ -45,10 +45,10 @@ import profileRouter, { configure as configureProfileRouter } from "./router/pro
 import transcriptionRouter, { configure as configureTranscriptionRouter } from "./router/transcription.js";
 import authRouter, { configure as configureAuthRouter } from "./router/auth.js";
 import foldersRouter, { configure as configureFoldersRouter } from "./router/folders.js";
+import algoRouter from "./router/algo.js";
 import { requestClientIdBetter, resolveRecordingAudioPath, resolveRecordingAudioPathBetter } from "./utils/recordings.js";
 import {
   expandTencentMeetingKeyCandidates,
-  findTencentMeetingContainerDuplicate,
   loadTencentMeetingStsToken,
   tencentMeetingApiConfig,
   tencentMeetingApiRequest,
@@ -112,8 +112,10 @@ import {
 } from "./utils/tencentMeeting.mjs";
 // import prisma from './plugins/prisma.js';
 import {removeFileIfExists} from './utils/file.js'
+import {getWecomUserByUserId} from './utils/wecom.js'
 import {projectRoot, tencentMeetingWebhookDir} from './config.js'
 import {TENCENT_MEETING_SOURCE_PREFIX} from './constant.js'
+import { recordingFromPrisma } from "./repositories/recordings.mjs";
 const prisma = await import('./plugins/prisma.cjs').then(m => m.default || m);
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -564,6 +566,9 @@ const upload = multer({
 
 const tencentMeetingImportJobs = new Set();
 const tencentMeetingTranscriptJobs = new Set();
+const tencentMeetingCreatorNameCache = new Map();
+let tencentMeetingRecorderOwnerContextCache = null;
+let tencentMeetingWebhookPayloadHistoryCache = null;
 let tencentMeetingCloudDiscoveryJob = null;
 const LOCAL_TRANSCRIPTION_STALE_MS = 2 * 60 * 1000;
 const LOCAL_TRANSCRIPTION_SWEEP_INTERVAL_MS = 30 * 1000;
@@ -781,11 +786,14 @@ configureFoldersRouter({
   crypto,
 });
 app.use("/api/folders", foldersRouter);
+app.use("/api/algo", algoRouter);
 
 async function appendTencentMeetingWebhookEvent(entry) {
   // await mkdir(tencentMeetingWebhookDir, { recursive: true });
   const filePath = path.join(tencentMeetingWebhookDir, `${new Date().toISOString().slice(0, 10)}.jsonl`);
   await writeFile(filePath, `${JSON.stringify(entry)}\n`, { flag: "a" });
+  tencentMeetingRecorderOwnerContextCache = null;
+  tencentMeetingWebhookPayloadHistoryCache = null;
 }
 
 async function requestTencentMeetingStsTokenIfPossible() {
@@ -888,16 +896,36 @@ function extractTencentMeetingRecordingEvents(payload) {
             file?.ownerName,
             file?.user_name,
             file?.userName,
+            file?.display_name,
+            file?.displayName,
+            file?.nick_name,
+            file?.nickName,
+            file?.nickname,
             fileOwner.user_name,
             fileOwner.userName,
+            fileOwner.display_name,
+            fileOwner.displayName,
+            fileOwner.nick_name,
+            fileOwner.nickName,
+            fileOwner.nickname,
             fileOwner.username,
             fileOwner.name,
             creator.user_name,
             creator.userName,
+            creator.display_name,
+            creator.displayName,
+            creator.nick_name,
+            creator.nickName,
+            creator.nickname,
             creator.username,
             creator.name,
             operator.user_name,
             operator.userName,
+            operator.display_name,
+            operator.displayName,
+            operator.nick_name,
+            operator.nickName,
+            operator.nickname,
             operator.username,
             operator.name,
           ]) || "",
@@ -928,6 +956,141 @@ function extractTencentMeetingRecordingEvents(payload) {
   }
 
   return entries;
+}
+
+function extractTencentMeetingStartedOwnerContext(payload) {
+  if (!payload || typeof payload !== "object") return null;
+  const event = String(payload.event || "").trim();
+  if (event !== "recording.started") return null;
+
+  const containers = asArray(payload.payload);
+  for (const container of containers) {
+    if (!container || typeof container !== "object") continue;
+    const meetingInfo = container.meeting_info || {};
+    const creator = meetingInfo.creator || {};
+    const operator = container.operator || {};
+    const ownerName = firstNonEmptyValue([
+      operator.user_name,
+      creator.user_name,
+    ]);
+    const creatorUserid = firstNonEmptyValue([
+      operator.userid,
+      creator.userid,
+    ]);
+    if (!ownerName && !creatorUserid) continue;
+
+    const operateTime =
+      container.operate_time ||
+      Date.now();
+    return {
+      ownerName: ownerName || "",
+      creatorUserid: creatorUserid || "",
+      subject:
+        firstNonEmptyValue([
+          container.subject,
+          container.meeting_subject,
+          meetingInfo.subject,
+          meetingInfo.meeting_subject,
+        ]) || "",
+      meetingId: meetingInfo.meeting_id || container.meeting_id || "",
+      meetingCode: meetingInfo.meeting_code || container.meeting_code || "",
+      operateTime,
+      timeMs: tencentMeetingEventTimeMs(operateTime),
+    };
+  }
+  return null;
+}
+
+function buildTencentMeetingRecorderOwnerContexts(webhookPayloads = []) {
+  const startedContexts = [];
+  const contextsByRecordFileId = new Map();
+  const configuredMaxGapMs = Number(process.env.TENCENT_MEETING_RECORDER_OWNER_CONTEXT_MAX_AGE_MS || 36 * 60 * 60 * 1000);
+  const maxGapMs = Number.isFinite(configuredMaxGapMs) ? Math.max(60 * 1000, configuredMaxGapMs) : 36 * 60 * 60 * 1000;
+
+  for (const payload of webhookPayloads) {
+    const startedContext = extractTencentMeetingStartedOwnerContext(payload);
+    if (startedContext) {
+      const duplicate = startedContexts.some(
+        (context) =>
+          context.timeMs === startedContext.timeMs &&
+          context.meetingId === startedContext.meetingId &&
+          context.creatorUserid === startedContext.creatorUserid,
+      );
+      if (!duplicate) startedContexts.push(startedContext);
+      continue;
+    }
+
+    const event = String(payload?.event || "").trim();
+    if (event !== "recording.audio-completed") continue;
+    const completedFiles = extractTencentMeetingRecordingEvents(payload);
+    if (!completedFiles.length) continue;
+    const completedAt = Math.min(...completedFiles.map((info) => tencentMeetingEventTimeMs(info.operateTime)));
+    let candidateIndex = -1;
+    for (let index = startedContexts.length - 1; index >= 0; index -= 1) {
+      const gapMs = completedAt - startedContexts[index].timeMs;
+      if (gapMs >= 0 && gapMs <= maxGapMs) {
+        candidateIndex = index;
+        break;
+      }
+    }
+    if (candidateIndex < 0) continue;
+    const context = startedContexts[candidateIndex];
+    for (const info of completedFiles) {
+      contextsByRecordFileId.set(info.recordFileId, context);
+    }
+  }
+
+  return contextsByRecordFileId;
+}
+
+async function loadTencentMeetingWebhookPayloadHistory() {
+  if (tencentMeetingWebhookPayloadHistoryCache) return tencentMeetingWebhookPayloadHistoryCache;
+  const payloads = [];
+  try {
+    const files = (await readdir(tencentMeetingWebhookDir))
+      .filter((fileName) => /^\d{4}-\d{2}-\d{2}\.jsonl$/.test(fileName))
+      .sort()
+      .slice(-8);
+    for (const fileName of files) {
+      const raw = await readFile(path.join(tencentMeetingWebhookDir, fileName), "utf8");
+      for (const line of raw.split(/\r?\n/)) {
+        const entry = parseJsonObject(line);
+        if (!entry) continue;
+        const payload = entry.payload && typeof entry.payload === "object" ? entry.payload : entry;
+        if (payload && typeof payload === "object") payloads.push(payload);
+      }
+    }
+  } catch (error) {
+    if (error?.code !== "ENOENT") {
+      console.warn("[Tencent Meeting] recorder owner context history skipped:", error instanceof Error ? error.message : error);
+    }
+  }
+  tencentMeetingWebhookPayloadHistoryCache = payloads;
+  return tencentMeetingWebhookPayloadHistoryCache;
+}
+
+async function loadTencentMeetingRecorderOwnerContexts() {
+  if (tencentMeetingRecorderOwnerContextCache) return tencentMeetingRecorderOwnerContextCache;
+  const payloads = await loadTencentMeetingWebhookPayloadHistory();
+  tencentMeetingRecorderOwnerContextCache = buildTencentMeetingRecorderOwnerContexts(payloads);
+  return tencentMeetingRecorderOwnerContextCache;
+}
+
+async function enrichTencentMeetingRecorderOwnerContexts(events = []) {
+  if (!events.length) return events;
+  const contexts = await loadTencentMeetingRecorderOwnerContexts();
+  return events.map((info) => {
+    const context = contexts.get(String(info.recordFileId || ""));
+    if (!context) return info;
+    return {
+      ...info,
+      ownerName: info.ownerName || context.ownerName || "",
+      creatorUserid: info.creatorUserid || context.creatorUserid || "",
+      subject: info.subject || context.subject || "",
+      meetingId: info.meetingId || context.meetingId || "",
+      meetingCode: info.meetingCode || context.meetingCode || "",
+    };
+  });
 }
 
 function cleanTencentMeetingSummaryText(text = "") {
@@ -1576,6 +1739,62 @@ function queueTencentMeetingTranscriptSync(recordingId, info = {}) {
   return true;
 }
 
+async function resolveTencentMeetingOwnerName(info = {}) {
+  const currentName = String(info.ownerName || "").trim();
+  const fallbackOwnerName = tencentMeetingImportOwnerName();
+  if (currentName && currentName !== fallbackOwnerName) return currentName;
+  const creatorUserid = String(info.creatorUserid || "").trim();
+  if (!creatorUserid) return currentName === fallbackOwnerName ? "" : currentName;
+  if (tencentMeetingCreatorNameCache.has(creatorUserid)) {
+    return tencentMeetingCreatorNameCache.get(creatorUserid) || "";
+  }
+  try {
+    const user = await getWecomUserByUserId(creatorUserid);
+    const name = String(user?.name || "").trim();
+    tencentMeetingCreatorNameCache.set(creatorUserid, name);
+    return name;
+  } catch (error) {
+    console.warn("[Tencent Meeting] creator name lookup skipped:", error instanceof Error ? error.message : error);
+    return currentName === fallbackOwnerName ? "" : currentName;
+  }
+}
+
+async function backfillTencentMeetingRecorderOwnersFromWebhookHistory() {
+  const contexts = await loadTencentMeetingRecorderOwnerContexts();
+  if (!contexts.size) return 0;
+  const resolvedContexts = new Map();
+  for (const [recordFileId, context] of contexts) {
+    resolvedContexts.set(recordFileId, {
+      ...context,
+      ownerName: (await resolveTencentMeetingOwnerName(context)) || context.ownerName || "",
+    });
+  }
+
+  const sources = [...resolvedContexts.keys()].map((recordFileId) => tencentMeetingSourceKey(recordFileId));
+  const recordings = await prisma.recording.findMany({
+    where: { source: { in: sources }, deletedAt: null },
+  });
+  let updated = 0;
+  const fallbackOwnerName = tencentMeetingImportOwnerName();
+  await prisma.$transaction(async (tx) => {
+    for (const recording of recordings) {
+      const recordFileId = String(recording.source || "").slice(`${TENCENT_MEETING_SOURCE_PREFIX}:`.length);
+      const context = resolvedContexts.get(recordFileId);
+      if (!context) continue;
+      const data = {};
+      const currentOwnerName = String(recording.ownerName || "").trim();
+      if ((!currentOwnerName || currentOwnerName === fallbackOwnerName) && context.ownerName) data.ownerName = context.ownerName;
+      if (!recording.tencentMeetingCreatorUserid && context.creatorUserid) data.tencentMeetingCreatorUserid = context.creatorUserid;
+      if (!recording.tencentMeetingMeetingId && context.meetingId) data.tencentMeetingMeetingId = context.meetingId;
+      if (!recording.tencentMeetingMeetingCode && context.meetingCode) data.tencentMeetingMeetingCode = context.meetingCode;
+      if (!Object.keys(data).length) continue;
+      await tx.recording.update({ where: { id: recording.id }, data });
+      updated += 1;
+    }
+  });
+  return updated;
+}
+
 async function upsertTencentMeetingRecordingInfos(recordInfos = [], userAgent = "tencent-meeting-sync") {
   const uniqueInfos = [];
   const seen = new Set();
@@ -1583,93 +1802,114 @@ async function upsertTencentMeetingRecordingInfos(recordInfos = [], userAgent = 
     const recordFileId = String(info?.recordFileId || "").trim();
     if (!recordFileId || seen.has(recordFileId)) continue;
     seen.add(recordFileId);
-    uniqueInfos.push({ ...info, recordFileId });
+    uniqueInfos.push({
+      ...info,
+      recordFileId,
+      ownerName: (await resolveTencentMeetingOwnerName(info)) || info.ownerName || "",
+    });
   }
   if (!uniqueInfos.length) return [];
 
-  const now = new Date().toISOString();
-  return updateDb((db) => {
-    if (!db.counters || typeof db.counters !== "object") db.counters = { recordingSeq: 0 };
-    if (!Array.isArray(db.recordings)) db.recordings = [];
-
-    return uniqueInfos.map((eventInfo) => {
+  const now = new Date();
+  return prisma.$transaction(async (tx) => {
+    const latest = await tx.recording.findFirst({ orderBy: { seq: "desc" }, select: { seq: true } });
+    let nextSeq = Number(latest?.seq || 0);
+    const results = [];
+    for (const eventInfo of uniqueInfos) {
       const source = tencentMeetingSourceKey(eventInfo.recordFileId);
-      const existing = db.recordings.find((recording) => recording.source === source);
-      const containerDuplicate = findTencentMeetingContainerDuplicate(db, eventInfo);
-      if (containerDuplicate) {
-        containerDuplicate.deletedAt = now;
-        containerDuplicate.updatedAt = now;
-        containerDuplicate.errorMessage = "已由腾讯会议真实录制文件替代。";
+      const existing = await tx.recording.findFirst({
+        where: { source },
+        include: { segments: { select: { id: true }, take: 1 } },
+      });
+      const meetingRecordId = String(eventInfo.meetingRecordId || "").trim();
+      if (meetingRecordId && meetingRecordId !== eventInfo.recordFileId) {
+        const duplicate = await tx.recording.findFirst({
+          where: { source: tencentMeetingSourceKey(meetingRecordId), deletedAt: null },
+          include: { segments: { select: { id: true }, take: 1 } },
+        });
+        const matchesMeeting =
+          duplicate &&
+          (!duplicate.tencentMeetingMeetingId || !eventInfo.meetingId || duplicate.tencentMeetingMeetingId === eventInfo.meetingId) &&
+          (!duplicate.tencentMeetingMeetingCode || !eventInfo.meetingCode || duplicate.tencentMeetingMeetingCode === eventInfo.meetingCode);
+        if (matchesMeeting && !duplicate.segments.length && !resolveRecordingAudioPath(recordingFromPrisma(duplicate), projectRoot)) {
+          await tx.recording.update({
+            where: { id: duplicate.id },
+            data: { deletedAt: now, errorMessage: "已由腾讯会议真实录制文件替代。" },
+          });
+        }
       }
       if (existing) {
-        existing.updatedAt = now;
-        existing.shared = true;
-        if (!existing.sharedAt) existing.sharedAt = now;
-        if (eventInfo.subject) existing.name = tencentMeetingPlaceholderName(eventInfo);
-        if (eventInfo.ownerName) existing.ownerName = eventInfo.ownerName;
-        if (eventInfo.durationMs > 0 && (!existing.durationMs || existing.durationMs < eventInfo.durationMs)) {
-          existing.durationMs = eventInfo.durationMs;
-        }
-        if (!existing.ownerName) existing.ownerName = tencentMeetingImportOwnerName();
-        if (eventInfo.creatorUserid) existing.tencentMeetingCreatorUserid = eventInfo.creatorUserid;
-        if (eventInfo.meetingId) existing.tencentMeetingMeetingId = eventInfo.meetingId;
-        if (eventInfo.meetingCode) existing.tencentMeetingMeetingCode = eventInfo.meetingCode;
-        if (eventInfo.meetingRecordId) existing.tencentMeetingMeetingRecordId = eventInfo.meetingRecordId;
-        if (eventInfo.sourceKind) existing.tencentMeetingSourceKind = eventInfo.sourceKind;
-        existing.transcriptProvider = existing.transcriptSource === "tencent-meeting" || !findSegments(db, existing.id).length ? "tencent-meeting" : existing.transcriptProvider;
+        const hasSegments = existing.segments.length > 0;
+        const data = {
+          shared: true,
+          sharedAt: existing.sharedAt || now,
+          ownerName: eventInfo.ownerName || existing.ownerName || tencentMeetingImportOwnerName(),
+          transcriptProvider: existing.transcriptSource === "tencent-meeting" || !hasSegments ? "tencent-meeting" : existing.transcriptProvider,
+        };
+        if (eventInfo.subject) data.name = tencentMeetingPlaceholderName(eventInfo);
+        const eventDurationMs = Number(eventInfo.durationMs || 0);
+        if (eventDurationMs > Number(existing.durationMs || 0n)) data.durationMs = BigInt(Math.round(eventDurationMs));
+        if (eventInfo.creatorUserid) data.tencentMeetingCreatorUserid = eventInfo.creatorUserid;
+        if (eventInfo.meetingId) data.tencentMeetingMeetingId = eventInfo.meetingId;
+        if (eventInfo.meetingCode) data.tencentMeetingMeetingCode = eventInfo.meetingCode;
+        if (eventInfo.meetingRecordId) data.tencentMeetingMeetingRecordId = eventInfo.meetingRecordId;
+        if (eventInfo.sourceKind) data.tencentMeetingSourceKind = eventInfo.sourceKind;
         if (eventInfo.sourceKind === "cloud" && (!existing.tag || /录音笔|等待同步|已同步/.test(existing.tag))) {
-          existing.tag = tencentMeetingImportTag(eventInfo, findSegments(db, existing.id).length ? "已同步转写" : "等待转写");
+          data.tag = tencentMeetingImportTag(eventInfo, hasSegments ? "已同步转写" : "等待转写");
         }
-        return { recordingId: existing.id, recordFileId: eventInfo.recordFileId, created: false, info: eventInfo };
+        await tx.recording.update({ where: { id: existing.id }, data });
+        results.push({ recordingId: existing.id, recordFileId: eventInfo.recordFileId, created: false, info: eventInfo });
+        continue;
       }
 
-      db.counters.recordingSeq += 1;
-      const seq = db.counters.recordingSeq;
-      const createdAt = new Date(tencentMeetingEventTimeMs(eventInfo.operateTime)).toISOString();
-      const recording = {
-        id: crypto.randomUUID(),
-        seq,
-        name: tencentMeetingPlaceholderName(eventInfo),
-        createdAt,
-        updatedAt: now,
-        durationMs: eventInfo.durationMs || 0,
-        mimeType: "audio/mpeg",
-        size: 0,
-        fileName: "",
-        storagePath: "",
-        transcriptPath: "",
-        favorite: false,
-        ownerClientId: tencentMeetingImportOwnerClientId(),
-        ownerName: eventInfo.ownerName || tencentMeetingImportOwnerName(),
-        shared: true,
-        sharedAt: now,
-        speakerName: "speaker-1",
-        speakerMap: {},
-        tag: tencentMeetingImportTag(eventInfo, "等待同步"),
-        deletedAt: null,
-        transcriptProvider: "tencent-meeting",
-        transcriptSource: "",
-        transcribedAt: "",
-        folderId: null,
-        status: "uploaded",
-        source,
-        tencentMeetingCreatorUserid: eventInfo.creatorUserid || "",
-        tencentMeetingMeetingId: eventInfo.meetingId || "",
-        tencentMeetingMeetingCode: eventInfo.meetingCode || "",
-        tencentMeetingMeetingRecordId: eventInfo.meetingRecordId || "",
-        tencentMeetingSourceKind: eventInfo.sourceKind || "",
-        errorMessage: "",
-        userAgent,
-      };
-      db.recordings.push(recording);
-      return { recordingId: recording.id, recordFileId: eventInfo.recordFileId, created: true, info: eventInfo };
-    });
+      nextSeq += 1;
+      const recordingId = crypto.randomUUID();
+      await tx.recording.create({
+        data: {
+          id: recordingId,
+          seq: nextSeq,
+          name: tencentMeetingPlaceholderName(eventInfo),
+          createdAt: new Date(tencentMeetingEventTimeMs(eventInfo.operateTime)),
+          updatedAt: now,
+          durationMs: BigInt(Math.max(0, Math.round(Number(eventInfo.durationMs || 0)))),
+          mimeType: "audio/mpeg",
+          fileSize: 0n,
+          fileName: "",
+          storageProvider: "local",
+          storageKey: "",
+          transcriptPath: "",
+          favorite: false,
+          ownerClientId: tencentMeetingImportOwnerClientId(),
+          ownerName: eventInfo.ownerName || tencentMeetingImportOwnerName(),
+          shared: true,
+          sharedAt: now,
+          speakerName: "speaker-1",
+          speakerMapJson: "{}",
+          tag: tencentMeetingImportTag(eventInfo, "等待同步"),
+          deletedAt: null,
+          transcriptProvider: "tencent-meeting",
+          transcriptSource: "",
+          transcribedAt: null,
+          status: "uploaded",
+          source,
+          tencentMeetingCreatorUserid: eventInfo.creatorUserid || "",
+          tencentMeetingMeetingId: eventInfo.meetingId || "",
+          tencentMeetingMeetingCode: eventInfo.meetingCode || "",
+          tencentMeetingMeetingRecordId: eventInfo.meetingRecordId || "",
+          tencentMeetingSourceKind: eventInfo.sourceKind || "",
+          errorMessage: "",
+          userAgent,
+        },
+      });
+      results.push({ recordingId, recordFileId: eventInfo.recordFileId, created: true, info: eventInfo });
+    }
+    return results;
   });
 }
 
 async function importTencentMeetingWebhookPayload(payload) {
   logger.debug("触发ststoken获取", {message: 'step2'})
-  const events = extractTencentMeetingRecordingEvents(payload);
+  const events = await enrichTencentMeetingRecorderOwnerContexts(extractTencentMeetingRecordingEvents(payload));
   logger.debug("触发ststoken获取", {message: `step3 length: ${events.length}`})
   if (!events.length) return [];
   const results = await upsertTencentMeetingRecordingInfos(events, "tencent-meeting-webhook");
@@ -1688,6 +1928,32 @@ async function importTencentMeetingWebhookPayload(payload) {
   }
 
   return results;
+}
+
+async function replayMissingTencentMeetingRecordingWebhooks() {
+  const payloads = (await loadTencentMeetingWebhookPayloadHistory())
+    .filter((payload) => extractTencentMeetingRecordingEvents(payload).length > 0)
+    .slice(-30);
+  if (!payloads.length) return 0;
+
+  const recordFileIds = payloads.flatMap((payload) =>
+    extractTencentMeetingRecordingEvents(payload).map((info) => String(info.recordFileId || "")).filter(Boolean),
+  );
+  const sources = [...new Set(recordFileIds)].map((recordFileId) => tencentMeetingSourceKey(recordFileId));
+  const existing = await prisma.recording.findMany({
+    where: { source: { in: sources } },
+    select: { source: true },
+  });
+  const existingSources = new Set(existing.map((recording) => String(recording.source || "")));
+  let replayed = 0;
+  for (const payload of payloads) {
+    const infos = extractTencentMeetingRecordingEvents(payload);
+    if (infos.every((info) => existingSources.has(tencentMeetingSourceKey(info.recordFileId)))) continue;
+    const results = await importTencentMeetingWebhookPayload(payload);
+    for (const result of results) existingSources.add(tencentMeetingSourceKey(result.recordFileId));
+    replayed += results.filter((result) => result.created).length;
+  }
+  return replayed;
 }
 
 async function fetchTencentMeetingCloudRecordInfos() {
@@ -1784,6 +2050,7 @@ function queueTencentMeetingCloudDiscovery() {
  * 恢复尚未下载音频或尚未同步转写的腾讯会议录音任务。
  */
 async function queueTencentMeetingPendingImports() {
+  await backfillTencentMeetingRecorderOwnersFromWebhookHistory();
   const pendingAudio = [];
   if (tencentMeetingAudioSyncEnabled()) {
     const recordings = await prisma.recording.findMany({
@@ -3505,13 +3772,12 @@ async function generateAndStoreMeetingOutline(recordingId, segments = [], option
 }
 
 async function runTranscriptionJob(recordingId) {
-  // const db = await loadDb();
-  // const recording = findRecording(db, recordingId);
-  const recording = await prisma.recording.findUnique({
+  const recordingRow = await prisma.recording.findUnique({
     where: {
       id: recordingId
     }
   })
+  const recording = recordingRow ? recordingFromPrisma(recordingRow) : null;
   logger.info("transcription.job.start", {message: `recordingId: ${recordingId}, source: ${recording?.source || "unknown"}`, recordingId, source: recording?.source || "unknown"});
   if (!recording) return;
   if (!isLocalApiTranscriptionRecording(recording)) {
@@ -3539,22 +3805,9 @@ async function runTranscriptionJob(recordingId) {
       await writeFile(transcriptionMetaPath, `${JSON.stringify(segments.transcriptionMeta, null, 2)}\n`, "utf8");
     }
 
-    await updateDb((nextDb) => {
-      nextDb.transcriptSegments = nextDb.transcriptSegments.filter((segment) => segment.recordingId !== recordingId);
-      nextDb.transcriptSegments.push(
-        ...segments.map((segment) => ({
-          ...segment,
-          recordingId,
-          createdAt: new Date().toISOString(),
-        })),
-      );
-
-    });
-    // 更新recording状态为 "ready"
     const newRecording = {
       status: "ready",
-      updatedAt: new Date().toISOString(),
-      transcribedAt: new Date().toISOString(),
+      transcribedAt: new Date(),
       transcriptProvider: getTranscriptionMode(),
       transcriptSource: isFallbackTranscript(segments) ? "local-fallback" : getTranscriptionMode(),
       transcriptPath: transcriptPath,
@@ -3570,26 +3823,36 @@ async function runTranscriptionJob(recordingId) {
     if (autoTag) {
       newRecording.tag = autoTag
     }
-    logger.debug("typeof prisma.recording: ", {message: `${prisma.recording}, ${prisma.recording.update}`})
-    // await prisma.Recording.update({
-    //   where: {
-    //     id: recordingId
-    //   },
-    //   data: newRecording
-    // })
+    await prisma.$transaction(async (tx) => {
+      await tx.transcriptSegment.deleteMany({ where: { recordingId } });
+      if (segments.length) {
+        await tx.transcriptSegment.createMany({
+          data: segments.map((segment) => ({
+            id: String(segment.id || crypto.randomUUID()),
+            recordingId,
+            startMs: BigInt(Math.max(0, Math.round(Number(segment.startMs || 0)))),
+            endMs: BigInt(Math.max(0, Math.round(Number(segment.endMs || 0)))),
+            text: segment.text || "",
+            confidence: Number.isFinite(Number(segment.confidence)) ? Number(segment.confidence) : null,
+            speakerLabel: segment.speakerKey || segment.speakerLabel || "speaker-1",
+            createdAt: new Date(),
+          })),
+        });
+      }
+      await tx.recording.update({ where: { id: recordingId }, data: newRecording });
+    });
     await generateAndStoreMeetingOutline(recordingId, segments, { updateTag: true });
     await markDailyBriefDirtyForRecording(recordingId);
     logger.info("transcription.job.success", {message: `recordingId: ${recordingId}, segmentCount: ${segments.length}, transcriptSource: ${recording?.source || "unknown"}`, recordingId, segmentCount: segments.length, transcriptSource: recording?.source || "unknown"});
   } catch (error) {
     logger.error("transcription.job.failed", {message: `recordingId: ${recordingId}, error: ${error instanceof Error ? error.message : error}`, recordingId, error: error instanceof Error ? { message: error.message, stack: error.stack } : error});
-    await updateDb((nextDb) => {
-      const target = findRecording(nextDb, recordingId);
-      if (target) {
-        const hasExistingSegments = nextDb.transcriptSegments.some((segment) => segment.recordingId === recordingId);
-        target.status = hasExistingSegments ? "ready" : "failed";
-        target.updatedAt = new Date().toISOString();
-        target.errorMessage = userSafeTranscriptionError(error);
-      }
+    const existingSegmentCount = await prisma.transcriptSegment.count({ where: { recordingId } });
+    await prisma.recording.updateMany({
+      where: { id: recordingId },
+      data: {
+        status: existingSegmentCount > 0 ? "ready" : "failed",
+        errorMessage: userSafeTranscriptionError(error),
+      },
     });
   }
 }
@@ -3799,6 +4062,16 @@ app.listen(port, host, () => {
 // }
 
 scheduleDailyBriefGeneration();
+
+replayMissingTencentMeetingRecordingWebhooks()
+  .then(async (replayed) => {
+    if (replayed > 0) console.info(`[Tencent Meeting] replayed missing recorder webhooks: ${replayed}`);
+    const updated = await backfillTencentMeetingRecorderOwnersFromWebhookHistory();
+    if (updated > 0) console.info(`[Tencent Meeting] backfilled recorder owner names: ${updated}`);
+  })
+  .catch((error) => {
+    console.warn("[Tencent Meeting] recorder webhook recovery failed:", error instanceof Error ? error.message : error);
+  });
 
 // 暂时停用存量转写文件处理
 // migrateExistingArtifacts().catch((error) => {

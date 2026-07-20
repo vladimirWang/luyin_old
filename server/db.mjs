@@ -3,6 +3,11 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import logger from "./utils/log.js";
 import { tencentMeetingWebhookDir } from "./config.js";
+import {
+  listRecordingsWithPrisma,
+  listTranscriptSegmentsWithPrisma,
+  persistRecordingChangesWithPrisma,
+} from "./repositories/recordings.mjs";
 console.log("-------------tencentMeetingWebhookDir: ", tencentMeetingWebhookDir)
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
@@ -297,14 +302,15 @@ async function loadMysqlDb() {
   const pool = await getMysqlPool();
   // await ensureMysqlSchema(pool);
   const [[profileRow]] = await pool.query("SELECT * FROM app_users ORDER BY created_at ASC LIMIT 1");
-  const [recordingRows] = await pool.query("SELECT * FROM recordings ORDER BY seq ASC");
+  const recordingsPromise = listRecordingsWithPrisma();
   const [folderRows] = await pool.query("SELECT * FROM recording_folders ORDER BY created_at ASC");
-  const [segmentRows] = await pool.query("SELECT * FROM transcript_segments ORDER BY recording_id ASC, start_ms ASC");
+  const transcriptSegmentsPromise = listTranscriptSegmentsWithPrisma();
   const [qaRows] = await pool.query("SELECT * FROM recording_questions ORDER BY created_at ASC");
   const [briefRows] = await pool.query("SELECT * FROM daily_meeting_briefs ORDER BY date_key DESC");
   const [clientProfileRows] = await pool.query("SELECT * FROM client_profiles ORDER BY updated_at DESC, created_at DESC");
   const [accountRows] = await pool.query("SELECT * FROM app_accounts ORDER BY created_at ASC");
-  const maxSeq = recordingRows.reduce((max, row) => Math.max(max, Number(row.seq || 0)), 0);
+  const [recordings, transcriptSegments] = await Promise.all([recordingsPromise, transcriptSegmentsPromise]);
+  const maxSeq = recordings.reduce((max, recording) => Math.max(max, Number(recording.seq || 0)), 0);
 
   return {
     ...defaultDb,
@@ -319,50 +325,7 @@ async function loadMysqlDb() {
       recordsTitle: profileRow?.records_title || defaultDb.profile.recordsTitle,
       updatedAt: iso(profileRow?.updated_at),
     },
-    recordings: recordingRows.map((row) => ({
-      id: row.id,
-      seq: Number(row.seq || 0),
-      name: row.name,
-      speakerName: row.speaker_name || "说话人 1",
-      speakerMap: row.speaker_map_json ? JSON.parse(row.speaker_map_json) : {},
-      ownerClientId: row.owner_client_id || "",
-      ownerName: row.owner_name || "",
-      shared: row.shared !== undefined ? Boolean(row.shared) : true,
-      sharedAt: iso(row.shared_at),
-      detectedLanguage: row.detected_language || "",
-      translationText: row.translation_text || "",
-      tag: row.tag || "",
-      createdAt: iso(row.created_at),
-      updatedAt: iso(row.updated_at),
-      durationMs: Number(row.duration_ms || 0),
-      mimeType: row.mime_type || "audio/mpeg",
-      size: Number(row.file_size || 0),
-      fileName: row.file_name || path.basename(row.storage_key || ""),
-      storagePath: row.storage_key,
-      transcriptPath: row.transcript_path || "",
-      transcriptRawPath: row.transcript_raw_path || "",
-      transcriptCorrectedPath: row.transcript_corrected_path || "",
-      transcriptionMetaPath: row.transcription_meta_path || "",
-      favorite: Boolean(row.favorite),
-      folderId: row.folder_id || null,
-      deletedAt: iso(row.deleted_at) || null,
-      status: row.status,
-      errorMessage: row.error_message || "",
-      transcriptProvider: row.transcript_provider || "",
-      transcriptSource: row.transcript_source || "",
-      transcribedAt: iso(row.transcribed_at),
-      meetingOutline: parseJson(row.meeting_outline_json, null),
-      meetingOutlineStatus: row.meeting_outline_status || "",
-      meetingOutlineError: row.meeting_outline_error || "",
-      meetingOutlinedAt: iso(row.meeting_outlined_at),
-      source: row.source || "wecom-h5",
-      tencentMeetingCreatorUserid: row.tencent_meeting_creator_userid || "",
-      tencentMeetingMeetingId: row.tencent_meeting_meeting_id || "",
-      tencentMeetingMeetingCode: row.tencent_meeting_meeting_code || "",
-      tencentMeetingMeetingRecordId: row.tencent_meeting_meeting_record_id || "",
-      tencentMeetingSourceKind: row.tencent_meeting_source_kind || "",
-      userAgent: row.user_agent || "",
-    })),
+    recordings,
     folders: folderRows.map((row) => ({
       id: row.id,
       name: row.name,
@@ -370,16 +333,7 @@ async function loadMysqlDb() {
       createdAt: iso(row.created_at),
       updatedAt: iso(row.updated_at),
     })),
-    transcriptSegments: segmentRows.map((row) => ({
-      id: row.id,
-      recordingId: row.recording_id,
-      startMs: Number(row.start_ms || 0),
-      endMs: Number(row.end_ms || 0),
-      text: row.text || "",
-      confidence: Number(row.confidence || 0),
-      speakerKey: row.speaker_label || "speaker-1",
-      createdAt: iso(row.created_at),
-    })),
+    transcriptSegments,
     qaMessages: qaRows.map((row) => ({
       id: row.id,
       recordingId: row.recording_id || null,
@@ -461,8 +415,6 @@ async function saveMysqlDb(db) {
     await connection.query("DELETE FROM app_accounts");
     await connection.query("DELETE FROM client_profiles");
     await connection.query("DELETE FROM recording_questions");
-    await connection.query("DELETE FROM transcript_segments");
-    await connection.query("DELETE FROM recordings");
     await connection.query("DELETE FROM recording_folders");
 
     const clientProfiles =
@@ -508,81 +460,6 @@ async function saveMysqlDb(db) {
           folder.ownerClientId || "",
           mysqlDate(folder.createdAt) || mysqlDate(new Date()),
           mysqlDate(folder.updatedAt) || mysqlDate(new Date()),
-        ],
-      );
-    }
-
-    for (const recording of db.recordings || []) {
-      await connection.query(
-        `INSERT INTO recordings
-        (id, seq, user_id, folder_id, name, speaker_name, speaker_map_json, owner_client_id, owner_name, shared, shared_at, detected_language, translation_text, tag, duration_ms, mime_type, file_size,
-         file_name, storage_provider, storage_key, transcript_path, transcript_raw_path, transcript_corrected_path, transcription_meta_path, status, favorite, deleted_at, transcript_provider,
-         transcript_source, transcribed_at, meeting_outline_json, meeting_outline_status, meeting_outline_error, meeting_outlined_at,
-         source, tencent_meeting_creator_userid, tencent_meeting_meeting_id, tencent_meeting_meeting_code, tencent_meeting_meeting_record_id, tencent_meeting_source_kind,
-         error_message, user_agent, created_at, updated_at)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-        [
-          recording.id,
-          recording.seq,
-          "default-user",
-          recording.folderId || null,
-          recording.name,
-          recording.speakerName || "说话人 1",
-          JSON.stringify(recording.speakerMap || {}),
-          recording.ownerClientId || "",
-          recording.ownerName || "",
-          recording.shared !== false,
-          mysqlDate(recording.sharedAt),
-          recording.detectedLanguage || "",
-          recording.translationText || "",
-          recording.tag || "",
-          recording.durationMs || 0,
-          recording.mimeType || "audio/mpeg",
-          recording.size || 0,
-          recording.fileName || path.basename(recording.storagePath || ""),
-          "local",
-          recording.storagePath || "",
-          recording.transcriptPath || "",
-          recording.transcriptRawPath || "",
-          recording.transcriptCorrectedPath || "",
-          recording.transcriptionMetaPath || "",
-          recording.status || "uploaded",
-          Boolean(recording.favorite),
-          mysqlDate(recording.deletedAt),
-          recording.transcriptProvider || "",
-          recording.transcriptSource || "",
-          mysqlDate(recording.transcribedAt),
-          recording.meetingOutline ? JSON.stringify(recording.meetingOutline) : null,
-          recording.meetingOutlineStatus || "",
-          recording.meetingOutlineError || "",
-          mysqlDate(recording.meetingOutlinedAt),
-          recording.source || "wecom-h5",
-          recording.tencentMeetingCreatorUserid || "",
-          recording.tencentMeetingMeetingId || "",
-          recording.tencentMeetingMeetingCode || "",
-          recording.tencentMeetingMeetingRecordId || "",
-          recording.tencentMeetingSourceKind || "",
-          recording.errorMessage || "",
-          recording.userAgent || "",
-          mysqlDate(recording.createdAt) || mysqlDate(new Date()),
-          mysqlDate(recording.updatedAt) || mysqlDate(new Date()),
-        ],
-      );
-    }
-
-    for (const segment of db.transcriptSegments || []) {
-      await connection.query(
-        `INSERT INTO transcript_segments (id, recording_id, start_ms, end_ms, text, confidence, speaker_label, created_at)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
-        [
-          segment.id,
-          segment.recordingId,
-          segment.startMs || 0,
-          segment.endMs || 0,
-          segment.text || "",
-          segment.confidence || null,
-          segment.speakerKey || "speaker-1",
-          mysqlDate(segment.createdAt) || mysqlDate(new Date()),
         ],
       );
     }
@@ -653,8 +530,16 @@ async function saveMysqlDb(db) {
 export function updateDb(mutator) {
   const next = writeQueue.then(async () => {
     const db = await loadDb();
+    const beforeRecordings = structuredClone(db.recordings || []);
+    const beforeTranscriptSegments = structuredClone(db.transcriptSegments || []);
     const result = await mutator(db);
     await saveDb(db);
+    await persistRecordingChangesWithPrisma(
+      beforeRecordings,
+      db.recordings || [],
+      beforeTranscriptSegments,
+      db.transcriptSegments || [],
+    );
     return result;
   });
 

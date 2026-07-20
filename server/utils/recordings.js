@@ -3,6 +3,7 @@ import path from "node:path";
 import { existsSync, statSync } from "node:fs";
 import { attachmentDir, audioDir, tempDir, transcriptDir, ttsDir } from "../db.mjs";
 import { requestAccountPayload } from "./auth.mjs";
+import { requestWecomIdentity, wecomOwnerClientId } from "./wecom.js";
 
 export function safeDownloadName(name) {
   if (!name) return "recording";
@@ -49,11 +50,14 @@ export function requestClientId(request) {
  * @returns {string} 账号、客户端或匿名访问者的稳定 ID。
  */
 export function requestClientIdBetter(request) {
+  const wecomIdentity = requestWecomIdentity(request);
+  if (wecomIdentity) return wecomOwnerClientId(wecomIdentity);
+
   const accountPayload = requestAccountPayload(request);
   if (accountPayload?.accountId) return `account-${accountPayload.accountId}`;
 
   const raw = String(request.get("x-client-id") || request.query?.clientId || "").trim();
-  if (raw && !raw.startsWith("account-")) return raw.slice(0, 120);
+  if (raw && !raw.startsWith("account-") && !raw.startsWith("wecom-")) return raw.slice(0, 120);
 
   const fallback = `${request.ip || ""}|${request.get("user-agent") || ""}`;
   return `ip-${crypto.createHash("sha1").update(fallback).digest("hex").slice(0, 20)}`;
@@ -76,6 +80,9 @@ export function requestClientName(request) {
  * @returns {string} 可用于录音归属和页面展示的用户名称。
  */
 export function requestClientNameAndDecode(request) {
+  const wecomIdentity = requestWecomIdentity(request);
+  if (wecomIdentity?.name) return String(wecomIdentity.name).trim().slice(0, 80);
+
   const accountPayload = requestAccountPayload(request);
   if (accountPayload?.username) return String(accountPayload.username).trim().slice(0, 80);
 
@@ -88,11 +95,18 @@ export function requestClientNameAndDecode(request) {
   }
 }
 
+export function requestTrustedWecomOwner(request) {
+  const identity = requestWecomIdentity(request);
+  if (!identity) return null;
+  const ownerClientId = wecomOwnerClientId(identity);
+  const ownerName = String(identity.name || "").trim().slice(0, 80);
+  const userId = String(identity.appUserId || "").trim();
+  return ownerClientId && ownerName && userId ? { userId, ownerClientId, ownerName } : null;
+}
+
 export function canManageRecording(recording, clientId, clientName) {
   if (!recording) return false;
-  if (recording.ownerClientId === clientId) return true;
-  if (recording.ownerName && recording.ownerName === clientName) return true;
-  return false;
+  return Boolean(recording.ownerClientId && recording.ownerClientId === clientId);
 }
 
 export function canDeleteRecording(recording, clientId, clientName) {
@@ -118,7 +132,7 @@ export function publicRecording(recording, segments, clientId, clientName, optio
   const canManage = canManageRecording(recording, clientId, clientName);
   const canDeleteAll = options.canDeleteAllRecordings || false;
   const canDelete = canDeleteAll || canDeleteRecording(recording, clientId, clientName);
-  const isOwner = recording.ownerClientId === clientId || recording.ownerName === clientName;
+  const isOwner = recording.ownerClientId === clientId;
 
   return {
     id: recording.id,
