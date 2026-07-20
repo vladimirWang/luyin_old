@@ -4028,9 +4028,9 @@ app.get("/", (req, res) => {
 //   });
 // }
 
-const storagePath = path.resolve(__dirname, 'storage')
-logger.info("storage path: ", {message: storagePath})
-app.use("/static", express.static(storagePath));
+// const storagePath = path.resolve(__dirname, 'storage')
+// logger.info("storage path: ", {message: storagePath})
+// app.use("/static", express.static(storagePath));
 
 app.use((error, request, response, _next) => {
   logger.error("server.unhandled_error", {message: `method: ${request?.method}, path: ${request?.path}, originalUrl: ${request?.originalUrl}`});
