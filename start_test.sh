@@ -33,7 +33,7 @@ if ! "${COMPOSE[@]}" up -d --wait --wait-timeout 180 mysql; then
 fi
 
 echo "2/4 依次构建应用镜像，避免低资源环境下并行构建超时..."
-for service in app py_server nginx; do
+for service in app nginx; do
   if ! build_service "$service"; then
     echo "镜像构建失败，输出当前 Docker Compose 状态："
     "${COMPOSE[@]}" ps || true
@@ -42,10 +42,10 @@ for service in app py_server nginx; do
 done
 
 echo "3/4 启动并等待后端服务健康..."
-if ! "${COMPOSE[@]}" up -d --no-build --wait --wait-timeout 180 app py_server; then
+if ! "${COMPOSE[@]}" up -d --no-build --wait --wait-timeout 180 app; then
   echo "后端服务启动失败，输出诊断信息："
   "${COMPOSE[@]}" ps || true
-  "${COMPOSE[@]}" logs --tail=200 mysql app py_server || true
+  "${COMPOSE[@]}" logs --tail=200 mysql app || true
   exit 1
 fi
 
@@ -69,6 +69,6 @@ if ! "${COMPOSE[@]}" up -d --no-build --wait --wait-timeout 60 nginx; then
   exit 1
 fi
 
-echo "测试环境已启动：MySQL、后端、Python 服务和 Nginx 均由 Docker Compose 管理。"
+echo "测试环境已启动：MySQL、后端和 Nginx 均由 Docker Compose 管理。"
 echo "查看状态：${COMPOSE[*]} ps"
 echo "查看日志：${COMPOSE[*]} logs -f"

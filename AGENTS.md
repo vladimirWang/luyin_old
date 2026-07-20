@@ -22,6 +22,8 @@ Database startup decisions: `docker-entrypoint.sh` selects the Prisma schema str
 
 Recording persistence decisions: Prisma is the only data-access implementation for `Recording` and `TranscriptSegment` reads, creates, updates, soft deletes, restores, and permanent deletes. Legacy aggregate helpers may remain temporarily for non-recording entities, but they must delegate recording persistence to the Prisma repository and must never issue raw `SELECT`, `DELETE`, or `INSERT` statements against `recordings` or `transcript_segments`.
 
+Test deployment decisions: `py_server` is intentionally disabled because the current application flow does not use it. `start_test.sh` must not build, start, wait for, or report `py_server`, and must not remove or otherwise manage stale Compose orphan containers.
+
 Records menu decisions: the avatar dropdown uses a compact, content-driven width with mobile viewport bounds instead of a fixed width, and its icon-only action buttons center their icons.
 
 Detail component decisions: keep the chat-history panel in `client/src/pages/Detail/components` as a controlled component. Its owner controls visibility through `open` and `onClose`, while panel-only state such as the history/favorites tab remains inside the panel.
