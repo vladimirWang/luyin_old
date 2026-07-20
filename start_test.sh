@@ -32,14 +32,12 @@ if ! "${COMPOSE[@]}" up -d --wait --wait-timeout 180 mysql; then
   exit 1
 fi
 
-echo "2/4 依次构建应用镜像，避免低资源环境下并行构建超时..."
-for service in app nginx; do
-  if ! build_service "$service"; then
-    echo "镜像构建失败，输出当前 Docker Compose 状态："
-    "${COMPOSE[@]}" ps || true
-    exit 1
-  fi
-done
+echo "2/4 构建后端应用镜像..."
+if ! build_service app; then
+  echo "镜像构建失败，输出当前 Docker Compose 状态："
+  "${COMPOSE[@]}" ps || true
+  exit 1
+fi
 
 echo "3/4 启动并等待后端服务健康..."
 if ! "${COMPOSE[@]}" up -d --no-build --wait --wait-timeout 180 app; then
@@ -50,6 +48,10 @@ if ! "${COMPOSE[@]}" up -d --no-build --wait --wait-timeout 180 app; then
 fi
 
 echo "4/4 检查证书并启动 Nginx..."
+if [ ! -r client/dist/index.html ]; then
+  echo "Nginx 启动失败：缺少 client/dist/index.html，请先完成前端构建或上传 dist 目录。"
+  exit 1
+fi
 for ssl_file in client/ssl/2026_hyp-arch.com.pem client/ssl/2026_hyp-arch.com.key; do
   if [ ! -r "$ssl_file" ]; then
     echo "Nginx 启动失败：缺少或无法读取证书文件 ${ssl_file}"
