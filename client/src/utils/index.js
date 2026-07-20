@@ -1,5 +1,6 @@
-import Toast from "antd-mobile/es/components/toast";
+import {Toast} from "antd-mobile";
 import {displayDateFromDateKey} from './date.js'
+import { getWecomAuthToken } from "../stores/useWecomAuthStore.js";
 import {
   AUTH_STORAGE_KEY,
   PROFILE_STORAGE_KEY,
@@ -39,6 +40,8 @@ export function mergeRequestHeaders(headers = {}, body = null) {
   next.set("X-Client-Id", getClientId());
   const auth = getStoredAuth();
   if (auth?.token) next.set("Authorization", `Bearer ${auth.token}`);
+  const wecomAuthToken = getWecomAuthToken();
+  if (wecomAuthToken) next.set("X-WeCom-Auth-Token", wecomAuthToken);
   const wecomName = getDetectedWecomName();
   if (wecomName) next.set("X-Wecom-User-Name", encodeURIComponent(wecomName));
   return next;

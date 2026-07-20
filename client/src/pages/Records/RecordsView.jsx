@@ -576,7 +576,10 @@ export function RecordsView({
                   bulkDeleteMode={bulkDeleteMode}
                   bulkDeleteSelected={bulkDeleteSelectedSet.has(recording.id)}
                   onBulkDeleteToggle={toggleBulkDeleteSelection}
-                  onToggleExpand={() => setExpandedRecordingId((current) => (current === recording.id ? "" : recording.id))}
+                  onToggleExpand={() => {
+                    console.log("recording toggle: ", recording.id)
+                    setExpandedRecordingId((current) => (current === recording.id ? "" : recording.id))
+                  }}
                   onAsk={() => onOpenDetail(recording.id)}
                   onRename={(name) => onRename(recording.id, name)}
                   onUpdateMeta={(patch) => onUpdateMeta(recording.id, patch)}

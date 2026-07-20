@@ -7,6 +7,7 @@ import {
   isTencentMeetingNoTranscript,
   meetingReportBlocks,
   api,
+  showToast,
 } from "../../utils/index.js";
 
 export function RecordPreviewOverlay({ recording, onClose, onAsk, onShare, onRetranscribe }) {
@@ -352,6 +353,10 @@ export function RecordPreviewOverlay({ recording, onClose, onAsk, onShare, onRet
             onPlay={() => setPreviewPlaying(true)}
             onPause={() => setPreviewPlaying(false)}
             onEnded={() => setPreviewPlaying(false)}
+            onError={(err) => {
+              console.error("on error: ", err)
+              showToast(`音频加载失败， 原因: ${err}`)
+            }}
           />
           <div className="preview-audio-bar" aria-label="录音播放器">
             <button type="button" onClick={togglePreviewPlay} aria-label={previewPlaying ? "暂停播放" : "播放录音"}>

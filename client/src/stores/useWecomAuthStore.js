@@ -4,7 +4,11 @@ import { createJSONStorage, persist } from "zustand/middleware";
 export const WECOM_AUTH_STORAGE_KEY = "wecom-recorder-wecom-auth";
 
 export function hasWecomIdentity(user) {
-  return Boolean(String(user?.userId || user?.openUserId || "").trim());
+  return Boolean(
+    String(user?.userId || "").trim() &&
+      String(user?.authToken || "").trim() &&
+      Number(user?.authExpiresAt || 0) > Date.now(),
+  );
 }
 
 export const useWecomAuthStore = create(
@@ -21,3 +25,8 @@ export const useWecomAuthStore = create(
     },
   ),
 );
+
+export function getWecomAuthToken() {
+  const user = useWecomAuthStore.getState().user;
+  return hasWecomIdentity(user) ? String(user.authToken) : "";
+}
