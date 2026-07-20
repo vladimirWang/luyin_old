@@ -115,7 +115,7 @@ import {removeFileIfExists} from './utils/file.js'
 import {getWecomUserByUserId} from './utils/wecom.js'
 import {projectRoot, tencentMeetingWebhookDir} from './config.js'
 import {TENCENT_MEETING_SOURCE_PREFIX} from './constant.js'
-import { recordingFromPrisma } from "./repositories/recordings.mjs";
+import { recordingFromPrisma, transcriptSegmentFromPrisma } from "./repositories/recordings.mjs";
 const prisma = await import('./plugins/prisma.cjs').then(m => m.default || m);
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -127,6 +127,7 @@ const qaMessageCache = new Map();
 const dailyBriefJobs = new Map();
 const ttsInFlight = new Map();
 const transcriptionJobs = new Set();
+const meetingOutlineJobs = new Map();
 let transcriptionJobChain = Promise.resolve();
 const DAILY_BRIEF_TIMEZONE = "Asia/Shanghai";
 const DAILY_BRIEF_TITLE = "今日会议简报";
@@ -570,9 +571,20 @@ const tencentMeetingCreatorNameCache = new Map();
 let tencentMeetingRecorderOwnerContextCache = null;
 let tencentMeetingWebhookPayloadHistoryCache = null;
 let tencentMeetingCloudDiscoveryJob = null;
-const LOCAL_TRANSCRIPTION_STALE_MS = 2 * 60 * 1000;
 const LOCAL_TRANSCRIPTION_SWEEP_INTERVAL_MS = 30 * 1000;
 const LOCAL_TRANSCRIPTION_SWEEP_LIMIT = 8;
+const configuredMeetingOutlineStaleMs = Number(process.env.MEETING_OUTLINE_STALE_MS);
+const configuredMeetingOutlineSweepIntervalMs = Number(process.env.MEETING_OUTLINE_SWEEP_INTERVAL_MS);
+const configuredMeetingOutlineSweepLimit = Number(process.env.MEETING_OUTLINE_SWEEP_LIMIT);
+const MEETING_OUTLINE_STALE_MS = Number.isFinite(configuredMeetingOutlineStaleMs)
+  ? Math.max(60_000, configuredMeetingOutlineStaleMs)
+  : 20 * 60 * 1000;
+const MEETING_OUTLINE_SWEEP_INTERVAL_MS = Number.isFinite(configuredMeetingOutlineSweepIntervalMs)
+  ? Math.max(30_000, configuredMeetingOutlineSweepIntervalMs)
+  : 60 * 1000;
+const MEETING_OUTLINE_SWEEP_LIMIT = Number.isFinite(configuredMeetingOutlineSweepLimit)
+  ? Math.max(1, Math.round(configuredMeetingOutlineSweepLimit))
+  : 4;
 let tencentMeetingStsTokenRequestInFlight = null;
 let pendingLocalTranscriptionSweepAt = 0;
 
@@ -2245,12 +2257,14 @@ function publicRecording(recording, segments = [], viewerClientId = "", viewerNa
           ? ""
           : recording.transcriptSource || ""
         : recording.transcriptSource || diagnostics.mode,
+    transcriptionStartedAt: recording.transcriptionStartedAt || "",
     transcribedAt: recording.transcribedAt || "",
     meetingOutline: recording.meetingOutline || null,
     meetingOutlineStatus: recording.meetingOutlineStatus || "",
     meetingOutlineError: recording.meetingOutlineError
       ? userSafeErrorMessage(recording.meetingOutlineError, "会议提纲暂未稳定生成，请稍后重新生成。")
       : "",
+    meetingOutlineStartedAt: recording.meetingOutlineStartedAt || "",
     meetingOutlinedAt: recording.meetingOutlinedAt || "",
     tencentMeeting: {
       imported: isTencentMeetingImport,
@@ -3709,25 +3723,43 @@ function outlineTitleText(outline, recording) {
 }
 
 async function setMeetingOutlineState(recordingId, patch) {
-  await updateDb((nextDb) => {
-    const target = findRecording(nextDb, recordingId);
-    if (!target) return;
-    Object.assign(target, patch, { updatedAt: new Date().toISOString() });
+  await prisma.recording.updateMany({
+    where: { id: recordingId, deletedAt: null },
+    data: { ...patch, updatedAt: new Date() },
   });
 }
 
 // 用于根据录音转写内容生成并保存会议大纲/会议提纲
 async function generateAndStoreMeetingOutline(recordingId, segments = [], options = {}) {
-  const db = await loadDb();
-  const recording = findRecording(db, recordingId);
+  const id = String(recordingId || "").trim();
+  if (!id) return null;
+  const activeJob = meetingOutlineJobs.get(id);
+  if (activeJob) return activeJob;
+
+  const job = runMeetingOutlineJob(id, segments, options);
+  meetingOutlineJobs.set(id, job);
+  try {
+    return await job;
+  } finally {
+    if (meetingOutlineJobs.get(id) === job) meetingOutlineJobs.delete(id);
+  }
+}
+
+async function runMeetingOutlineJob(recordingId, segments = [], options = {}) {
+  const row = await prisma.recording.findUnique({
+    where: { id: recordingId },
+    include: { segments: { orderBy: { startMs: "asc" } } },
+  });
+  const recording = row ? recordingFromPrisma(row) : null;
   if (!recording) return null;
 
-  const transcriptSegments = segments.length ? segments : findSegments(db, recordingId);
+  const transcriptSegments = segments.length ? segments : row.segments.map(transcriptSegmentFromPrisma);
   const expandedSegments = expandTranscriptSegments(transcriptSegments, recording.durationMs || 0);
   if (!expandedSegments.length) {
     await setMeetingOutlineState(recordingId, {
       meetingOutlineStatus: "failed",
       meetingOutlineError: "当前还没有可用于生成会议提纲的转写内容。",
+      meetingOutlineStartedAt: null,
     });
     return null;
   }
@@ -3735,30 +3767,30 @@ async function generateAndStoreMeetingOutline(recordingId, segments = [], option
   await setMeetingOutlineState(recordingId, {
     meetingOutlineStatus: "generating",
     meetingOutlineError: "",
+    meetingOutlineStartedAt: new Date(),
   });
 
   try {
     const outline = await generateMeetingOutline(recording, expandedSegments);
     const outlineKeywords = outlineKeywordText(outline);
     const outlineTitle = outlineTitleText(outline, recording);
-    const generatedAt = outline?.generatedAt || new Date().toISOString();
+    const generatedAt = new Date(outline?.generatedAt || Date.now());
     const outlineStatus = outline ? "ready" : "failed";
-
-    await updateDb((nextDb) => {
-      const target = findRecording(nextDb, recordingId);
-      if (!target) return;
-      target.meetingOutline = outline;
-      target.meetingOutlineStatus = outlineStatus;
-      target.meetingOutlineError =
-        outlineStatus === "failed" ? "Meeting outline generation failed." : "";
-      target.meetingOutlinedAt = generatedAt;
-      if (options.updateTag !== false && outlineKeywords) {
-        target.tag = outlineKeywords;
-      }
-      if (options.updateName !== false && outlineTitle && isDefaultRecordingName(target.name)) {
-        target.name = outlineTitle;
-      }
-      target.updatedAt = new Date().toISOString();
+    const data = {
+      meetingOutlineJson: outline ? JSON.stringify(outline) : null,
+      meetingOutlineStatus: outlineStatus,
+      meetingOutlineError: outlineStatus === "failed" ? "Meeting outline generation failed." : "",
+      meetingOutlineStartedAt: null,
+      meetingOutlinedAt: Number.isNaN(generatedAt.getTime()) ? new Date() : generatedAt,
+      updatedAt: new Date(),
+    };
+    if (options.updateTag !== false && outlineKeywords) data.tag = outlineKeywords;
+    if (options.updateName !== false && outlineTitle && isDefaultRecordingName(recording.name)) {
+      data.name = outlineTitle;
+    }
+    await prisma.recording.updateMany({
+      where: { id: recordingId, deletedAt: null },
+      data,
     });
     return outline;
   } catch (error) {
@@ -3766,6 +3798,7 @@ async function generateAndStoreMeetingOutline(recordingId, segments = [], option
     await setMeetingOutlineState(recordingId, {
       meetingOutlineStatus: "failed",
       meetingOutlineError: userSafeErrorMessage(error, "会议提纲暂未稳定生成，请稍后重新生成。"),
+      meetingOutlineStartedAt: null,
     });
     return null;
   }
@@ -3810,6 +3843,7 @@ async function runTranscriptionJob(recordingId) {
       transcribedAt: new Date(),
       transcriptProvider: getTranscriptionMode(),
       transcriptSource: isFallbackTranscript(segments) ? "local-fallback" : getTranscriptionMode(),
+      transcriptionStartedAt: null,
       transcriptPath: transcriptPath,
       transcriptRawPath: segments.rawText ? transcriptRawPath : "",
       transcriptCorrectedPath: segments.correctedText ? transcriptCorrectedPath : "",
@@ -3818,6 +3852,9 @@ async function runTranscriptionJob(recordingId) {
       translationText: translation.translationText || "",
       meetingOutlineStatus: "generating",
       meetingOutlineError: "",
+      meetingOutlineJson: null,
+      meetingOutlineStartedAt: new Date(),
+      meetingOutlinedAt: null,
       // if (!target.tag && autoTag) target.tag = autoTag;
     }
     if (autoTag) {
@@ -3852,6 +3889,7 @@ async function runTranscriptionJob(recordingId) {
       data: {
         status: existingSegmentCount > 0 ? "ready" : "failed",
         errorMessage: userSafeTranscriptionError(error),
+        transcriptionStartedAt: null,
       },
     });
   }
@@ -3870,22 +3908,26 @@ async function queueTranscriptionJob(recordingId, recordingForSource = null) {
   if (transcriptionJobs.has(id)) return false;
 
   transcriptionJobs.add(id);
-
-  // await prisma.Recording.update({
-  //   where: {
-  //     id: recordingId
-  //   },
-  //   data: {
-  //     status:  "transcribing",
-  //     updatedAt:  new Date().toISOString(),
-  //     errorMessage:  "",
-  //     transcriptProvider:  getTranscriptionMode(),
-  //     // meetingOutline:  null,
-  //     meetingOutlineStatus:  "",
-  //     meetingOutlineError:  "",
-  //     meetingOutlinedAt:  "",
-  //   }
-  // })
+  let claimed;
+  try {
+    claimed = await prisma.recording.updateMany({
+      where: { id, deletedAt: null },
+      data: {
+        status: "transcribing",
+        transcriptionStartedAt: new Date(),
+        updatedAt: new Date(),
+        errorMessage: "",
+        transcriptProvider: getTranscriptionMode(),
+      },
+    });
+  } catch (error) {
+    transcriptionJobs.delete(id);
+    throw error;
+  }
+  if (!claimed.count) {
+    transcriptionJobs.delete(id);
+    return false;
+  }
 
   transcriptionJobChain = transcriptionJobChain
     .catch(() => {})
@@ -3900,39 +3942,19 @@ async function queueTranscriptionJob(recordingId, recordingForSource = null) {
   return true;
 }
 
-function localRecordingHasTranscript(db, recording) {
-  if (!recording?.id) return false;
-  return Boolean(recording.transcriptPath) || findSegments(db, recording.id).length > 0;
-}
-
-function shouldRecoverLocalTranscription(recording, db, nowMs = Date.now()) {
-  if (!recording || recording.deletedAt) return false;
-  if (!isLocalApiTranscriptionRecording(recording)) return false;
-  if (!isRecordingApiTranscriptionEnabled()) return false;
-  if (!resolveRecordingAudioPath(recording)) return false;
-  if (localRecordingHasTranscript(db, recording) && recording.status === "ready") return false;
-
-  const status = String(recording.status || "").trim();
-  if (!["uploaded", "uploading", "queued", "pending", "processing", "transcribing"].includes(status)) {
-    return false;
-  }
-
-  if (["processing", "transcribing"].includes(status)) {
-    const timestamp = Date.parse(recording.updatedAt || recording.createdAt || "");
-    const ageMs = Number.isFinite(timestamp) ? nowMs - timestamp : Number.POSITIVE_INFINITY;
-    return ageMs > LOCAL_TRANSCRIPTION_STALE_MS && !transcriptionJobs.has(String(recording.id));
-  }
-
-  return true;
-}
-
 async function queuePendingLocalTranscriptionJobs(reason = "sweep") {
   if (!isRecordingApiTranscriptionEnabled()) return 0;
-  const db = await loadDb();
-  const nowMs = Date.now();
-  const candidates = [...(db.recordings || [])]
-    .filter((recording) => shouldRecoverLocalTranscription(recording, db, nowMs))
-    .sort((a, b) => new Date(a.updatedAt || a.createdAt || 0) - new Date(b.updatedAt || b.createdAt || 0))
+  const rows = await prisma.recording.findMany({
+    where: {
+      deletedAt: null,
+      source: { in: ["wecom-h5", "wecom-h5-long-session", "wecom-h5-resumed"] },
+      status: { in: ["uploaded", "uploading", "queued", "pending", "processing", "transcribing"] },
+    },
+    orderBy: { updatedAt: "asc" },
+  });
+  const candidates = rows
+    .map(recordingFromPrisma)
+    .filter((recording) => !transcriptionJobs.has(recording.id) && Boolean(resolveRecordingAudioPath(recording, projectRoot)))
     .slice(0, LOCAL_TRANSCRIPTION_SWEEP_LIMIT);
 
   let queued = 0;
@@ -3941,6 +3963,30 @@ async function queuePendingLocalTranscriptionJobs(reason = "sweep") {
   }
   if (queued) logger.info("transcription.recovered", {message: `reason: ${reason}, queued: ${queued}`, reason, queued});
   return queued;
+}
+
+async function queuePendingMeetingOutlineJobs(reason = "sweep", options = {}) {
+  const staleBefore = new Date(Date.now() - MEETING_OUTLINE_STALE_MS);
+  const rows = await prisma.recording.findMany({
+    where: {
+      deletedAt: null,
+      meetingOutlineStatus: "generating",
+      meetingOutlineJson: null,
+      segments: { some: {} },
+      ...(options.force
+        ? {}
+        : { OR: [{ meetingOutlineStartedAt: null }, { meetingOutlineStartedAt: { lte: staleBefore } }] }),
+    },
+    orderBy: { meetingOutlineStartedAt: "asc" },
+    take: MEETING_OUTLINE_SWEEP_LIMIT,
+    select: { id: true },
+  });
+  const jobs = rows
+    .filter(({ id }) => !meetingOutlineJobs.has(id))
+    .map(({ id }) => generateAndStoreMeetingOutline(id, [], { updateTag: true }));
+  if (jobs.length) logger.info("meeting-outline.recovered", { message: `reason: ${reason}, queued: ${jobs.length}`, reason, queued: jobs.length });
+  await Promise.allSettled(jobs);
+  return jobs.length;
 }
 
 function schedulePendingLocalTranscriptionSweep(reason = "sweep", options = {}) {
@@ -4083,7 +4129,22 @@ replayMissingTencentMeetingRecordingWebhooks()
 // });
 
 // queueTencentMeetingCloudDiscovery();
-// setTimeout(() => schedulePendingLocalTranscriptionSweep("startup", { force: true }), 2000).unref?.();
+setTimeout(() => {
+  schedulePendingLocalTranscriptionSweep("startup", { force: true });
+  queuePendingMeetingOutlineJobs("startup", { force: true }).catch((error) => {
+    console.warn("[Meeting outline] startup recovery failed:", error instanceof Error ? error.message : error);
+  });
+}, 2000).unref?.();
+
+setInterval(() => {
+  schedulePendingLocalTranscriptionSweep("interval");
+}, LOCAL_TRANSCRIPTION_SWEEP_INTERVAL_MS).unref?.();
+
+setInterval(() => {
+  queuePendingMeetingOutlineJobs("interval").catch((error) => {
+    console.warn("[Meeting outline] pending job sweep failed:", error instanceof Error ? error.message : error);
+  });
+}, MEETING_OUTLINE_SWEEP_INTERVAL_MS).unref?.();
 
 // const tencentMeetingPendingImportIntervalMs = Number(process.env.TENCENT_MEETING_PENDING_IMPORT_INTERVAL_MS || 5 * 60 * 1000);
 // if (tencentMeetingPendingImportIntervalMs > 0) {

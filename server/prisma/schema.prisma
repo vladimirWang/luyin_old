@@ -56,10 +56,12 @@ model Recording {
   deletedAt                     DateTime? @map("deleted_at") @db.Timestamp(0)
   transcriptProvider            String?   @map("transcript_provider") @db.VarChar(80)
   transcriptSource              String?   @map("transcript_source") @db.VarChar(120)
+  transcriptionStartedAt        DateTime? @map("transcription_started_at") @db.Timestamp(0)
   transcribedAt                 DateTime? @map("transcribed_at") @db.Timestamp(0)
   meetingOutlineJson            String?   @map("meeting_outline_json") @db.LongText
   meetingOutlineStatus          String?   @map("meeting_outline_status") @db.VarChar(32)
   meetingOutlineError           String?   @map("meeting_outline_error") @db.Text
+  meetingOutlineStartedAt       DateTime? @map("meeting_outline_started_at") @db.Timestamp(0)
   meetingOutlinedAt             DateTime? @map("meeting_outlined_at") @db.Timestamp(0)
   source                        String?   @db.VarChar(80)
   tencentMeetingCreatorUserid   String?   @map("tencent_meeting_creator_userid") @db.VarChar(160)
@@ -78,6 +80,10 @@ model Recording {
   questions RecordingQuestion[]
 
   @@index([createdAt], map: "recordings_created_index")
+  @@index([folderId, deletedAt], map: "recordings_folder_deleted_index")
+  @@index([favorite, deletedAt], map: "recordings_favorite_deleted_index")
+  @@index([status, deletedAt, updatedAt], map: "recordings_transcription_queue_index")
+  @@index([meetingOutlineStatus, meetingOutlineStartedAt], map: "recordings_outline_queue_index")
   @@index([ownerClientId], map: "recordings_owner_index")
   @@index([seq], map: "recordings_seq_index")
   @@map("recordings")

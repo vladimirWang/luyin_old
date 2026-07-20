@@ -24,6 +24,7 @@ import { isTencentMeetingRecording, tencentMeetingSyncInfoFromRecording } from "
 // import prisma from "../plugins/prisma.js";
 import {removeFileIfExists} from '../utils/file.js'
 import { canDeleteAllRecordings, canReadRecording } from "../utils/common.mjs";
+import { recordingFromPrisma, transcriptSegmentFromPrisma } from "../repositories/recordings.mjs";
 
 const prisma = await import('../plugins/prisma.cjs').then(m => m.default || m);
 
@@ -97,7 +98,15 @@ async function handleMeetingOutlineRequest(req, res, next) {
       return;
     }
 
-    if (!forceRefresh && recording.meetingOutlineStatus === "generating") {
+    const outlineStartedAt = Date.parse(recording.meetingOutlineStartedAt || "");
+    const configuredOutlineStaleMs = Number(process.env.MEETING_OUTLINE_STALE_MS);
+    const outlineStaleMs = Number.isFinite(configuredOutlineStaleMs)
+      ? Math.max(60_000, configuredOutlineStaleMs)
+      : 20 * 60 * 1000;
+    const outlineIsStale =
+      recording.meetingOutlineStatus === "generating" &&
+      (!Number.isFinite(outlineStartedAt) || Date.now() - outlineStartedAt >= outlineStaleMs);
+    if (!forceRefresh && recording.meetingOutlineStatus === "generating" && !outlineIsStale) {
       res.json({ outline: null, status: "generating" });
       return;
     }
@@ -122,56 +131,45 @@ async function handleMeetingOutlineRequest(req, res, next) {
 }
 
 router.get("/", async (request, response, next) => {
-  const { schedulePendingLocalTranscriptionSweep, findSegments, publicRecording } = dependencies;
-  // const db = await loadDb();
-  // const clientId = requestClientIdBetter(request);
-  // const clientName = requestClientNameAndDecode(request);
-  // const canDeleteAll = canDeleteAllRecordings();
-  // const query = String(request.query.q || request.query.search || "").trim().toLowerCase();
+  const { publicRecording } = dependencies;
+  const clientId = requestClientIdBetter(request);
+  const clientName = requestClientNameAndDecode(request);
+  const canDeleteAll = canDeleteAllRecordings();
+  const query = String(request.query.q || request.query.search || "").trim().toLowerCase();
   const folderId = request.query.folderId || "all";
-  // const recordings = [...db.recordings]
-  //   .sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt))
-  //   .filter((recording) => canDeleteAll || canReadRecording(recording, clientId))
-  //   .map((recording) => publicRecording(recording, findSegments(db, recording.id), clientId, clientName, { canDeleteAllRecordings: canDeleteAll }));
-
-  // const folderFiltered =
-  //   folderId === "all"
-  //     ? recordings.filter((recording) => !recording.deletedAt)
-  //     : folderId === "favorites"
-  //       ? recordings.filter((recording) => recording.favorite && !recording.deletedAt)
-  //       : folderId === "trash"
-  //         ? recordings.filter((recording) => recording.deletedAt)
-  //         : folderId === "uncategorized"
-  //           ? recordings.filter((recording) => !recording.folderId && !recording.deletedAt)
-  //           : recordings.filter((recording) => recording.folderId === folderId && !recording.deletedAt);
-
-  // const filtered = query
-  //   ? folderFiltered
-  //       .map((recording) => ({ recording, score: recordingSearchScore(recording, query) }))
-  //       .filter((item) => item.score >= 18)
-  //       .sort((a, b) => b.score - a.score || new Date(b.recording.createdAt) - new Date(a.recording.createdAt))
-  //       .map((item) => item.recording)
-  //   : folderFiltered;
-
-  // // 改为定时扫描
-  // // schedulePendingLocalTranscriptionSweep("recordings-list");
   try {
-    const recordings = await prisma.recording.findMany({
-      where: folderId === "all" ? { deletedAt: null } : { folderId, deletedAt: null },
-      orderBy: {
-        updatedAt: "desc",
-      },
+    const folderWhere =
+      folderId === "trash"
+        ? { deletedAt: { not: null } }
+        : folderId === "favorites"
+          ? { deletedAt: null, favorite: true }
+          : folderId === "uncategorized"
+            ? { deletedAt: null, folderId: null }
+            : folderId === "all"
+              ? { deletedAt: null }
+              : { deletedAt: null, folderId };
+    const rows = await prisma.recording.findMany({
+      where: folderWhere,
+      include: { segments: { orderBy: { startMs: "asc" } } },
+      orderBy: { createdAt: "desc" },
     });
-    logger.info("---------------test: ----------------", {message: "1418"})
-    response.json({
-      recordings: recordings.map((recording) => ({
-        ...recording,
-        // audioUrl: `${process.env.SERVER_URL}/static/audio/${recording.fileName}`,
-        audioUrl: `/static/audio/${recording.fileName}`,
-        durationMs: Number(recording.durationMs || 0n),
-        fileSize: Number(recording.fileSize || 0n),
-      })),
-    });
+    const recordings = rows
+      .map((row) => ({
+        recording: recordingFromPrisma(row),
+        segments: row.segments.map(transcriptSegmentFromPrisma),
+      }))
+      .filter(({ recording }) => canDeleteAll || canReadRecording(recording, clientId))
+      .map(({ recording, segments }) =>
+        publicRecording(recording, segments, clientId, clientName, { canDeleteAllRecordings: canDeleteAll }),
+      );
+    const filtered = query
+      ? recordings
+          .map((recording) => ({ recording, score: recordingSearchScore(recording, query) }))
+          .filter((item) => item.score >= 18)
+          .sort((a, b) => b.score - a.score || new Date(b.recording.createdAt) - new Date(a.recording.createdAt))
+          .map((item) => item.recording)
+      : recordings;
+    response.json({ recordings: filtered });
   } catch (error) {
     next(error);
   }
@@ -346,7 +344,7 @@ router.post("/segments", upload.array("audio", 480), async (request, response, n
       },
     });
 
-    const queued = queueTranscriptionJob(id, recording);
+    const queued = await queueTranscriptionJob(id, recording);
     const responseRecording = queued ? { ...recording, status: "transcribing", errorMessage: "" } : recording;
 
     logger.info("recording.segments.uploaded", {message: `recordingId: ${id}, ownerClientId: ${ownerClientId}, ownerName: ${ownerName}, queued: ${queued}, partCount: ${files.length}, fileName: ${fileName}`, recordingId: id, ownerClientId, ownerName, queued, partCount: files.length, fileName});
