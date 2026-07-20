@@ -30,7 +30,7 @@ export function RecorderView({ createUploadCard, uploadRecordingSegments }) {
   return (
     <section className="screen recorder-screen" aria-label="录音">
       <div className="zustand-user-query">
-        <button
+        {/* <button
           className="sts-token-request-button"
           type="button"
           onClick={requestStsToken}
@@ -38,7 +38,7 @@ export function RecorderView({ createUploadCard, uploadRecordingSegments }) {
         >
           <KeyRound size={16} />
           {stsTokenRequesting ? "申请中…" : "申请 STS Token"}
-        </button>
+        </button> */}
         {/* <button
           className="zustand-user-query-button"
           type="button"

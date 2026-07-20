@@ -1,4 +1,6 @@
-import {dailyBriefDisplayDate} from '../../../utils/index.js'
+import { Share2 } from "lucide-react";
+import { cleanQaVisibleText, dailyBriefDisplayDate } from '../../../utils/index.js'
+import { renderDailyBriefLines } from "./DailyBriefListView.jsx";
 
 function dailyBriefFallbackContent(brief, meetingCount) {
   const displayDate = dailyBriefDisplayDate(brief);
