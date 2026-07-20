@@ -5,7 +5,7 @@ import { projectRoot } from "../config.js";
 
 let wecomTokenCache = { value: "", expiresAt: 0 };
 const wecomSessionSecret =
-  process.env.WECOM_SESSION_SECRET
+  process.env.WECOM_SESSION_SECRET ||
   crypto.createHash("sha256").update(`${projectRoot}:wecom-session`).digest("hex");
 const WECOM_SESSION_TTL_MS = Math.max(60 * 60 * 1000, Number(process.env.WECOM_SESSION_TTL_MS || 24 * 60 * 60 * 1000));
 
