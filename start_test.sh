@@ -24,7 +24,7 @@ build_service() {
 }
 
 echo "启动阿里云测试环境完整服务栈..."
-echo "1/3 启动并等待 MySQL 健康..."
+echo "1/4 启动并等待 MySQL 健康..."
 if ! "${COMPOSE[@]}" up -d --wait --wait-timeout 180 mysql; then
   echo "MySQL 启动失败，输出诊断信息："
   "${COMPOSE[@]}" ps mysql || true
@@ -32,7 +32,7 @@ if ! "${COMPOSE[@]}" up -d --wait --wait-timeout 180 mysql; then
   exit 1
 fi
 
-echo "2/3 依次构建应用镜像，避免低资源环境下并行构建超时..."
+echo "2/4 依次构建应用镜像，避免低资源环境下并行构建超时..."
 for service in app py_server nginx; do
   if ! build_service "$service"; then
     echo "镜像构建失败，输出当前 Docker Compose 状态："
@@ -41,11 +41,31 @@ for service in app py_server nginx; do
   fi
 done
 
-echo "3/3 启动并等待应用服务健康..."
-if ! "${COMPOSE[@]}" up -d --no-build --wait --wait-timeout 180; then
-  echo "应用服务启动失败，输出诊断信息："
+echo "3/4 启动并等待后端服务健康..."
+if ! "${COMPOSE[@]}" up -d --no-build --wait --wait-timeout 180 app py_server; then
+  echo "后端服务启动失败，输出诊断信息："
   "${COMPOSE[@]}" ps || true
-  "${COMPOSE[@]}" logs --tail=200 mysql app py_server nginx || true
+  "${COMPOSE[@]}" logs --tail=200 mysql app py_server || true
+  exit 1
+fi
+
+echo "4/4 检查证书并启动 Nginx..."
+for ssl_file in client/ssl/2026_hyp-arch.com.pem client/ssl/2026_hyp-arch.com.key; do
+  if [ ! -r "$ssl_file" ]; then
+    echo "Nginx 启动失败：缺少或无法读取证书文件 ${ssl_file}"
+    exit 1
+  fi
+done
+
+if ! "${COMPOSE[@]}" up -d --no-build --wait --wait-timeout 60 nginx; then
+  echo "Nginx 启动失败，输出诊断信息："
+  "${COMPOSE[@]}" ps -a nginx || true
+  nginx_container_id=$("${COMPOSE[@]}" ps -q nginx || true)
+  if [ -n "$nginx_container_id" ]; then
+    docker inspect --format '容器状态={{.State.Status}} 启动错误={{.State.Error}} 退出码={{.State.ExitCode}}' "$nginx_container_id" || true
+  fi
+  "${COMPOSE[@]}" logs --tail=200 nginx || true
+  echo "如果启动错误包含 address already in use，请检查宿主机端口：ss -ltnp '( sport = :80 or sport = :443 )'"
   exit 1
 fi
 
