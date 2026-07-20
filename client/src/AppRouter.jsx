@@ -16,7 +16,7 @@ export default function AppRouter() {
         <Route element={<ProtectedRoute />}>
           <Route path="/" element={<Navigate to="/recorder" replace />} />
           <Route element={<App />}>
-            <Route path="/recorder" element={<Recorder />} />
+            {/* <Route path="/recorder" element={<Recorder />} /> */}
             <Route path="/records" element={<Records />} />
             <Route path="/detail" element={<Detail />} />
           </Route>
