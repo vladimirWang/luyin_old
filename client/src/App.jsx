@@ -5,6 +5,7 @@ import { getLocalProfile, uiText } from "./utils/index.js";
 
 const NAV_ITEMS = [
   { path: "/records", labelZh: "记录", labelEn: "Records", icon: Home },
+  { path: "/verify", labelZh: "验证", labelEn: "Records", icon: Home },
   // { path: "/recorder", labelZh: "录音", labelEn: "Record", icon: Mic, center: true },
   { path: "/detail", labelZh: "问答", labelEn: "QA", icon: ListMusic },
 ];

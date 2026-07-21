@@ -47,12 +47,21 @@ router.post("/sts-token/request", async (_request, response, next) => {
     const result = await requestTencentMeetingStsTokenIfNeeded();
     if (!result.requested) {
       const missingOperator = result.reason === "missing_operator_id";
-      response.status(missingOperator ? 503 : 502).json({
-        ok: false,
+      const redisUnavailable = result.reason === "redis_unavailable";
+      const accepted = result.reason === "token_fresh" || result.reason === "request_pending";
+      response.status(accepted ? 200 : missingOperator || redisUnavailable ? 503 : 502).json({
+        ok: accepted,
         requested: false,
-        error: missingOperator
-          ? "未配置腾讯会议 STS Operator ID"
-          : "腾讯会议 STS Token 申请失败",
+        reason: result.reason,
+        ...(accepted
+          ? { message: result.reason === "token_fresh" ? "STS Token 仍然有效" : "STS Token 申请已在处理中" }
+          : {
+              error: missingOperator
+                ? "未配置腾讯会议 STS Operator ID"
+                : redisUnavailable
+                  ? "Redis 不可用，无法读写 STS Token"
+                  : "腾讯会议 STS Token 申请失败",
+            }),
       });
       return;
     }
