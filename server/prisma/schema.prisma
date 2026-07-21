@@ -151,6 +151,55 @@ model RecordingQuestion {
   @@map("recording_questions")
 }
 
+model AdminQaSession {
+  id            String    @id @db.VarChar(191)
+  userId        String    @default("admin") @map("user_id") @db.VarChar(191)
+  surface       String    @default("admin") @db.VarChar(32)
+  title         String    @default("新建问答") @db.VarChar(255)
+  titleSource   String    @default("system") @map("title_source") @db.VarChar(32)
+  preview       String    @db.Text
+  status        String    @default("active") @db.VarChar(32)
+  recordingIds  Json      @map("recording_ids")
+  scopeJson     Json      @map("scope_json")
+  model         String    @default("") @db.VarChar(255)
+  promptVersion String    @default("") @map("prompt_version") @db.VarChar(64)
+  createdAt     DateTime  @default(now()) @map("created_at") @db.DateTime(6)
+  updatedAt     DateTime  @default(now()) @updatedAt @map("updated_at") @db.DateTime(6)
+  archivedAt    DateTime? @map("archived_at") @db.DateTime(6)
+  deletedAt     DateTime? @map("deleted_at") @db.DateTime(6)
+
+  @@index([surface, status, updatedAt], map: "idx_admin_sessions_status")
+  @@map("admin_qa_sessions")
+}
+
+model AdminQaMessage {
+  id                  String    @id @db.VarChar(191)
+  recordingId         String?   @map("recording_id") @db.VarChar(191)
+  recordingIds        Json      @map("recording_ids")
+  userId              String    @default("admin") @map("user_id") @db.VarChar(191)
+  surface             String    @default("admin") @db.VarChar(32)
+  sessionId           String    @map("session_id") @db.VarChar(191)
+  question            String    @db.LongText
+  answer              String    @db.LongText
+  jumpToMs            BigInt    @default(0) @map("jump_to_ms")
+  citations           Json
+  attachments         Json
+  warningText         String    @map("warning_text") @db.Text
+  emptyReason         String    @default("") @map("empty_reason") @db.VarChar(255)
+  scopeKey            String    @default("") @map("scope_key") @db.VarChar(255)
+  scopeLabel          String    @default("") @map("scope_label") @db.VarChar(500)
+  scopeTerms          Json      @map("scope_terms")
+  contextRecordingIds Json      @map("context_recording_ids")
+  favorite            Boolean   @default(false)
+  deletedAt           DateTime? @map("deleted_at") @db.DateTime(6)
+  createdAt           DateTime  @default(now()) @map("created_at") @db.DateTime(6)
+  updatedAt           DateTime  @default(now()) @updatedAt @map("updated_at") @db.DateTime(6)
+
+  @@index([sessionId, createdAt], map: "idx_admin_messages_session")
+  @@index([deletedAt, createdAt], map: "idx_admin_messages_deleted")
+  @@map("admin_qa_messages")
+}
+
 model AppAccount {
   id           String   @id @db.VarChar(80)
   username     String   @db.LongText
