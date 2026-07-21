@@ -112,6 +112,7 @@ model TranscriptSegment {
   confidence   Float?
   speakerLabel String?  @map("speaker_label") @db.VarChar(120)
   createdAt    DateTime @default(now()) @map("created_at") @db.Timestamp(0)
+  updatedAt    DateTime @default(now()) @updatedAt @map("updated_at") @db.Timestamp(0)
 
   recording Recording @relation(fields: [recordingId], references: [id])
 

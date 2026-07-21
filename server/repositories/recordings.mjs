@@ -96,6 +96,52 @@ export async function listTranscriptSegmentsWithPrisma() {
   return rows.map(transcriptSegmentFromPrisma);
 }
 
+function recordingQuestionReferencesRecording(question = {}, recordingId = "") {
+  if (question.recordingId === recordingId) return true;
+  try {
+    const recordingIds = JSON.parse(question.recordingIdsJson || "[]");
+    return Array.isArray(recordingIds) && recordingIds.includes(recordingId);
+  } catch {
+    return false;
+  }
+}
+
+export async function permanentlyDeleteRecordingDataWithPrisma(recordingId) {
+  return prisma.$transaction(async (tx) => {
+    const questionCandidates = await tx.recordingQuestion.findMany({
+      where: {
+        OR: [
+          { recordingId },
+          { recordingIdsJson: { contains: recordingId } },
+        ],
+      },
+      select: {
+        id: true,
+        recordingId: true,
+        recordingIdsJson: true,
+      },
+    });
+    const questionIds = questionCandidates
+      .filter((question) => recordingQuestionReferencesRecording(question, recordingId))
+      .map((question) => question.id);
+
+    const deletedQuestions = questionIds.length
+      ? await tx.recordingQuestion.deleteMany({ where: { id: { in: questionIds } } })
+      : { count: 0 };
+    const deletedSegments = await tx.transcriptSegment.deleteMany({ where: { recordingId } });
+    const deletedRecording = await tx.recording.deleteMany({ where: { id: recordingId } });
+    if (deletedRecording.count !== 1) {
+      throw new Error(`Recording ${recordingId} disappeared during permanent deletion.`);
+    }
+
+    return {
+      recordings: deletedRecording.count,
+      transcriptSegments: deletedSegments.count,
+      recordingQuestions: deletedQuestions.count,
+    };
+  });
+}
+
 function recordingPrismaScalarData(recording = {}) {
   return {
     seq: Number(recording.seq || 0),

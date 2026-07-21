@@ -122,12 +122,45 @@ const dailyBriefJobs = new Map();
 const ttsInFlight = new Map();
 const transcriptionJobs = new Set();
 const meetingOutlineJobs = new Map();
+const cancelledRecordingJobs = new Set();
+const recordingJobVersions = new Map();
 let transcriptionJobChain = Promise.resolve();
 const DAILY_BRIEF_TIMEZONE = "Asia/Shanghai";
 const DAILY_BRIEF_TITLE = "今日会议简报";
 const dailyBriefScheduleState = { lastDate: "" };
 const ACCOUNT_TOKEN_TTL_MS = 1000 * 60 * 60 * 24 * 45;
 const MIN_VALID_RECORDING_DURATION_MS = 1000;
+
+function recordingJobVersion(recordingId) {
+  return recordingJobVersions.get(String(recordingId || "").trim()) || 0;
+}
+
+function isRecordingJobCancelled(recordingId, jobVersion) {
+  const id = String(recordingId || "").trim();
+  return cancelledRecordingJobs.has(id) || (jobVersion !== undefined && recordingJobVersion(id) !== jobVersion);
+}
+
+function cancelRecordingJobs(recordingId) {
+  const id = String(recordingId || "").trim();
+  if (!id) return { transcription: false, meetingOutline: false, tencentMeetingImport: false, tencentMeetingTranscript: false };
+  const state = {
+    transcription: transcriptionJobs.has(id),
+    meetingOutline: meetingOutlineJobs.has(id),
+    tencentMeetingImport: tencentMeetingImportJobs.has(id),
+    tencentMeetingTranscript: tencentMeetingTranscriptJobs.has(id),
+  };
+  recordingJobVersions.set(id, recordingJobVersion(id) + 1);
+  cancelledRecordingJobs.add(id);
+  transcriptionJobs.delete(id);
+  meetingOutlineJobs.delete(id);
+  tencentMeetingImportJobs.delete(id);
+  tencentMeetingTranscriptJobs.delete(id);
+  return state;
+}
+
+function releaseRecordingJobCancellation(recordingId) {
+  cancelledRecordingJobs.delete(String(recordingId || "").trim());
+}
 
 async function loadEnvFile(filePath) {
   if (!existsSync(filePath)) return;
@@ -658,6 +691,8 @@ configureRecordingsRouter(projectRoot, {
   resolveRecordingAudioPath,
   generateAndStoreMeetingOutline,
   renderMeetingOutlinePdf,
+  cancelRecordingJobs,
+  releaseRecordingJobCancellation,
 });
 app.use("/api/recordings", recordingsRouter);
 
@@ -1358,8 +1393,8 @@ async function fetchTencentMeetingBuiltInTranscript(info = {}, durationMs = 0) {
   };
 }
 
-async function storeTencentMeetingBuiltInTranscript(recordingId, transcriptResult) {
-  if (!transcriptResult?.segments?.length) return false;
+async function storeTencentMeetingBuiltInTranscript(recordingId, transcriptResult, jobVersion) {
+  if (!transcriptResult?.segments?.length || isRecordingJobCancelled(recordingId, jobVersion)) return false;
   const recordingRow = await prisma.recording.findFirst({
     where: { id: recordingId, deletedAt: null },
   });
@@ -1390,6 +1425,15 @@ async function storeTencentMeetingBuiltInTranscript(recordingId, transcriptResul
     )}\n`,
     "utf8",
   );
+  if (isRecordingJobCancelled(recordingId, jobVersion)) {
+    await Promise.all([
+      transcriptPath,
+      transcriptRawPath,
+      transcriptCorrectedPath,
+      transcriptionMetaPath,
+    ].map((filePath) => removeFileIfExists(filePath)));
+    return false;
+  }
 
   const now = new Date();
   const recordingData = {
@@ -1425,11 +1469,14 @@ async function storeTencentMeetingBuiltInTranscript(recordingId, transcriptResul
         createdAt: now,
       })),
     });
-    await tx.recording.update({
-      where: { id: recordingId },
+    const updated = await tx.recording.updateMany({
+      where: { id: recordingId, deletedAt: null },
       data: recordingData,
     });
+    if (!updated.count) throw new Error("Recording was deleted while Tencent Meeting transcript sync was running.");
   });
+
+  if (isRecordingJobCancelled(recordingId, jobVersion)) return false;
 
   markDailyBriefDirtyForRecording(recordingId).catch((error) =>
     console.warn("[Tencent Meeting] daily brief dirty mark failed:", error instanceof Error ? error.message : error),
@@ -1440,9 +1487,9 @@ async function storeTencentMeetingBuiltInTranscript(recordingId, transcriptResul
   return true;
 }
 
-async function syncTencentMeetingBuiltInTranscript(recordingId, info = {}) {
+async function syncTencentMeetingBuiltInTranscript(recordingId, info = {}, jobVersion = recordingJobVersion(recordingId)) {
   logger.info("[CALL] syncTencentMeetingBuiltInTranscript", {message: `recordingId: ${recordingId}, info: ${JSON.stringify(info)}`});
-  if (!isTencentMeetingTranscriptReadyEvent({ event: info.event })) {
+  if (isRecordingJobCancelled(recordingId, jobVersion) || !isTencentMeetingTranscriptReadyEvent({ event: info.event })) {
     logger.info("[Tencent Meeting] transcript sync skipped", { message: "waiting for smart.transcripts" });
     return false;
   }
@@ -1459,6 +1506,7 @@ async function syncTencentMeetingBuiltInTranscript(recordingId, info = {}) {
   }
   logger.info("[CALL] syncTencentMeetingBuiltInTranscript", {message: `开始同步转写`});
   const transcriptResult = await fetchTencentMeetingBuiltInTranscript(info, recording.durationMs || info.durationMs || 0);
+  if (isRecordingJobCancelled(recordingId, jobVersion)) return false;
   if (!transcriptResult?.segments?.length) {
     const failureKind = transcriptResult?.failureKind || "pending";
     const finalStatus = tencentMeetingTranscriptFinalStatus(failureKind, recording);
@@ -1485,7 +1533,7 @@ async function syncTencentMeetingBuiltInTranscript(recordingId, info = {}) {
     }
     return false;
   }
-  return storeTencentMeetingBuiltInTranscript(recordingId, transcriptResult);
+  return storeTencentMeetingBuiltInTranscript(recordingId, transcriptResult, jobVersion);
 }
 
 async function downloadTencentMeetingFile(url, targetPath) {
@@ -1529,7 +1577,8 @@ async function inspectTencentMeetingDownloadedFile(targetPath, downloadInfo = {}
   return { useRemoteInput: false };
 }
 
-async function syncTencentMeetingRecordingAudio(recordingId, info = {}) {
+async function syncTencentMeetingRecordingAudio(recordingId, info = {}, jobVersion = recordingJobVersion(recordingId)) {
+  if (isRecordingJobCancelled(recordingId, jobVersion)) return false;
   console.info(`[CALL] syncTencentMeetingRecordingAudio: recordingId: ${recordingId}`);
   const target = await findTencentMeetingDownloadTarget(info);
   console.info(`[CALL] syncTencentMeetingRecordingAudio`);
@@ -1539,6 +1588,7 @@ async function syncTencentMeetingRecordingAudio(recordingId, info = {}) {
     const canRequestStsToken = Boolean(tencentMeetingStsOperatorId());
     const waitsForTencentTranscript = info.sourceKind === "recorder" || /audio-completed|smart\.transcripts/i.test(String(info.event || ""));
     await updateDb((db) => {
+      if (isRecordingJobCancelled(recordingId, jobVersion)) return null;
       const recording = findRecording(db, recordingId);
       if (!recording || recording.deletedAt) return null;
       recording.updatedAt = new Date().toISOString();
@@ -1582,9 +1632,15 @@ async function syncTencentMeetingRecordingAudio(recordingId, info = {}) {
     const conversionInput =
       inspection.useRemoteInput || isTencentMeetingStreamingMedia(target.downloadUrl, downloadInfo) ? target.downloadUrl : tempPath;
     await convertAudioFileToMp3(conversionInput, storagePath);
+    if (isRecordingJobCancelled(recordingId, jobVersion)) {
+      await removeFileIfExists(tempPath);
+      await removeFileIfExists(storagePath);
+      return false;
+    }
     await removeFileIfExists(tempPath);
     const { storedFile, durationMs } = await verifiedStoredRecording(storagePath, target.durationMs || info.durationMs || 0);
     const synced = await updateDb((db) => {
+      if (isRecordingJobCancelled(recordingId, jobVersion)) return null;
       const recording = findRecording(db, recordingId);
       if (!recording || recording.deletedAt) return null;
       const now = new Date().toISOString();
@@ -1611,6 +1667,7 @@ async function syncTencentMeetingRecordingAudio(recordingId, info = {}) {
     await removeFileIfExists(tempPath);
     await removeFileIfExists(storagePath);
     await updateDb((db) => {
+      if (isRecordingJobCancelled(recordingId, jobVersion)) return null;
       const recording = findRecording(db, recordingId);
       if (!recording || recording.deletedAt) return null;
       recording.updatedAt = new Date().toISOString();
@@ -1624,27 +1681,33 @@ async function syncTencentMeetingRecordingAudio(recordingId, info = {}) {
 
 function queueTencentMeetingImportSync(recordingId, info = {}) {
   if (!tencentMeetingAudioSyncEnabled()) return false;
-  if (!recordingId || tencentMeetingImportJobs.has(recordingId)) return false;
+  if (!recordingId || isRecordingJobCancelled(recordingId) || tencentMeetingImportJobs.has(recordingId)) return false;
+  const jobVersion = recordingJobVersion(recordingId);
   tencentMeetingImportJobs.add(recordingId);
   setTimeout(() => {
-    syncTencentMeetingRecordingAudio(recordingId, info)
+    syncTencentMeetingRecordingAudio(recordingId, info, jobVersion)
       .catch((error) => console.warn("[Tencent Meeting] import sync failed:", error instanceof Error ? error.message : error))
-      .finally(() => tencentMeetingImportJobs.delete(recordingId));
+      .finally(() => {
+        if (recordingJobVersion(recordingId) === jobVersion) tencentMeetingImportJobs.delete(recordingId);
+      });
   }, 50);
   return true;
 }
 
 function queueTencentMeetingTranscriptSync(recordingId, info = {}) {
   logger.info("call queueTencentMeetingTranscriptSync: ", {message: 'step 0'})
-  if (!recordingId || tencentMeetingTranscriptJobs.has(recordingId)) {
+  if (!recordingId || isRecordingJobCancelled(recordingId) || tencentMeetingTranscriptJobs.has(recordingId)) {
     logger.info("call queueTencentMeetingTranscriptSync: ", {message: '已有这个任务'})
     return false;
   }
+  const jobVersion = recordingJobVersion(recordingId);
   tencentMeetingTranscriptJobs.add(recordingId);
   setTimeout(() => {
-    syncTencentMeetingBuiltInTranscript(recordingId, info)
+    syncTencentMeetingBuiltInTranscript(recordingId, info, jobVersion)
       .catch((error) => console.warn("[Tencent Meeting] transcript sync failed:", error instanceof Error ? error.message : error))
-      .finally(() => tencentMeetingTranscriptJobs.delete(recordingId));
+      .finally(() => {
+        if (recordingJobVersion(recordingId) === jobVersion) tencentMeetingTranscriptJobs.delete(recordingId);
+      });
   }, 80);
   return true;
 }
@@ -3617,7 +3680,8 @@ function outlineTitleText(outline, recording) {
   return title;
 }
 
-async function setMeetingOutlineState(recordingId, patch) {
+async function setMeetingOutlineState(recordingId, patch, jobVersion) {
+  if (isRecordingJobCancelled(recordingId, jobVersion)) return;
   await prisma.recording.updateMany({
     where: { id: recordingId, deletedAt: null },
     data: { ...patch, updatedAt: new Date() },
@@ -3627,11 +3691,12 @@ async function setMeetingOutlineState(recordingId, patch) {
 // 用于根据录音转写内容生成并保存会议大纲/会议提纲
 async function generateAndStoreMeetingOutline(recordingId, segments = [], options = {}) {
   const id = String(recordingId || "").trim();
-  if (!id) return null;
+  if (!id || isRecordingJobCancelled(id)) return null;
   const activeJob = meetingOutlineJobs.get(id);
   if (activeJob) return activeJob;
 
-  const job = runMeetingOutlineJob(id, segments, options);
+  const jobVersion = recordingJobVersion(id);
+  const job = runMeetingOutlineJob(id, segments, options, jobVersion);
   meetingOutlineJobs.set(id, job);
   try {
     return await job;
@@ -3640,9 +3705,10 @@ async function generateAndStoreMeetingOutline(recordingId, segments = [], option
   }
 }
 
-async function runMeetingOutlineJob(recordingId, segments = [], options = {}) {
-  const row = await prisma.recording.findUnique({
-    where: { id: recordingId },
+async function runMeetingOutlineJob(recordingId, segments = [], options = {}, jobVersion = recordingJobVersion(recordingId)) {
+  if (isRecordingJobCancelled(recordingId, jobVersion)) return null;
+  const row = await prisma.recording.findFirst({
+    where: { id: recordingId, deletedAt: null },
     include: { segments: { orderBy: { startMs: "asc" } } },
   });
   const recording = row ? recordingFromPrisma(row) : null;
@@ -3655,7 +3721,7 @@ async function runMeetingOutlineJob(recordingId, segments = [], options = {}) {
       meetingOutlineStatus: "failed",
       meetingOutlineError: "当前还没有可用于生成会议提纲的转写内容。",
       meetingOutlineStartedAt: null,
-    });
+    }, jobVersion);
     return null;
   }
 
@@ -3663,10 +3729,11 @@ async function runMeetingOutlineJob(recordingId, segments = [], options = {}) {
     meetingOutlineStatus: "generating",
     meetingOutlineError: "",
     meetingOutlineStartedAt: new Date(),
-  });
+  }, jobVersion);
 
   try {
     const outline = await generateMeetingOutline(recording, expandedSegments);
+    if (isRecordingJobCancelled(recordingId, jobVersion)) return null;
     const outlineKeywords = outlineKeywordText(outline);
     const outlineTitle = outlineTitleText(outline, recording);
     const generatedAt = new Date(outline?.generatedAt || Date.now());
@@ -3689,21 +3756,24 @@ async function runMeetingOutlineJob(recordingId, segments = [], options = {}) {
     });
     return outline;
   } catch (error) {
+    if (isRecordingJobCancelled(recordingId, jobVersion)) return null;
     console.warn("[Meeting outline] store failed:", error instanceof Error ? error.message : error);
     await setMeetingOutlineState(recordingId, {
       meetingOutlineStatus: "failed",
       meetingOutlineError: userSafeErrorMessage(error, "会议提纲暂未稳定生成，请稍后重新生成。"),
       meetingOutlineStartedAt: null,
-    });
+    }, jobVersion);
     return null;
   }
 }
 
-async function runTranscriptionJob(recordingId) {
-  const recordingRow = await prisma.recording.findUnique({
+async function runTranscriptionJob(recordingId, jobVersion = recordingJobVersion(recordingId)) {
+  if (isRecordingJobCancelled(recordingId, jobVersion)) return;
+  const recordingRow = await prisma.recording.findFirst({
     where: {
-      id: recordingId
-    }
+      id: recordingId,
+      deletedAt: null,
+    },
   })
   const recording = recordingRow ? recordingFromPrisma(recordingRow) : null;
   logger.info("transcription.job.start", {message: `recordingId: ${recordingId}, source: ${recording?.source || "unknown"}`, recordingId, source: recording?.source || "unknown"});
@@ -3723,7 +3793,9 @@ async function runTranscriptionJob(recordingId) {
       ...recording,
       asrAudioUrl: createAsrAudioUrl(recording),
     });
+    if (isRecordingJobCancelled(recordingId, jobVersion)) return;
     const translation = await translateTranscriptToChinese(recording, segments);
+    if (isRecordingJobCancelled(recordingId, jobVersion)) return;
     const autoTag = "";
     const { transcriptPath, transcriptRawPath, transcriptCorrectedPath, transcriptionMetaPath } = await transcriptStoragePaths(recordingId, recording);
     await writeTranscriptTextFile(recording, segments, transcriptPath);
@@ -3731,6 +3803,15 @@ async function runTranscriptionJob(recordingId) {
     if (segments.correctedText) await writeFile(transcriptCorrectedPath, `${segments.correctedText.trim()}\n`, "utf8");
     if (segments.transcriptionMeta) {
       await writeFile(transcriptionMetaPath, `${JSON.stringify(segments.transcriptionMeta, null, 2)}\n`, "utf8");
+    }
+    if (isRecordingJobCancelled(recordingId, jobVersion)) {
+      await Promise.all([
+        transcriptPath,
+        transcriptRawPath,
+        transcriptCorrectedPath,
+        transcriptionMetaPath,
+      ].map((filePath) => removeFileIfExists(filePath)));
+      return;
     }
 
     const newRecording = {
@@ -3771,16 +3852,22 @@ async function runTranscriptionJob(recordingId) {
           })),
         });
       }
-      await tx.recording.update({ where: { id: recordingId }, data: newRecording });
+      const updated = await tx.recording.updateMany({
+        where: { id: recordingId, deletedAt: null },
+        data: newRecording,
+      });
+      if (!updated.count) throw new Error("Recording was deleted while transcription was running.");
     });
+    if (isRecordingJobCancelled(recordingId, jobVersion)) return;
     await generateAndStoreMeetingOutline(recordingId, segments, { updateTag: true });
     await markDailyBriefDirtyForRecording(recordingId);
     logger.info("transcription.job.success", {message: `recordingId: ${recordingId}, segmentCount: ${segments.length}, transcriptSource: ${recording?.source || "unknown"}`, recordingId, segmentCount: segments.length, transcriptSource: recording?.source || "unknown"});
   } catch (error) {
+    if (isRecordingJobCancelled(recordingId, jobVersion)) return;
     logger.error("transcription.job.failed", {message: `recordingId: ${recordingId}, error: ${error instanceof Error ? error.message : error}`, recordingId, error: error instanceof Error ? { message: error.message, stack: error.stack } : error});
     const existingSegmentCount = await prisma.transcriptSegment.count({ where: { recordingId } });
     await prisma.recording.updateMany({
-      where: { id: recordingId },
+      where: { id: recordingId, deletedAt: null },
       data: {
         status: existingSegmentCount > 0 ? "ready" : "failed",
         errorMessage: userSafeTranscriptionError(error),
@@ -3793,7 +3880,7 @@ async function runTranscriptionJob(recordingId) {
 async function queueTranscriptionJob(recordingId, recordingForSource = null) {
   logger.debug(`call queueTranscriptionJob: recordingId: ${recordingId}, recordingForSource: ${recordingForSource}`)
   const id = String(recordingId || "").trim();
-  if (!id) return false;
+  if (!id || isRecordingJobCancelled(id)) return false;
 
   // 如果传入了 recordingForSource ，但该录音的来源 不支持本地 API 转写 ，则直接返回 false ， 不加入转写队列
   if (recordingForSource && !isLocalApiTranscriptionRecording(recordingForSource)) {
@@ -3801,6 +3888,7 @@ async function queueTranscriptionJob(recordingId, recordingForSource = null) {
   }
   if (!isRecordingApiTranscriptionEnabled()) return false;
   if (transcriptionJobs.has(id)) return false;
+  const jobVersion = recordingJobVersion(id);
 
   transcriptionJobs.add(id);
   let claimed;
@@ -3826,12 +3914,12 @@ async function queueTranscriptionJob(recordingId, recordingForSource = null) {
 
   transcriptionJobChain = transcriptionJobChain
     .catch(() => {})
-    .then(() => runTranscriptionJob(id))
+    .then(() => runTranscriptionJob(id, jobVersion))
     .catch((error) => {
       console.warn("[Transcription] queued job failed:", error instanceof Error ? error.message : error);
     })
     .finally(() => {
-      transcriptionJobs.delete(id);
+      if (recordingJobVersion(id) === jobVersion) transcriptionJobs.delete(id);
     });
 
   return true;
