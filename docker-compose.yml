@@ -12,12 +12,16 @@ services:
       HOST: 0.0.0.0
       HTTPS_PORT: 0
       MYSQL_HOST: host.docker.internal
+      REDIS_URL: redis://redis:6379
       FFMPEG_PATH: /usr/bin/ffmpeg
       FFPROBE_PATH: /usr/bin/ffprobe
     volumes:
       - app-logs:/app/logs
       - app-storage:/app/server/storage
     restart: unless-stopped
+    depends_on:
+      redis:
+        condition: service_healthy
     extra_hosts:
       - "host.docker.internal:host-gateway"
 
@@ -31,6 +35,20 @@ services:
       - app
     restart: unless-stopped
 
+  redis:
+    image: redis:7.4-alpine
+    volumes:
+      - redis-data:/data
+    command: ["redis-server", "--appendonly", "yes"]
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 5s
+    restart: unless-stopped
+
 volumes:
   app-logs:
   app-storage:
+  redis-data:

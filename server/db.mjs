@@ -187,11 +187,7 @@ export async function ensureStorage() {
   const task7 = mkdir(tempDir, { recursive: true });
   const task8 = mkdir(tencentMeetingWebhookDir, {recursive: true})
 
-  // const tencentMeetingStsTokenPath = path.join(projectRoot, "storage", "tencent-meeting-sts-token.json");
-  // const task9 = mkdir(path.dirname(tencentMeetingStsTokenPath), { recursive: true });
-  return Promise.all([task1, task2, task3, task4, task5, task6, task7, task8,
-    // task9
-  ]);
+  return Promise.all([task1, task2, task3, task4, task5, task6, task7, task8]);
   
   // TODO 待删除 多余判断
   // if (mysqlEnabled()) return;

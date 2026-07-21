@@ -50,6 +50,7 @@ import { requestClientIdBetter, resolveRecordingAudioPath, resolveRecordingAudio
 import {
   expandTencentMeetingKeyCandidates,
   loadTencentMeetingStsToken,
+  requestTencentMeetingStsTokenIfNeeded,
   tencentMeetingApiConfig,
   tencentMeetingApiRequest,
   tencentMeetingEventTimeMs,
@@ -110,6 +111,8 @@ import {getWecomUserByUserId} from './utils/wecom.js'
 import {projectRoot, tencentMeetingWebhookDir} from './config.js'
 import {TENCENT_MEETING_SOURCE_PREFIX} from './constant.js'
 import { recordingFromPrisma, transcriptSegmentFromPrisma } from "./repositories/recordings.mjs";
+import {connectRedis} from './plugins/redis.js'
+import { startTencentMeetingStsTokenCron } from "./cron/tencentMeeting.js";
 const prisma = await import('./plugins/prisma.cjs').then(m => m.default || m);
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -185,6 +188,7 @@ async function loadEnvFile(filePath) {
   }
 }
 
+await connectRedis()
 await init();
 console.log("process.env.PORT:", process.env.PORT);
 // await loadEnvFile(path.join(projectRoot, ".env"));
@@ -612,7 +616,6 @@ const MEETING_OUTLINE_SWEEP_INTERVAL_MS = Number.isFinite(configuredMeetingOutli
 const MEETING_OUTLINE_SWEEP_LIMIT = Number.isFinite(configuredMeetingOutlineSweepLimit)
   ? Math.max(1, Math.round(configuredMeetingOutlineSweepLimit))
   : 4;
-let tencentMeetingStsTokenRequestInFlight = null;
 let pendingLocalTranscriptionSweepAt = 0;
 
 app.use(cors());
@@ -834,31 +837,6 @@ async function appendTencentMeetingWebhookEvent(entry) {
   await writeFile(filePath, `${JSON.stringify(entry)}\n`, { flag: "a" });
   tencentMeetingRecorderOwnerContextCache = null;
   tencentMeetingWebhookPayloadHistoryCache = null;
-}
-
-async function requestTencentMeetingStsTokenIfPossible() {
-  if (await loadTencentMeetingStsToken()) return true;
-  const operatorId = tencentMeetingStsOperatorId();
-  if (!operatorId) return false;
-  if (tencentMeetingStsTokenRequestInFlight) return tencentMeetingStsTokenRequestInFlight;
-
-  tencentMeetingStsTokenRequestInFlight = (async () => {
-    const body = {
-      operator_id: operatorId,
-      operator_id_type: 1,
-      valid_time: 24,
-    };
-    try {
-      await tencentMeetingApiRequest("POST", "/v1/app/sts-token", body, { skipStsToken: true });
-      return true;
-    } catch (error) {
-      console.warn("[Tencent Meeting] STS token request skipped:", error instanceof Error ? error.message : error);
-      return false;
-    } finally {
-      tencentMeetingStsTokenRequestInFlight = null;
-    }
-  })();
-  return tencentMeetingStsTokenRequestInFlight;
 }
 
 function isLocalApiTranscriptionRecording(recording = {}) {
@@ -1175,7 +1153,7 @@ async function fetchTencentMeetingSummaryTranscript(info = {}, durationMs = 0, f
   ].filter((value, index, list) => value && list.indexOf(value) === index);
   const identityParamsList = tencentMeetingCandidateDownloadIdentityParams(info);
   if (!ids.length || !identityParamsList.length) return null;
-  await requestTencentMeetingStsTokenIfPossible();
+  await requestTencentMeetingStsTokenIfNeeded();
 
   for (const params of identityParamsList) {
     for (const id of ids) {
@@ -1233,7 +1211,7 @@ async function findTencentMeetingDownloadTarget(info) {
   logger.log("[call] findTencentMeetingDownloadTarget ", {message: `startTime: ${startTime}, endTime: ${endTime}`})
   const identityParams = tencentMeetingCandidateDownloadIdentityParams(info);
   if (!identityParams.length) return null;
-  await requestTencentMeetingStsTokenIfPossible();
+  await requestTencentMeetingStsTokenIfNeeded();
 
   for (const params of identityParams) {
     const addressIds = [...new Set([recordFileId, meetingRecordId].filter(Boolean))];
@@ -1342,7 +1320,7 @@ async function fetchTencentMeetingBuiltInTranscript(info = {}, durationMs = 0) {
   if (!recordFileId || !tencentMeetingApiConfigured()) return null;
 
   // 获取 STS Token（确保 API 调用权限）
-  await requestTencentMeetingStsTokenIfPossible();
+  await requestTencentMeetingStsTokenIfNeeded();
   logger.info("[CALL] fetchTencentMeetingBuiltInTranscript", {message: `获取到 STS Token`});
   const failureKinds = [];
 
@@ -1939,7 +1917,7 @@ async function replayMissingTencentMeetingRecordingWebhooks() {
 async function fetchTencentMeetingCloudRecordInfos() {
   if (!tencentMeetingApiConfigured()) return [];
   // 申请token
-  await requestTencentMeetingStsTokenIfPossible();
+  await requestTencentMeetingStsTokenIfNeeded();
   const { startTime, endTime } = tencentMeetingDiscoveryWindow();
   const infos = [];
   const seen = new Set();
@@ -4091,6 +4069,7 @@ app.listen(port, host, () => {
 // }
 
 scheduleDailyBriefGeneration();
+startTencentMeetingStsTokenCron();
 
 replayMissingTencentMeetingRecordingWebhooks()
   .then(async (replayed) => {
@@ -4107,11 +4086,14 @@ replayMissingTencentMeetingRecordingWebhooks()
 //   console.error("Artifact migration failed", error);
 // });
 
-setTimeout(() => {
-  queueTencentMeetingPendingImports().catch((error) => {
-    console.error("Tencent Meeting pending import scan failed", error);
-  });
-}, 5000).unref?.();
+// Do not scan every historical pending Tencent Meeting import on startup.
+// New imports are synchronized by their webhook events, and a fresh STS-token
+// webhook explicitly retries pending imports when recovery is actually useful.
+// setTimeout(() => {
+//   queueTencentMeetingPendingImports().catch((error) => {
+//     console.error("Tencent Meeting pending import scan failed", error);
+//   });
+// }, 5000).unref?.();
 
 // queueTencentMeetingCloudDiscovery();
 setTimeout(() => {
@@ -4131,14 +4113,16 @@ setInterval(() => {
   });
 }, MEETING_OUTLINE_SWEEP_INTERVAL_MS).unref?.();
 
-const tencentMeetingPendingImportIntervalMs = Number(process.env.TENCENT_MEETING_PENDING_IMPORT_INTERVAL_MS || 5 * 60 * 1000);
-if (tencentMeetingPendingImportIntervalMs > 0) {
-  setInterval(() => {
-    queueTencentMeetingPendingImports().catch((error) => {
-      console.warn("Tencent Meeting pending import scan failed:", error instanceof Error ? error.message : error);
-    });
-  }, Math.max(60 * 1000, tencentMeetingPendingImportIntervalMs)).unref();
-}
+// Periodic full-table retries generate a Tencent API request burst even when no
+// relevant event has occurred. Keep recovery event-driven instead.
+// const tencentMeetingPendingImportIntervalMs = Number(process.env.TENCENT_MEETING_PENDING_IMPORT_INTERVAL_MS || 5 * 60 * 1000);
+// if (tencentMeetingPendingImportIntervalMs > 0) {
+//   setInterval(() => {
+//     queueTencentMeetingPendingImports().catch((error) => {
+//       console.warn("Tencent Meeting pending import scan failed:", error instanceof Error ? error.message : error);
+//     });
+//   }, Math.max(60 * 1000, tencentMeetingPendingImportIntervalMs)).unref();
+// }
 
 // const tencentMeetingCloudDiscoveryIntervalMs = Number(process.env.TENCENT_MEETING_CLOUD_DISCOVERY_INTERVAL_MS || 10 * 60 * 1000);
 // if (tencentMeetingCloudDiscoveryIntervalMs > 0) {
