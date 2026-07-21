@@ -369,35 +369,35 @@ export function DetailView({ recording, recordings = EMPTY_RECORDINGS, onBack, l
     };
   }, []);
 
-  useEffect(() => {
-    if (recording?.id) return undefined;
-    let ignored = false;
-    setDailyBriefLoading(true);
-    fetchDailyBriefHistory().catch(() => {});
-    api("/api/meeting-briefs/today")
-      .then((payload) => {
-        if (!ignored) {
-          mergeDailyBriefState(payload);
-          if (payload?.status === "generating") {
-            saveActiveDailyBriefRef(payload);
-            pollDailyBrief(payload.date);
-          } else if (payload?.summaryMarkdown) {
-            clearActiveDailyBriefRef(payload.date);
-          } else if (readActiveDailyBriefRef()?.date === payload?.date) {
-            pollDailyBrief(payload.date);
-          }
-        }
-      })
-      .catch(() => {
-        if (!ignored) setDailyBrief(null);
-      })
-      .finally(() => {
-        if (!ignored) setDailyBriefLoading(false);
-      });
-    return () => {
-      ignored = true;
-    };
-  }, [recording?.id, availableRecordings.length]);
+  // useEffect(() => {
+  //   if (recording?.id) return undefined;
+  //   let ignored = false;
+  //   setDailyBriefLoading(true);
+  //   fetchDailyBriefHistory().catch(() => {});
+  //   api("/api/meeting-briefs/today")
+  //     .then((payload) => {
+  //       if (!ignored) {
+  //         mergeDailyBriefState(payload);
+  //         if (payload?.status === "generating") {
+  //           saveActiveDailyBriefRef(payload);
+  //           pollDailyBrief(payload.date);
+  //         } else if (payload?.summaryMarkdown) {
+  //           clearActiveDailyBriefRef(payload.date);
+  //         } else if (readActiveDailyBriefRef()?.date === payload?.date) {
+  //           pollDailyBrief(payload.date);
+  //         }
+  //       }
+  //     })
+  //     .catch(() => {
+  //       if (!ignored) setDailyBrief(null);
+  //     })
+  //     .finally(() => {
+  //       if (!ignored) setDailyBriefLoading(false);
+  //     });
+  //   return () => {
+  //     ignored = true;
+  //   };
+  // }, [recording?.id, availableRecordings.length]);
 
   const activeRecordings = useMemo(() => {
     return [...availableRecordings].sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt));
