@@ -165,8 +165,8 @@ router.get("/", async (request, response, next) => {
     });
     const recordings = rows
       .map((row) => ({
-        recordings: row
-        // recording: recordingFromPrisma(row),
+        // recordings: row
+        recording: recordingFromPrisma(row),
         // segments: row.segments.map(transcriptSegmentFromPrisma),
       }))
       // .filter(({ recording }) => canDeleteAll || canReadRecording(recording, clientId))
