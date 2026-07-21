@@ -52,6 +52,8 @@ services:
     environment:
       MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD:-123456}
       MYSQL_DATABASE: ${MYSQL_DATABASE:-wecom_recorder_test}
+    ports:
+      - "3307:3306"
     expose:
       - "3306"
     volumes:
