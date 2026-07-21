@@ -165,21 +165,22 @@ router.get("/", async (request, response, next) => {
     });
     const recordings = rows
       .map((row) => ({
-        recording: recordingFromPrisma(row),
-        segments: row.segments.map(transcriptSegmentFromPrisma),
+        recordings: row
+        // recording: recordingFromPrisma(row),
+        // segments: row.segments.map(transcriptSegmentFromPrisma),
       }))
-      .filter(({ recording }) => canDeleteAll || canReadRecording(recording, clientId))
+      // .filter(({ recording }) => canDeleteAll || canReadRecording(recording, clientId))
       .map(({ recording, segments }) =>
         publicRecording(recording, segments, clientId, clientName, { canDeleteAllRecordings: canDeleteAll }),
       );
-    const filtered = query
-      ? recordings
-          .map((recording) => ({ recording, score: recordingSearchScore(recording, query) }))
-          .filter((item) => item.score >= 18)
-          .sort((a, b) => b.score - a.score || new Date(b.recording.createdAt) - new Date(a.recording.createdAt))
-          .map((item) => item.recording)
-      : recordings;
-    response.json({ recordings: filtered });
+    // const filtered = query
+    //   ? recordings
+    //       .map((recording) => ({ recording, score: recordingSearchScore(recording, query) }))
+    //       .filter((item) => item.score >= 18)
+    //       .sort((a, b) => b.score - a.score || new Date(b.recording.createdAt) - new Date(a.recording.createdAt))
+    //       .map((item) => item.recording)
+    //   : recordings;
+    response.json({ recordings });
   } catch (error) {
     next(error);
   }

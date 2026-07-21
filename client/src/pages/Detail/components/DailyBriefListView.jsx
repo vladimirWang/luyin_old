@@ -44,10 +44,6 @@ function dailyBriefOutlineWaitingText(state) {
   return "这条录音的会议提纲还没有生成完成，今日简报先保留位置。提纲完成后，可在标题旁更新这一条。";
 }
 
-export function canRefreshDailyBriefRecording(state) {
-  return Boolean(state?.canRefreshDailyBriefItem || state?.hasMeetingOutline || state?.meetingOutlineStatus === "ready");
-}
-
 function renderDailyBriefLineElement({ text, visibleText, className, index, itemId, active, onSpeakLine, heading }) {
   if (onSpeakLine) {
     return (
@@ -74,9 +70,7 @@ export function renderDailyBriefLines(markdown = "", options = {}) {
     ttsState,
     onSpeakLine,
     recordingStates = [],
-    refreshingRecordingIds,
     briefDate,
-    onRefreshRecording,
   } = options;
   const lines = String(markdown || "").split(/\r?\n/);
   let waitingRecordingState = null;
@@ -100,22 +94,9 @@ export function renderDailyBriefLines(markdown = "", options = {}) {
 
     if (!recordingState) return [lineElement];
 
-    const refreshing = Boolean(refreshingRecordingIds?.has?.(recordingState.id));
-    const canRefresh = canRefreshDailyBriefRecording(recordingState) && typeof onRefreshRecording === "function";
     return [
       <div className="daily-brief-recording-heading-row" key={`daily-brief-recording-heading-${index}`}>
         <div className="daily-brief-recording-heading-text">{lineElement}</div>
-        {canRefresh ? (
-          <button
-            className="daily-brief-recording-refresh"
-            type="button"
-            disabled={refreshing}
-            onClick={(event) => onRefreshRecording(recordingState, briefDate, event)}
-          >
-            {refreshing ? <LoaderCircle className="spin-icon" size={13} /> : <RefreshCw size={13} />}
-            <span>{refreshing ? "更新中" : "重新生成此条"}</span>
-          </button>
-        ) : null}
       </div>,
       waitingText ? (
         <div className="daily-brief-outline-waiting" key={`daily-brief-outline-waiting-${index}`}>
@@ -158,13 +139,11 @@ export function DailyBriefListView({
   expandedDates,
   generatingDates,
   ttsState,
-  refreshingRecordingIds,
   onToggle,
   onGenerate,
   onSpeak,
   onSpeakLine,
   onShare,
-  onRefreshRecording,
 }) {
   if (!briefs.length) {
     return (
@@ -213,9 +192,7 @@ export function DailyBriefListView({
                     speechIdPrefix: speechId,
                     ttsState,
                     recordingStates: brief.recordingStates || [],
-                    refreshingRecordingIds,
                     briefDate: date,
-                    onRefreshRecording,
                     onSpeakLine: (line) => onSpeakLine?.(brief, line),
                   })}
                 </div>

@@ -490,7 +490,10 @@ export function RecordsView({
                     aria-label={folder.label + "文件夹名称"}
                   />
                 ) : (
-                  <button className="folder-main-button" type="button" onClick={() => onSelectFolder(folder.id)}>
+                  <button className="folder-main-button" type="button" onClick={() => {
+                    console.log("folder.id: ", folder.id)
+                    onSelectFolder(folder.id)
+                  }}>
                     {folder.icon}
                     <span className="folder-label">{folder.label}</span>
                     <span className="folder-count">{folder.count}</span>

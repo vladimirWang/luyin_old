@@ -42,7 +42,7 @@ function dailyBriefFallbackContent(brief, meetingCount) {
   ].join("\n");
 }
 
-export function DailyMeetingBriefMessage({ message, ttsState, onSpeakLine, onShare, onRefreshRecording, refreshingRecordingIds }) {
+export function DailyMeetingBriefMessage({ message, ttsState, onSpeakLine, onShare }) {
   const content = cleanQaVisibleText(message.content || message.answer || "", "") || dailyBriefFallbackContent(null, 0);
   const canShare = message.briefDate && message.status !== "generating";
   const speechIdPrefix = `daily-brief-${message.briefDate || message.id || "message"}`;
@@ -54,9 +54,7 @@ export function DailyMeetingBriefMessage({ message, ttsState, onSpeakLine, onSha
           speechIdPrefix,
           ttsState,
           recordingStates: message.recordingStates || [],
-          refreshingRecordingIds,
           briefDate: message.briefDate,
-          onRefreshRecording,
           onSpeakLine: (line) => onSpeakLine?.(message, line),
         })}
       </div>

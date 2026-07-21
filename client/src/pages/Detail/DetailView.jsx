@@ -51,7 +51,6 @@ import {DailyMeetingBriefMessage} from './components/DailyMeetingBriefMessage.js
 import { ChatHistoryPanel } from "./components/ChatHistoryPanel.jsx";
 import {
   DailyBriefListView,
-  canRefreshDailyBriefRecording,
   dailyBriefHasSummary,
 } from "./components/DailyBriefListView.jsx";
 import {QA_ACTIVE_MESSAGE_KEY, DAILY_BRIEF_ACTIVE_KEY} from '../../constant.js'
@@ -86,7 +85,6 @@ export function DetailView({ recording, recordings = EMPTY_RECORDINGS, onBack, l
   const [dailyBriefExpanded, setDailyBriefExpanded] = useState(Boolean(recording?.id));
   const [expandedDailyBriefDates, setExpandedDailyBriefDates] = useState(() => new Set());
   const [dailyBriefGeneratingDates, setDailyBriefGeneratingDates] = useState(() => new Set());
-  const [dailyBriefRefreshingRecordingIds, setDailyBriefRefreshingRecordingIds] = useState(() => new Set());
   const [qaHistory, setQaHistory] = useState([]);
   const [historyOpen, setHistoryOpen] = useState(false);
   const [images, setImages] = useState([]);
@@ -1398,59 +1396,6 @@ export function DetailView({ recording, recordings = EMPTY_RECORDINGS, onBack, l
     dailyBriefPollingRef.current.set(date, timer);
   }
 
-  async function refreshDailyBriefRecordingItem(recordingState, date, event) {
-    event?.preventDefault?.();
-    event?.stopPropagation?.();
-    const recordingId = recordingState?.id || "";
-    const targetDate = date || todayDateKey();
-    if (!recordingId || !targetDate) return;
-    if (!canRefreshDailyBriefRecording(recordingState)) {
-      onToast?.("会议提纲完成后，才能更新这一条简报。");
-      return;
-    }
-    if (dailyBriefGeneratingDates.has(targetDate)) {
-      onToast?.("今日简报正在生成，请稍等完成后再更新这一条。");
-      return;
-    }
-
-    let keepGenerating = false;
-    setDailyBriefRefreshingRecordingIds((current) => new Set([...current, recordingId]));
-    setDailyBriefGeneratingDates((current) => new Set([...current, targetDate]));
-    try {
-      const payload = await api(`/api/meeting-briefs/${encodeURIComponent(targetDate)}`, { method: "POST" });
-      mergeDailyBriefState(payload);
-      updateDailyBriefAnswerMessage(payload);
-      fetchDailyBriefHistory().catch(() => {});
-      if (payload.status === "generating") {
-        keepGenerating = true;
-        saveActiveDailyBriefRef(payload);
-        pollDailyBrief(targetDate);
-      } else if (dailyBriefHasSummary(payload)) {
-        clearActiveDailyBriefRef(targetDate);
-        onToast?.("已开始更新这一条简报内容。");
-      } else {
-        keepGenerating = true;
-        saveActiveDailyBriefRef(payload);
-        pollDailyBrief(targetDate);
-      }
-    } catch (error) {
-      onToast?.(error instanceof Error ? error.message : "这一条简报更新失败");
-    } finally {
-      setDailyBriefRefreshingRecordingIds((current) => {
-        const next = new Set(current);
-        next.delete(recordingId);
-        return next;
-      });
-      if (!keepGenerating) {
-        setDailyBriefGeneratingDates((current) => {
-          const next = new Set(current);
-          next.delete(targetDate);
-          return next;
-        });
-      }
-    }
-  }
-
   async function generateDailyBriefForDate(brief, event) {
     event?.stopPropagation?.();
     const date = brief?.date || todayDateKey();
@@ -1698,36 +1643,6 @@ export function DetailView({ recording, recordings = EMPTY_RECORDINGS, onBack, l
       onToast?.("PDF 已生成，可在下载文件中分享");
     } catch (error) {
       onToast?.(error instanceof Error ? error.message : "分享失败");
-    }
-  }
-
-  async function regenerateQaMessage(item, event) {
-    event?.stopPropagation?.();
-    const question = String(item?.question || "").trim();
-    if (!question) return;
-    enterQaConversationView();
-    try {
-      const targetScopeIds = lockedRecordingId ? [lockedRecordingId] : messageScopeFromKnown(item, activeScopeIdsRef.current, answers);
-      const payload = await api("/api/ask", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          question,
-          recordingIds: targetScopeIds,
-          attachments: Array.isArray(item.attachments) ? item.attachments : [],
-        }),
-      });
-      if (!payload.message?.id) throw new Error("问答创建失败");
-      const scopedMessage = withQaMessageScope(payload.message, targetScopeIds, [item]);
-      saveActiveQaMessageRef(scopedMessage);
-      setAnswers((current) => current.map((message) => (message.id === item.id ? scopedMessage : message)));
-      setQaHistory((current) => [scopedMessage, ...current.filter((message) => message.id !== item.id && message.id !== scopedMessage.id)]);
-      pollQaMessage(scopedMessage.id, 0, targetScopeIds);
-      setTimeout(() => {
-        chatEndRef.current?.scrollIntoView({ block: "end", behavior: "smooth" });
-      });
-    } catch (error) {
-      onToast?.(error instanceof Error ? error.message : "重新生成失败");
     }
   }
 
@@ -2248,13 +2163,11 @@ export function DetailView({ recording, recordings = EMPTY_RECORDINGS, onBack, l
               expandedDates={expandedDailyBriefDates}
               generatingDates={dailyBriefGeneratingDates}
               ttsState={ttsState}
-              refreshingRecordingIds={dailyBriefRefreshingRecordingIds}
               onToggle={toggleDailyBriefDate}
               onGenerate={generateDailyBriefForDate}
               onSpeak={speakDailyBrief}
               onSpeakLine={speakDailyBriefLine}
               onShare={shareDailyBriefPdf}
-              onRefreshRecording={refreshDailyBriefRecordingItem}
             />
           ) : answers.length > 0 ? (
             answers.map((item) => {
@@ -2264,10 +2177,8 @@ export function DetailView({ recording, recordings = EMPTY_RECORDINGS, onBack, l
                   key={item.id}
                   message={item}
                   ttsState={ttsState}
-                  refreshingRecordingIds={dailyBriefRefreshingRecordingIds}
                   onSpeakLine={speakDailyBriefLine}
                   onShare={shareDailyBriefPdf}
-                  onRefreshRecording={refreshDailyBriefRecordingItem}
                 />
               );
             }
@@ -2386,10 +2297,6 @@ export function DetailView({ recording, recordings = EMPTY_RECORDINGS, onBack, l
                 )}
                 {!item.pending ? (
                   <div className="chat-message-actions" aria-label="问答操作">
-                    <button type="button" onClick={(event) => regenerateQaMessage(item, event)}>
-                      <RefreshCw size={14} />
-                      <span>重新生成</span>
-                    </button>
                     {answerSpeakSegments.length > 0 ? (
                       <button
                         className={answerTtsRunning ? "playing" : ""}

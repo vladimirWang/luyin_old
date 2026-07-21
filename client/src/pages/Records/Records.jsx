@@ -107,6 +107,7 @@ import {useUploadManager} from '../../hooks/useUploadManager.js'
 import { useWecomAuthStore } from '../../stores/useWecomAuthStore.js'
 import {QA_ACTIVE_MESSAGE_KEY, DAILY_BRIEF_ACTIVE_KEY, PROFILE_STORAGE_KEY} from '../../constant.js'
 import {appendUrlParam} from '../../utils/index.js'
+import {getRecordings} from '../../api/recordings.js'
 
 const cardColors = ["coral", "indigo", "violet", "teal", "clay", "ink"];
 
@@ -299,6 +300,7 @@ export default function Records() {
     });
   }
 
+
   async function refreshRecordings(nextQuery = "", nextFolderId = selectedFolderId, options = {}) {
     const silent = Boolean(options.silent);
     if (!silent) setLoading(true);
@@ -370,6 +372,17 @@ export default function Records() {
       });
 
   }, []);
+
+  async function loadRecordings(params) {
+    console.log("recordings request: ", params)
+    const res = await getRecordings(params)
+    // console.log("recordings: ", res)
+    setRecordings(res.recordings)
+  }
+
+  useEffect(() => {
+    loadRecordings({folderId: selectedFolderId})
+  }, [selectedFolderId])
 
   useEffect(() => {
     if (Object.keys(profile || {}).length > 0) saveLocalProfile(profile);
@@ -842,9 +855,11 @@ export default function Records() {
 
     try {
       await api(endpoint, { method: "DELETE" });
-      releaseOptimisticRecordingRemovalLater(recording.id);
+      // releaseOptimisticRecordingRemovalLater(recording.id);
       refreshFolders().catch(() => {});
-      refreshRecordings("", selectedFolderId, { silent: true }).catch(() => {});
+      loadRecordings()
+      console.log("delete recording success")
+      // refreshRecordings("", selectedFolderId, { silent: true }).catch(() => {});
     } catch (error) {
       releaseOptimisticRecordingRemoval(recording.id);
       refreshFolders().catch(() => {});
