@@ -2,9 +2,17 @@ import test from "node:test";
 import assert from "node:assert/strict";
 
 import {
+  isTencentMeetingTranscriptReadyEvent,
   tencentMeetingTranscriptSegmentsFromPayload,
   tencentMeetingTranscriptSegmentsFromText,
 } from "./tencentMeeting.mjs";
+
+test("only the canonical smart.transcripts event marks a transcript as ready", () => {
+  assert.equal(isTencentMeetingTranscriptReadyEvent({ event: "smart.transcripts" }), true);
+  assert.equal(isTencentMeetingTranscriptReadyEvent({ event: "recording.completed" }), false);
+  assert.equal(isTencentMeetingTranscriptReadyEvent({ event_type: "smart.transcripts" }), false);
+  assert.equal(isTencentMeetingTranscriptReadyEvent({ Event: "smart.transcripts" }), false);
+});
 
 test("Tencent Meeting payload parser returns the transcript result shape used by sync jobs", () => {
   const result = tencentMeetingTranscriptSegmentsFromPayload(

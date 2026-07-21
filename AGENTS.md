@@ -22,6 +22,8 @@ Database startup decisions: `docker-entrypoint.sh` selects the Prisma schema str
 
 Recording persistence decisions: Prisma is the only data-access implementation for `Recording` and `TranscriptSegment` reads, creates, updates, soft deletes, restores, and permanent deletes. Legacy aggregate helpers may remain temporarily for non-recording entities, but they must delegate recording persistence to the Prisma repository and must never issue raw `SELECT`, `DELETE`, or `INSERT` statements against `recordings` or `transcript_segments`.
 
+Database access decisions: prefer Prisma for all new or reworked database reads and writes. Do not introduce new raw SQL when Prisma can express the operation; when touching legacy raw-SQL persistence, migrate the in-scope operation to Prisma where practical.
+
 Test deployment decisions: `py_server` is intentionally disabled because the current application flow does not use it. `start_test.sh` must not build, start, wait for, or report `py_server`, and must not remove or otherwise manage stale Compose orphan containers.
 
 Records menu decisions: the avatar dropdown uses a compact, content-driven width with mobile viewport bounds instead of a fixed width, and its icon-only action buttons center their icons.
@@ -31,6 +33,8 @@ Detail component decisions: keep the chat-history panel in `client/src/pages/Det
 Server router dependency decisions: functions needed by server routes should be imported directly from focused utility modules whenever practical. Do not pass importable utility functions through router `configure()` dependency objects; reserve configuration injection for behavior that genuinely belongs to the application composition root or would otherwise create circular dependencies.
 
 Tencent Meeting webhook payload decisions: handle the canonical `payload.event` and `item.token_info` fields only; do not add aliases for alternative event or token-info field names. Keep `TENCENT_MEETING_SOURCE_PREFIX` equal to `"tencent-meeting"` without the colon, and add or skip the separator explicitly where a full source key is built or parsed.
+
+Tencent Meeting transcript sync decisions: automatically query `/v1/records/transcripts/details` only for the canonical `smart.transcripts` webhook event. Do not poll transcript details from recording-completed events, audio-download completion, cloud discovery, or pending-import sweeps, and do not fall back to per-paragraph detail fan-out.
 
 Recording ownership decisions: `ownerName` is an immutable producer-name snapshot, not a client-editable label. Manual uploads must derive `userId`, `ownerClientId`, and `ownerName` from a server-signed Enterprise WeChat identity obtained during OAuth; never trust name or user-ID request headers for ownership. Tencent Meeting imports use the creator/owner display name returned by Tencent Meeting and may resolve a missing name from the verified Enterprise WeChat directory using the creator userid. Because recorder `recording.audio-completed` callbacks omit identity, correlate them with the nearest preceding `recording.started` context from the persisted webhook history and only replace an empty or generic Tencent recorder owner name. One started context may apply to multiple subsequent audio-completed files until a newer started event arrives or the context expires.
 

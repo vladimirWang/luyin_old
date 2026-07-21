@@ -588,7 +588,7 @@ router.get("/:id/meeting-outline.pdf", async (request, response, next) => {
 });
 
 router.post("/:id/transcribe", async (request, response) => {
-  const { queueTranscriptionJob, syncTencentMeetingBuiltInTranscript, isLocalApiTranscriptionRecording, findRecording, canManageRecording } = dependencies;
+  const { queueTranscriptionJob, isLocalApiTranscriptionRecording, findRecording, canManageRecording } = dependencies;
   logger.info("[CALL] /api/recordings/:id/transcribe", {message: `request.params.id: ${request.params.id}`});
   const db = await loadDb();
   const clientId = requestClientIdBetter(request);
@@ -600,11 +600,11 @@ router.post("/:id/transcribe", async (request, response) => {
   }
 
   if (isTencentMeetingRecording(recording)) {
-    const synced = await syncTencentMeetingBuiltInTranscript(recording.id, tencentMeetingSyncInfoFromRecording(recording));
-    response.status(synced ? 200 : 202).json({
+    response.status(202).json({
       ok: true,
-      status: synced ? "ready" : "pending",
+      status: "pending",
       source: "tencent-meeting",
+      message: "等待腾讯会议 smart.transcripts 转写生成事件。",
     });
     return;
   }
@@ -615,15 +615,6 @@ router.post("/:id/transcribe", async (request, response) => {
   }
 
   if (!isRecordingApiTranscriptionEnabled()) {
-    if (isTencentMeetingRecording(recording)) {
-      const synced = await syncTencentMeetingBuiltInTranscript(recording.id, tencentMeetingSyncInfoFromRecording(recording));
-      response.status(synced ? 200 : 202).json({
-        ok: true,
-        status: synced ? "ready" : "pending",
-        source: "tencent-meeting",
-      });
-      return;
-    }
     response.status(409).json({ error: "录音 API 转写已停用；腾讯会议录音会使用腾讯会议自带转写。" });
     return;
   }

@@ -1128,6 +1128,10 @@ export function tencentMeetingApiConfigured() {
   return Boolean(config.secretId && config.secretKey && config.appId);
 }
 
+export function isTencentMeetingTranscriptReadyEvent(payload = {}) {
+  return String(payload?.event || "").trim() === "smart.transcripts";
+}
+
 export function tencentMeetingQuery(pathname, params = {}) {
   const query = new URLSearchParams();
   for (const [key, value] of Object.entries(params)) {

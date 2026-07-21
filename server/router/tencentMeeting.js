@@ -1,7 +1,13 @@
 import express from "express";
 import logger from "../utils/log.js";
 import { parseJsonObject } from "../utils/common.mjs";
-import { requestTencentMeetingStsTokenIfNeeded, tencentMeetingVerifiedPlaintext, tencentMeetingWebhookStatus, importTencentMeetingStsTokenPayload } from "../utils/tencentMeeting.mjs";
+import {
+  importTencentMeetingStsTokenPayload,
+  isTencentMeetingTranscriptReadyEvent,
+  requestTencentMeetingStsTokenIfNeeded,
+  tencentMeetingVerifiedPlaintext,
+  tencentMeetingWebhookStatus,
+} from "../utils/tencentMeeting.mjs";
 
 const router = express.Router();
 
@@ -87,7 +93,7 @@ router.post("/webhook", async (request, response) => {
     // 记录腾讯会议webhhook日志
     await appendTencentMeetingWebhookEvent({
       receivedAt: new Date().toISOString(),
-      event: payload?.event || payload?.Event || payload?.event_type || "",
+      event: payload?.event || "",
       uniqueSequence: payload?.unique_sequence || payload?.uniqueSequence || "",
       payload: payload || plaintext,
     });
@@ -111,6 +117,9 @@ router.post("/webhook", async (request, response) => {
             // 创建或更新本地录音记录，并按事件内容调度后续的音频、转写同步流程。
             await importTencentMeetingWebhookPayload(payload);
           } else if (payload.event === 'recording.audio-completed') {
+            await importTencentMeetingWebhookPayload(payload);
+          } else if (isTencentMeetingTranscriptReadyEvent(payload)) {
+            // 腾讯会议确认完整转写已经生成后，才读取转写详情。
             await importTencentMeetingWebhookPayload(payload);
           }
           logger.info("listen /webhook call importTencentMeetingWebhookPayload success: ", {message: ''})
