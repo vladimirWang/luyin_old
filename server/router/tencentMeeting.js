@@ -1,7 +1,13 @@
 import express from "express";
 import logger from "../utils/log.js";
 import { parseJsonObject } from "../utils/common.mjs";
-import { requestTencentMeetingStsTokenIfNeeded, tencentMeetingVerifiedPlaintext, tencentMeetingWebhookStatus, importTencentMeetingStsTokenPayload } from "../utils/tencentMeeting.mjs";
+import {
+  importTencentMeetingStsTokenPayload,
+  isTencentMeetingTranscriptReadyEvent,
+  requestTencentMeetingStsTokenIfNeeded,
+  tencentMeetingVerifiedPlaintext,
+  tencentMeetingWebhookStatus,
+} from "../utils/tencentMeeting.mjs";
 
 const router = express.Router();
 
@@ -41,12 +47,21 @@ router.post("/sts-token/request", async (_request, response, next) => {
     const result = await requestTencentMeetingStsTokenIfNeeded();
     if (!result.requested) {
       const missingOperator = result.reason === "missing_operator_id";
-      response.status(missingOperator ? 503 : 502).json({
-        ok: false,
+      const redisUnavailable = result.reason === "redis_unavailable";
+      const accepted = result.reason === "token_fresh" || result.reason === "request_pending";
+      response.status(accepted ? 200 : missingOperator || redisUnavailable ? 503 : 502).json({
+        ok: accepted,
         requested: false,
-        error: missingOperator
-          ? "未配置腾讯会议 STS Operator ID"
-          : "腾讯会议 STS Token 申请失败",
+        reason: result.reason,
+        ...(accepted
+          ? { message: result.reason === "token_fresh" ? "STS Token 仍然有效" : "STS Token 申请已在处理中" }
+          : {
+              error: missingOperator
+                ? "未配置腾讯会议 STS Operator ID"
+                : redisUnavailable
+                  ? "Redis 不可用，无法读写 STS Token"
+                  : "腾讯会议 STS Token 申请失败",
+            }),
       });
       return;
     }
@@ -87,7 +102,7 @@ router.post("/webhook", async (request, response) => {
     // 记录腾讯会议webhhook日志
     await appendTencentMeetingWebhookEvent({
       receivedAt: new Date().toISOString(),
-      event: payload?.event || payload?.Event || payload?.event_type || "",
+      event: payload?.event || "",
       uniqueSequence: payload?.unique_sequence || payload?.uniqueSequence || "",
       payload: payload || plaintext,
     });
@@ -111,6 +126,9 @@ router.post("/webhook", async (request, response) => {
             // 创建或更新本地录音记录，并按事件内容调度后续的音频、转写同步流程。
             await importTencentMeetingWebhookPayload(payload);
           } else if (payload.event === 'recording.audio-completed') {
+            await importTencentMeetingWebhookPayload(payload);
+          } else if (isTencentMeetingTranscriptReadyEvent(payload)) {
+            // 腾讯会议确认完整转写已经生成后，才读取转写详情。
             await importTencentMeetingWebhookPayload(payload);
           }
           logger.info("listen /webhook call importTencentMeetingWebhookPayload success: ", {message: ''})

@@ -6559,8 +6559,9 @@ button {
 .bottom-nav {
   position: relative;
   z-index: 8;
-  display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
+  display: flex;
+  /* display: grid; */
+  /* grid-template-columns: repeat(3, minmax(0, 1fr)); */
   gap: 10px;
   align-items: end;
   padding: 6px 28px max(18px, env(safe-area-inset-bottom));
@@ -6573,6 +6574,7 @@ button {
 }
 
 .bottom-nav button {
+  flex: 1;
   display: grid;
   min-width: 0;
   height: 58px;

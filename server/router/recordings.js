@@ -3,7 +3,7 @@ import multer from "multer";
 import crypto from "node:crypto";
 import path from "node:path";
 import { existsSync, statSync } from "node:fs";
-import { mkdir, rm } from "node:fs/promises";
+import { mkdir } from "node:fs/promises";
 import logger from "../utils/log.js";
 import {
   expandTranscriptSegments,
@@ -22,9 +22,19 @@ import {
 import { uploadWecomTemporaryFile } from "../utils/wecom.js";
 import { isTencentMeetingRecording, tencentMeetingSyncInfoFromRecording } from "../utils/tencentMeeting.mjs";
 // import prisma from "../plugins/prisma.js";
-import {removeFileIfExists} from '../utils/file.js'
+import {
+  finalizeStagedFileDeletions,
+  findRecordingTemporaryArtifacts,
+  removeFileIfExists,
+  restoreStagedFiles,
+  stageFilesForDeletion,
+} from '../utils/file.js'
 import { canDeleteAllRecordings, canReadRecording } from "../utils/common.mjs";
-import { recordingFromPrisma, transcriptSegmentFromPrisma } from "../repositories/recordings.mjs";
+import {
+  permanentlyDeleteRecordingDataWithPrisma,
+  recordingFromPrisma,
+  transcriptSegmentFromPrisma,
+} from "../repositories/recordings.mjs";
 
 const prisma = await import('../plugins/prisma.cjs').then(m => m.default || m);
 
@@ -47,7 +57,7 @@ async function sendRecordingAudio(req, res, disposition = "inline") {
   const recording = findRecording(db, req.params.id);
   const audioPath = recording ? resolveRecordingAudioPath(recording, projectRoot) : "";
   const tokenAllowed = recording ? hasValidAudioDownloadToken(req.query?.token, recording.id) : false;
-  if (!recording || (!tokenAllowed && !canReadRecording(recording, clientId))) {
+  if (!recording || recording.deletedAt || (!tokenAllowed && !canReadRecording(recording, clientId))) {
     res.status(404).json({ error: "音频文件不存在" });
     return;
   }
@@ -83,7 +93,7 @@ async function handleMeetingOutlineRequest(req, res, next) {
     const clientId = requestClientIdBetter(req);
     const clientName = requestClientNameAndDecode(req);
     const recording = findRecording(db, req.params.id);
-    if (!recording || !canReadRecording(recording, clientId)) {
+    if (!recording || recording.deletedAt || !canReadRecording(recording, clientId)) {
       res.status(404).json({ error: "录音不存在" });
       return;
     }
@@ -153,30 +163,39 @@ router.get("/", async (request, response, next) => {
       include: { segments: { orderBy: { startMs: "asc" } } },
       orderBy: { createdAt: "desc" },
     });
+    // for (let i of rows) {
+    //   if (i.id === "429d3888-47b1-462e-84aa-4570f6a64162") {
+    //     logger.debug("排查转写数据: ", {message: `isArray: ${Array.isArray(i.segments)}`})
+    //     if (Array.isArray(i.segments)) {
+    //       logger.debug("排查转写数据: ", {message: `length: ${i.segments.length}`})
+    //     }
+    //   }
+    // }
     const recordings = rows
       .map((row) => ({
+        // recordings: row
         recording: recordingFromPrisma(row),
         segments: row.segments.map(transcriptSegmentFromPrisma),
       }))
-      .filter(({ recording }) => canDeleteAll || canReadRecording(recording, clientId))
+      // .filter(({ recording }) => canDeleteAll || canReadRecording(recording, clientId))
       .map(({ recording, segments }) =>
         publicRecording(recording, segments, clientId, clientName, { canDeleteAllRecordings: canDeleteAll }),
       );
-    const filtered = query
-      ? recordings
-          .map((recording) => ({ recording, score: recordingSearchScore(recording, query) }))
-          .filter((item) => item.score >= 18)
-          .sort((a, b) => b.score - a.score || new Date(b.recording.createdAt) - new Date(a.recording.createdAt))
-          .map((item) => item.recording)
-      : recordings;
-    response.json({ recordings: filtered });
+    // const filtered = query
+    //   ? recordings
+    //       .map((recording) => ({ recording, score: recordingSearchScore(recording, query) }))
+    //       .filter((item) => item.score >= 18)
+    //       .sort((a, b) => b.score - a.score || new Date(b.recording.createdAt) - new Date(a.recording.createdAt))
+    //       .map((item) => item.recording)
+    //   : recordings;
+    response.json({ recordings });
   } catch (error) {
     next(error);
   }
 });
 
 router.post("/", upload.single("audio"), async (request, response, next) => {
-  const { queueTranscriptionJob, verifiedStoredRecording = fileInfo, publicRecording } = dependencies;
+  const { queueTranscriptionJob, verifiedStoredRecording, publicRecording } = dependencies;
   try {
     if (!request.file) {
       response.status(400).json({ error: "缺少录音文件" });
@@ -193,53 +212,73 @@ router.post("/", upload.single("audio"), async (request, response, next) => {
     const fileName = `${id}.mp3`;
     const storagePath = path.join(audioDir, fileName);
     const now = new Date().toISOString();
-    const { userId, ownerClientId, ownerName } = trustedOwner;
+    // // ----------用本地假音频模拟上传文件 start-----------
+    // const trustedOwner = {
+    //   ownerClientId: 'user1231',
+    //   userId: "1231",
+    //   ownerName: "user1231 ownerName"
+    // }
+    // const mockMp3Path = path.join(projectRoot, "mock/audio/e6676bf0-0db2-4bef-9e5a-3e52719e4c43.mp3");
+    // const { copyFile } = await import("node:fs/promises");
+    // await copyFile(mockMp3Path, storagePath);
+    // const mockOwner = { userId: "mock-user-001", ownerClientId: "mock-client-001", ownerName: "Mock测试用户" };
+    // const { size: fileSize } = statSync(mockMp3Path);
+    // const { probeAudioDurationMs } = await import("../media.mjs");
+    // const durationMs = await probeAudioDurationMs(storagePath) || 0;
+    // // ----------用本地假音频模拟上传文件 end-----------
+
     await convertAudioFileToMp3(request.file.path, storagePath);
     await removeFileIfExists(request.file.path);
     const { storedFile, durationMs } = await verifiedStoredRecording(storagePath, request.body.durationMs);
-    const recording = await updateDb((db) => {
-      db.counters.recordingSeq += 1;
-      const seq = db.counters.recordingSeq;
-      const item = {
+    const fileSize = storedFile.fileSize
+    const lastRecording = await prisma.recording.findFirst({
+      orderBy: {
+        seq: 'desc'
+      }
+    })
+    const seq = lastRecording ? lastRecording.seq + 1 : 1
+
+    logger.info("recording.uploaded lastRecording", { message: `lastRecording.id: ${lastRecording.id}, seq: ${seq}` });
+    logger.info("recording.uploaded mock", { message: `recordingId: ${id}, ownerClientId: ${mockOwner.ownerClientId}, ownerName: ${mockOwner.ownerName}, durationMs: ${durationMs}, fileSize: ${fileSize}` });
+    const insertResult = await prisma.recording.create({
+      data: {
         id,
         seq,
         name: request.body.name || `录音 ${String(seq).padStart(3, "0")}`,
         createdAt: now,
         updatedAt: now,
-        durationMs,
+        durationMs: BigInt(durationMs),
         mimeType: "audio/mpeg",
-        size: storedFile.size,
+        fileSize: BigInt(fileSize),
         fileName,
-        storagePath,
+        storageProvider: "local",
+        storageKey: storagePath,
         transcriptPath: "",
         favorite: false,
-        userId,
-        ownerClientId,
-        ownerName,
+        userId: trustedOwner.userId,
+        ownerClientId: trustedOwner.ownerClientId,
+        ownerName: trustedOwner.ownerName,
         shared: false,
-        sharedAt: "",
+        sharedAt: null,
         speakerName: request.body.speakerName || "说话人 1",
-        speakerMap: {},
+        speakerMapJson: JSON.stringify({}),
         tag: request.body.tag || "",
         deletedAt: null,
         transcriptProvider: getTranscriptionMode(),
         transcriptSource: "",
-        transcribedAt: "",
+        transcribedAt: null,
         folderId: request.body.folderId || null,
         status: "uploaded",
         source: "wecom-h5",
         userAgent: request.get("user-agent") || "",
-      };
-
-      db.recordings.push(item);
-      return item;
+      }
     });
-
+    const recording = recordingFromPrisma(insertResult);
+    logger.info("recording insert success", { message: `id: ${id}, durationMs: ${recording.durationMs}, size: ${recording.size}` });
     const queued = await queueTranscriptionJob(id, recording);
+    logger.debug("queueTranscriptionJob success", { message: `queued: ${queued}` });
     const responseRecording = queued ? { ...recording, status: "transcribing", errorMessage: "" } : recording;
-
-    logger.info("recording.uploaded", {message: `recordingId: ${id}, ownerClientId: ${ownerClientId}, ownerName: ${ownerName}, queued: ${queued}, durationMs: ${durationMs}, fileName: ${fileName}`, recordingId: id, ownerClientId, ownerName, queued, durationMs, fileName});
-    response.status(201).json({ recording: publicRecording(responseRecording, [], ownerClientId, ownerName) });
+    response.status(201).json({ recording: publicRecording(responseRecording, [], mockOwner.ownerClientId, mockOwner.ownerName) });
   } catch (error) {
     next(error);
   }
@@ -362,7 +401,7 @@ router.get("/:id", async (request, response) => {
   const clientName = requestClientNameAndDecode(request);
   const canDeleteAll = canDeleteAllRecordings();
   const recording = findRecording(db, request.params.id);
-  if (!recording || (!canDeleteAll && !canReadRecording(recording, clientId))) {
+  if (!recording || recording.deletedAt || (!canDeleteAll && !canReadRecording(recording, clientId))) {
     response.status(404).json({ error: "录音不存在" });
     return;
   }
@@ -376,7 +415,7 @@ router.patch("/:id", async (request, response) => {
   const clientName = requestClientNameAndDecode(request);
   const updated = await updateDb((db) => {
     const recording = findRecording(db, request.params.id);
-    if (!recording) return null;
+    if (!recording || recording.deletedAt) return null;
     const keys = Object.keys(request.body || {});
     const readerOnlyPatch = keys.length > 0 && keys.every((key) => key === "favorite");
     if (!canManageRecording(recording, clientId, clientName) && !(readerOnlyPatch && canReadRecording(recording, clientId))) return null;
@@ -428,46 +467,141 @@ router.patch("/:id", async (request, response) => {
   response.json({ recording: updated });
 });
 
-router.delete("/:id", async (request, response) => {
-  const { findRecording, canManageRecording, canDeleteRecording } = dependencies;
+// router.delete("/:id", async (request, response) => {
+//   const { findRecording, canManageRecording, canDeleteRecording } = dependencies;
+//   const clientId = requestClientIdBetter(request);
+//   const clientName = requestClientNameAndDecode(request);
+//   const canDeleteAll = canDeleteAllRecordings();
+//   let filePath = "";
+//   let transcriptPath = "";
+//   const permanent = request.query.permanent === "true";
+//   const deleted = await updateDb((db) => {
+//     const recording = findRecording(db, request.params.id);
+//     if (!recording) return false;
+//     if (!canDeleteAll && !(permanent ? canManageRecording(recording, clientId, clientName) : canDeleteRecording(recording, clientId, clientName))) return false;
+
+//     if (!permanent) {
+//       recording.deletedAt = new Date().toISOString();
+//       recording.updatedAt = new Date().toISOString();
+//       return true;
+//     }
+
+//     filePath = recording.storagePath;
+//     transcriptPath = recording.transcriptPath;
+//     db.recordings = db.recordings.filter((item) => item.id !== request.params.id);
+//     db.transcriptSegments = db.transcriptSegments.filter((segment) => segment.recordingId !== request.params.id);
+//     db.qaMessages = db.qaMessages.filter((message) => !message.recordingIds?.includes(request.params.id));
+//     return true;
+//   });
+
+//   if (!deleted) {
+//     response.status(404).json({ error: "录音不存在" });
+//     return;
+//   }
+
+//   if (filePath) {
+//     await rm(filePath, { force: true });
+//   }
+//   if (transcriptPath) {
+//     await rm(transcriptPath, { force: true });
+//   }
+
+//   response.json({ ok: true });
+// });
+
+router.delete("/:id", async (request, response, next) => {
+  const {
+    cancelRecordingJobs,
+    canManageRecording,
+    canDeleteRecording,
+    releaseRecordingJobCancellation,
+  } = dependencies;
+  const recordingId = String(request.params.id || "").trim();
+  const permanent = request.query.permanent === "true";
   const clientId = requestClientIdBetter(request);
   const clientName = requestClientNameAndDecode(request);
   const canDeleteAll = canDeleteAllRecordings();
-  let filePath = "";
-  let transcriptPath = "";
-  const permanent = request.query.permanent === "true";
-  const deleted = await updateDb((db) => {
-    const recording = findRecording(db, request.params.id);
-    if (!recording) return false;
-    if (!canDeleteAll && !(permanent ? canManageRecording(recording, clientId, clientName) : canDeleteRecording(recording, clientId, clientName))) return false;
+  let jobsCancelled = false;
+  let deletionCommitted = false;
 
-    if (!permanent) {
-      recording.deletedAt = new Date().toISOString();
-      recording.updatedAt = new Date().toISOString();
-      return true;
+  try {
+    const row = await prisma.recording.findUnique({ where: { id: recordingId } });
+    if (!row) {
+      response.status(404).json({ error: "录音不存在" });
+      return;
     }
 
-    filePath = recording.storagePath;
-    transcriptPath = recording.transcriptPath;
-    db.recordings = db.recordings.filter((item) => item.id !== request.params.id);
-    db.transcriptSegments = db.transcriptSegments.filter((segment) => segment.recordingId !== request.params.id);
-    db.qaMessages = db.qaMessages.filter((message) => !message.recordingIds?.includes(request.params.id));
-    return true;
-  });
+    const recording = recordingFromPrisma(row);
+    const allowed = canDeleteAll || (permanent
+      ? canManageRecording(recording, clientId, clientName)
+      : canDeleteRecording(recording, clientId, clientName));
+    if (!allowed) {
+      response.status(404).json({ error: "录音不存在" });
+      return;
+    }
 
-  if (!deleted) {
-    response.status(404).json({ error: "录音不存在" });
-    return;
-  }
+    if (!permanent) {
+      const now = new Date();
+      cancelRecordingJobs(recordingId);
+      jobsCancelled = true;
+      await prisma.recording.update({
+        where: { id: recordingId },
+        data: { deletedAt: now, updatedAt: now },
+      });
+      response.json({ ok: true, permanent: false });
+      return;
+    }
 
-  if (filePath) {
-    await rm(filePath, { force: true });
-  }
-  if (transcriptPath) {
-    await rm(transcriptPath, { force: true });
-  }
+    cancelRecordingJobs(recordingId);
+    jobsCancelled = true;
+    const temporaryArtifacts = await findRecordingTemporaryArtifacts(tempDir, recordingId);
+    const stagedFiles = await stageFilesForDeletion(
+      [
+        recording.storagePath,
+        recording.transcriptPath,
+        recording.transcriptRawPath,
+        recording.transcriptCorrectedPath,
+        recording.transcriptionMetaPath,
+        ...temporaryArtifacts,
+      ],
+      `${recordingId}-${crypto.randomUUID()}`,
+    );
 
-  response.json({ ok: true });
+    let deleted;
+    try {
+      deleted = await permanentlyDeleteRecordingDataWithPrisma(recordingId);
+      deletionCommitted = true;
+    } catch (error) {
+      try {
+        await restoreStagedFiles(stagedFiles);
+      } catch (restoreError) {
+        logger.error("recording.permanent_delete.restore_failed", {
+          message: restoreError instanceof Error ? restoreError.message : String(restoreError),
+          recordingId,
+        });
+      }
+      throw error;
+    }
+
+    const cleanupFailures = await finalizeStagedFileDeletions(stagedFiles);
+    if (cleanupFailures.length) {
+      logger.error("recording.permanent_delete.file_cleanup_failed", {
+        message: cleanupFailures.map((failure) => `${failure.path}: ${failure.error?.message || failure.error}`).join("; "),
+        recordingId,
+      });
+    }
+
+    response.json({
+      ok: true,
+      permanent: true,
+      deleted,
+      deletedFiles: stagedFiles.length - cleanupFailures.length,
+      fileCleanupPending: cleanupFailures.length,
+    });
+  } catch (error) {
+    if (jobsCancelled && !deletionCommitted) releaseRecordingJobCancellation(recordingId);
+    next(error);
+  }
 });
 
 router.get("/:id/audio", async (request, response) => {
@@ -487,7 +621,7 @@ router.post("/:id/audio-share-url", async (request, response) => {
   const clientName = requestClientNameAndDecode(request);
   const recording = findRecording(db, request.params.id);
   const audioPath = recording ? resolveRecordingAudioPath(recording, projectRoot) : "";
-  if (!recording || !canReadRecording(recording, clientId) || !audioPath) {
+  if (!recording || recording.deletedAt || !canReadRecording(recording, clientId) || !audioPath) {
     response.status(404).json({ error: "audio file not found" });
     return;
   }
@@ -511,7 +645,7 @@ router.post("/:id/wecom-audio-media", async (request, response, next) => {
     const clientName = requestClientNameAndDecode(request);
     const recording = findRecording(db, request.params.id);
     const audioPath = recording ? resolveRecordingAudioPath(recording, projectRoot) : "";
-    if (!recording || !canReadRecording(recording, clientId) || !audioPath) {
+    if (!recording || recording.deletedAt || !canReadRecording(recording, clientId) || !audioPath) {
       response.status(404).json({ error: "音频文件不存在" });
       return;
     }
@@ -537,7 +671,7 @@ router.get("/:id/transcript.txt", async (request, response) => {
   const clientId = requestClientIdBetter(request);
   const clientName = requestClientNameAndDecode(request);
   const recording = findRecording(db, request.params.id);
-  if (!recording || !canReadRecording(recording, clientId) || !recording.transcriptPath || !existsSync(recording.transcriptPath)) {
+  if (!recording || recording.deletedAt || !canReadRecording(recording, clientId) || !recording.transcriptPath || !existsSync(recording.transcriptPath)) {
     response.status(404).json({ error: "转写 TXT 不存在" });
     return;
   }
@@ -556,7 +690,7 @@ router.get("/:id/meeting-outline.pdf", async (request, response, next) => {
     const clientId = requestClientIdBetter(request);
     const clientName = requestClientNameAndDecode(request);
     const recording = findRecording(db, request.params.id);
-    if (!recording || !canReadRecording(recording, clientId)) {
+    if (!recording || recording.deletedAt || !canReadRecording(recording, clientId)) {
       response.status(404).json({ error: "录音不存在" });
       return;
     }
@@ -588,23 +722,23 @@ router.get("/:id/meeting-outline.pdf", async (request, response, next) => {
 });
 
 router.post("/:id/transcribe", async (request, response) => {
-  const { queueTranscriptionJob, syncTencentMeetingBuiltInTranscript, isLocalApiTranscriptionRecording, findRecording, canManageRecording } = dependencies;
+  const { queueTranscriptionJob, isLocalApiTranscriptionRecording, findRecording, canManageRecording } = dependencies;
   logger.info("[CALL] /api/recordings/:id/transcribe", {message: `request.params.id: ${request.params.id}`});
   const db = await loadDb();
   const clientId = requestClientIdBetter(request);
   const clientName = requestClientNameAndDecode(request);
   const recording = findRecording(db, request.params.id);
-  if (!recording || !canManageRecording(recording, clientId, clientName)) {
+  if (!recording || recording.deletedAt || !canManageRecording(recording, clientId, clientName)) {
     response.status(404).json({ error: "录音不存在" });
     return;
   }
 
   if (isTencentMeetingRecording(recording)) {
-    const synced = await syncTencentMeetingBuiltInTranscript(recording.id, tencentMeetingSyncInfoFromRecording(recording));
-    response.status(synced ? 200 : 202).json({
+    response.status(202).json({
       ok: true,
-      status: synced ? "ready" : "pending",
+      status: "pending",
       source: "tencent-meeting",
+      message: "等待腾讯会议 smart.transcripts 转写生成事件。",
     });
     return;
   }
@@ -615,15 +749,6 @@ router.post("/:id/transcribe", async (request, response) => {
   }
 
   if (!isRecordingApiTranscriptionEnabled()) {
-    if (isTencentMeetingRecording(recording)) {
-      const synced = await syncTencentMeetingBuiltInTranscript(recording.id, tencentMeetingSyncInfoFromRecording(recording));
-      response.status(synced ? 200 : 202).json({
-        ok: true,
-        status: synced ? "ready" : "pending",
-        source: "tencent-meeting",
-      });
-      return;
-    }
     response.status(409).json({ error: "录音 API 转写已停用；腾讯会议录音会使用腾讯会议自带转写。" });
     return;
   }
@@ -633,25 +758,37 @@ router.post("/:id/transcribe", async (request, response) => {
   response.status(202).json({ ok: true, status: queued ? "transcribing" : "queued" });
 });
 
-router.post("/:id/restore", async (request, response) => {
-  const { findRecording, canManageRecording, findSegments, publicRecording } = dependencies;
+router.post("/:id/restore", async (request, response, next) => {
+  const { canManageRecording, publicRecording, releaseRecordingJobCancellation } = dependencies;
   const clientId = requestClientIdBetter(request);
   const clientName = requestClientNameAndDecode(request);
-  const restored = await updateDb((db) => {
-    const recording = findRecording(db, request.params.id);
-    if (!recording) return null;
-    if (!canManageRecording(recording, clientId, clientName)) return null;
-    recording.deletedAt = null;
-    recording.updatedAt = new Date().toISOString();
-    return publicRecording(recording, findSegments(db, recording.id), clientId, clientName);
-  });
+  try {
+    const row = await prisma.recording.findFirst({
+      where: { id: request.params.id, deletedAt: { not: null } },
+      include: { segments: { orderBy: { startMs: "asc" } } },
+    });
+    const recording = row ? recordingFromPrisma(row) : null;
+    if (!recording || !canManageRecording(recording, clientId, clientName)) {
+      response.status(404).json({ error: "录音不存在" });
+      return;
+    }
 
-  if (!restored) {
-    response.status(404).json({ error: "录音不存在" });
-    return;
+    const restoredRow = await prisma.recording.update({
+      where: { id: recording.id },
+      data: { deletedAt: null, updatedAt: new Date() },
+    });
+    releaseRecordingJobCancellation(recording.id);
+    response.json({
+      recording: publicRecording(
+        recordingFromPrisma(restoredRow),
+        row.segments.map(transcriptSegmentFromPrisma),
+        clientId,
+        clientName,
+      ),
+    });
+  } catch (error) {
+    next(error);
   }
-
-  response.json({ recording: restored });
 });
 
 router.post("/:id/ask", async (request, response) => {
@@ -686,7 +823,7 @@ router.post("/:id/ask", async (request, response) => {
 
   const db = await loadDb();
   const recording = findRecording(db, request.params.id);
-  if (!recording || !canReadRecording(recording, clientId)) {
+  if (!recording || recording.deletedAt || !canReadRecording(recording, clientId)) {
     response.status(404).json({ error: "录音不存在" });
     return;
   }

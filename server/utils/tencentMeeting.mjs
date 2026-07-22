@@ -1,6 +1,4 @@
 import crypto from "node:crypto";
-import { mkdir, readFile, writeFile } from "node:fs/promises";
-import path from "node:path";
 import logger from "./log.js";
 import { normalizeTencentMeetingEncryptedData, tencentMeetingDecryptData } from "./tencentMeetingCrypto.mjs";
 import { firstEnv, parseJsonObject, splitEnvList, firstNonEmptyValue, asArray, boundedNumber } from "./common.mjs";
@@ -8,92 +6,19 @@ import { decodedTencentMeetingAesKeyLength } from "./algo.js";
 import { resolveRecordingAudioPath } from "./recordings.js";
 import { projectRoot } from "../config.js";
 import {TENCENT_MEETING_SOURCE_PREFIX} from '../constant.js'
-
-let stsTokenRequestInFlight = null;
-const stsTokenCache = { loaded: false, value: "", expiresAt: 0, reqId: "" };
-const stsTokenPath = path.join(projectRoot, "storage", "tencent-meeting-sts-token.json");
+import { getTMToken, requestTMToken, setTMToken } from "./token.js";
 
 export async function requestTencentMeetingStsTokenIfNeeded() {
-  const operatorId = process.env.TENCENT_MEETING_STS_OPERATOR_ID
-  if (!operatorId) {
-    return { requested: false, reason: "missing_operator_id" };
-  }
-  if (stsTokenRequestInFlight) return stsTokenRequestInFlight;
-
-  stsTokenRequestInFlight = (async () => {
-    const body = {
-      operator_id: operatorId,
-      operator_id_type: 1,
-      valid_time: 24
-    };
-    console.log("sts token request: ", JSON.stringify(body))
-    try {
-      await tencentMeetingApiRequest("POST", "/v1/app/sts-token", body, { skipStsToken: true });
-      return { requested: true };
-    } catch (error) {
-      logger.warn("[Tencent Meeting] STS token request failed", {
-        message: error instanceof Error ? error.message : String(error),
-      });
-      return { requested: false, reason: "request_failed" };
-    } finally {
-      stsTokenRequestInFlight = null;
-    }
-  })();
-
-  return stsTokenRequestInFlight;
-}
-
-function tencentMeetingStsExpireMs(value) {
-  const number = Number(value || 0);
-  if (!Number.isFinite(number) || number <= 0) return 0;
-  return number > 10_000_000_000 ? number : number * 1000;
+  return requestTMToken();
 }
 
 export async function loadTencentMeetingStsToken() {
-  const envToken = firstEnv("TENCENT_MEETING_STS_TOKEN", "WEMEET_STS_TOKEN");
-  if (envToken) {
-    return isTencentMeetingStsTokenFresh({ value: envToken, expiresAt: Date.now() + 1000 * 60 * 30 }) ? envToken : "";
-  }
-
-  if (stsTokenCache.loaded) {
-    return isTencentMeetingStsTokenFresh(stsTokenCache) ? stsTokenCache.value : "";
-  }
-
-  stsTokenCache.loaded = true;
-  try {
-    const raw = await readFile(stsTokenPath, "utf8");
-    const parsed = parseJsonObject(raw) || {};
-    stsTokenCache.value = String(parsed.value || parsed.sts_token || "");
-    stsTokenCache.expiresAt = tencentMeetingStsExpireMs(parsed.expiresAt || parsed.expire_ts);
-    stsTokenCache.reqId = String(parsed.reqId || parsed.req_id || "");
-  } catch {
-    stsTokenCache.value = "";
-    stsTokenCache.expiresAt = 0;
-    stsTokenCache.reqId = "";
-  }
-  return isTencentMeetingStsTokenFresh(stsTokenCache) ? stsTokenCache.value : "";
+  const token = await getTMToken({ minimumValidityMs: 3 * 60 * 1000 });
+  return token?.value || "";
 }
 
 export async function saveTencentMeetingStsToken(tokenInfo = {}) {
-  logger.debug("save sts token step2: ", {message: JSON.stringify(tokenInfo)})
-  const value = String(tokenInfo.sts_token || tokenInfo.stsToken || tokenInfo.token || "").trim();
-  if (!value) return false;
-  const expiresAt = tencentMeetingStsExpireMs(tokenInfo.expire_ts || tokenInfo.expireTs || tokenInfo.expiresAt);
-  const reqId = String(tokenInfo.req_id || tokenInfo.reqId || "").trim();
-  const record = {
-    value,
-    expiresAt,
-    reqId,
-    updatedAt: new Date().toISOString(),
-  };
-  await mkdir(path.dirname(stsTokenPath), { recursive: true });
-  logger.debug("save sts token makedir success: ", {message: ''})
-  await writeFile(stsTokenPath, `${JSON.stringify(record, null, 2)}\n`, "utf8");
-  logger.debug("save sts token save success: ", {message: ''})
-  stsTokenCache.loaded = true;
-  stsTokenCache.value = value;
-  stsTokenCache.expiresAt = expiresAt;
-  stsTokenCache.reqId = reqId;
+  await setTMToken(tokenInfo);
   return true;
 }
 
@@ -279,7 +204,10 @@ export function tencentMeetingVerifiedPlaintext(request, encryptedData) {
 // 说明：处理账号、客户端身份或资料相关逻辑。
 export function isTencentMeetingStsTokenFresh(token) {
   const isFresh = Boolean(token?.value && token.expiresAt && token.expiresAt > Date.now() + 1000 * 60 * 3);
-  logger.info("[CALL] isTencentMeetingStsTokenFresh ", {message: `token: ${JSON.stringify(token).slice(0, 50)}, isFresh: ${isFresh}`})
+  // Token freshness is checked before every Tencent Meeting API request. Avoid
+  // logging here because a pending-import sweep can call it many times and the
+  // serialized token fragment may expose credentials in server logs.
+  // logger.info("[CALL] isTencentMeetingStsTokenFresh", { message: `isFresh: ${isFresh}` });
   return isFresh
 }
 
@@ -1126,6 +1054,10 @@ export function tencentMeetingSourceKey(recordFileId) {
 export function tencentMeetingApiConfigured() {
   const config = tencentMeetingApiConfig();
   return Boolean(config.secretId && config.secretKey && config.appId);
+}
+
+export function isTencentMeetingTranscriptReadyEvent(payload = {}) {
+  return String(payload?.event || "").trim() === "smart.transcripts";
 }
 
 export function tencentMeetingQuery(pathname, params = {}) {

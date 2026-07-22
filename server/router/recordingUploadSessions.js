@@ -121,6 +121,17 @@ router.delete("/:sessionId", async (request, response, next) => {
   }
 });
 
+/**
+ *  根据 sessionId 找到临时上传会话。
+    检查所有音频分片是否已经上传完整。
+    将这些分片按顺序合并并转换为最终 MP3。
+    生成新的 recording.id。
+    把 recordingId 写入上传会话的 meta.json，方便异常中断时识别和清理临时分片。
+    使用 Prisma 创建 recordings 主记录。
+    删除临时上传会话和分片目录。
+    根据配置把新录音加入转写队列。
+    返回创建完成的录音信息。
+ */
 router.post("/:sessionId/finalize", async (request, response, next) => {
   const { queueTranscriptionJob, verifiedStoredRecording, publicRecording } = dependencies;
   try {
@@ -150,6 +161,11 @@ router.post("/:sessionId/finalize", async (request, response, next) => {
     const fileName = `${id}.mp3`;
     const storagePath = path.join(audioDir, fileName);
     const now = new Date().toISOString();
+    await writeFile(
+      path.join(dir, "meta.json"),
+      `${JSON.stringify({ ...meta, recordingId: id, updatedAt: now }, null, 2)}\n`,
+      "utf8",
+    );
     await mergeAudioFilesToMp3(partFiles, storagePath);
     const { storedFile, durationMs } = await verifiedStoredRecording(storagePath, meta.durationMs || request.body?.durationMs);
 

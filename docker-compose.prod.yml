@@ -13,8 +13,11 @@ services:
       HTTPS_PORT: 0
       MYSQL_HOST: mysql
       MYSQL_PORT: 3306
+      REDIS_URL: redis://redis:6379
     depends_on:
       mysql:
+        condition: service_healthy
+      redis:
         condition: service_healthy
     volumes:
       - app-logs:/app/logs
@@ -60,7 +63,21 @@ services:
       start_period: 20s
     restart: unless-stopped
 
+  redis:
+    image: redis:7.4-alpine
+    volumes:
+      - redis-data:/data
+    command: ["redis-server", "--appendonly", "yes"]
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 5s
+    restart: unless-stopped
+
 volumes:
   mysql-data:
   app-logs:
   app-storage:
+  redis-data:

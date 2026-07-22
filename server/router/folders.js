@@ -1,6 +1,9 @@
 import express from "express";
 import { canDeleteAllRecordings, canReadRecording } from "../utils/common.mjs";
 import { requestClientIdBetter } from "../utils/recordings.js";
+import { recordingFromPrisma } from "../repositories/recordings.mjs";
+
+const prisma = await import("../plugins/prisma.cjs").then((module) => module.default || module);
 
 const router = express.Router();
 
@@ -11,19 +14,32 @@ export function configure(deps) {
 }
 
 router.get("/", async (request, response) => {
-  const { loadDb, canReadFolder, publicFolder } = dependencies;
-  const db = await loadDb();
+  const { canReadFolder, publicFolder } = dependencies;
   const clientId = requestClientIdBetter(request);
   const canDeleteAll = canDeleteAllRecordings();
-  const readableRecordings = canDeleteAll ? db.recordings : db.recordings.filter((recording) => canReadRecording(recording, clientId));
-  const folders = [...db.folders]
+
+  const [folderRows, recordingRows] = await prisma.$transaction([
+    prisma.recordingFolder.findMany({ orderBy: { createdAt: "asc" } }),
+    prisma.recording.findMany(),
+  ]);
+  const recordings = recordingRows.map(recordingFromPrisma);
+  const readableRecordings = canDeleteAll
+    ? recordings
+    : recordings.filter((recording) => canReadRecording(recording, clientId));
+  const folders = folderRows
+    .map((folder) => ({
+      id: folder.id,
+      name: folder.name,
+      ownerClientId: folder.ownerClientId || "",
+      createdAt: folder.createdAt,
+      updatedAt: folder.updatedAt,
+    }))
     .filter((folder) => canReadFolder(folder, clientId))
-    .sort((a, b) => new Date(a.createdAt) - new Date(b.createdAt))
     .map((folder) => publicFolder(folder, readableRecordings));
   const activeRecordings = readableRecordings.filter((recording) => !recording.deletedAt);
   const uncategorizedCount = activeRecordings.filter((recording) => !recording.folderId).length;
   const favoriteCount = activeRecordings.filter((recording) => recording.favorite).length;
-  const trashCount = db.recordings.filter((recording) => recording.deletedAt).length;
+  const trashCount = recordings.filter((recording) => recording.deletedAt).length;
 
   response.json({ folders, uncategorizedCount, favoriteCount, trashCount, totalCount: activeRecordings.length });
 });

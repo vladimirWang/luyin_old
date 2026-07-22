@@ -13,10 +13,13 @@ services:
       HTTPS_PORT: 0
       MYSQL_HOST: mysql
       MYSQL_PORT: 3306
+      REDIS_URL: redis://redis:6379
       FFMPEG_PATH: /usr/bin/ffmpeg
       FFPROBE_PATH: /usr/bin/ffprobe
     depends_on:
       mysql:
+        condition: service_healthy
+      redis:
         condition: service_healthy
     volumes:
       - test-app-logs:/app/logs
@@ -65,8 +68,23 @@ services:
       retries: 10
       start_period: 20s
     restart: unless-stopped
+  redis:
+    image: redis:7.4-alpine
+    ports:
+      - "${REDIS_HOST_PORT:-6379}:6379"
+    volumes:
+      - redis-data:/data
+    command: ["redis-server", "--appendonly", "yes"]
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 5s
+    restart: unless-stopped
 
 volumes:
+  mysql-data:
+  redis-data:
   test-app-logs:
   test-app-storage:
-  mysql-data:
