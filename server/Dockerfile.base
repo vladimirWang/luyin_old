@@ -1,6 +1,11 @@
 FROM node:22-bookworm
 
-RUN sed -i 's|http://deb.debian.org|https://deb.debian.org|g' /etc/apt/sources.list.d/debian.sources \
+ARG DEBIAN_MIRROR=https://mirrors.ustc.edu.cn/debian
+ARG DEBIAN_SECURITY_MIRROR=https://mirrors.ustc.edu.cn/debian-security
+
+RUN printf 'Types: deb\nURIs: %s\nSuites: bookworm bookworm-updates\nComponents: main\nSigned-By: /usr/share/keyrings/debian-archive-keyring.gpg\n\nTypes: deb\nURIs: %s\nSuites: bookworm-security\nComponents: main\nSigned-By: /usr/share/keyrings/debian-archive-keyring.gpg\n' \
+    "${DEBIAN_MIRROR}" "${DEBIAN_SECURITY_MIRROR}" \
+    > /etc/apt/sources.list.d/debian.sources \
   && apt-get -o Acquire::Retries=3 update \
   && apt-get -o Acquire::Retries=3 install -y --no-install-recommends ffmpeg \
   && rm -rf /var/lib/apt/lists/*
