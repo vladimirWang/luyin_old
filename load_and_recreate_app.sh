@@ -51,6 +51,20 @@ if ! docker image inspect "${IMAGE_NAME}" >/dev/null 2>&1; then
   exit 1
 fi
 
+image_os="$(docker image inspect "${IMAGE_NAME}" --format '{{.Os}}')"
+image_arch="$(docker image inspect "${IMAGE_NAME}" --format '{{.Architecture}}')"
+server_os="$(docker version --format '{{.Server.Os}}')"
+server_arch="$(docker version --format '{{.Server.Arch}}')"
+if [[ "${image_os}/${image_arch}" != "${server_os}/${server_arch}" ]]; then
+  echo "镜像平台与目标 Docker 服务器不匹配：" >&2
+  echo "  镜像：${image_os}/${image_arch}" >&2
+  echo "  服务器：${server_os}/${server_arch}" >&2
+  echo "已停止部署，未重建 app 容器。" >&2
+  exit 1
+fi
+
+echo "镜像平台校验通过：${image_os}/${image_arch}"
+
 compose=(
   docker compose
   --env-file "${ENV_FILE}"
