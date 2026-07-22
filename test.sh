@@ -1,1 +1,1 @@
-curl http://locahost:8080
+curl http://localhost:8080
