@@ -1,8 +1,20 @@
+x-app-base-image: &app-base-image ${APP_BASE_IMAGE:-luyin-old-app-base:node22-bookworm-ffmpeg-v1}
+
 services:
+  app-base:
+    profiles: ["build-base"]
+    image: *app-base-image
+    build:
+      context: ./server
+      dockerfile: Dockerfile.base
+
   app:
+    image: ${APP_IMAGE:-luyin_old-app:latest}
     build:
       context: ./server
       dockerfile: Dockerfile
+      args:
+        APP_BASE_IMAGE: *app-base-image
     expose:
       - "8787"
     env_file:

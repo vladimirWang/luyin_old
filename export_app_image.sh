@@ -3,9 +3,11 @@
 set -Eeuo pipefail
 
 IMAGE_NAME="${IMAGE_NAME:-luyin_old-app:latest}"
+BASE_IMAGE_NAME="${BASE_IMAGE_NAME:-luyin-old-app-base:node22-bookworm-ffmpeg-v1}"
 TARGET_PLATFORM="${TARGET_PLATFORM:-linux/amd64}"
 BUILD_CONTEXT="${BUILD_CONTEXT:-$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)/server}"
 DOCKERFILE="${DOCKERFILE:-${BUILD_CONTEXT}/Dockerfile}"
+BASE_DOCKERFILE="${BASE_DOCKERFILE:-${BUILD_CONTEXT}/Dockerfile.base}"
 BUILD_IMAGE="${BUILD_IMAGE:-true}"
 REMOTE_TARGET="${REMOTE_TARGET:-root@172.16.200.9:~/luyin_old}"
 SCP_CONTROL_PATH="${SCP_CONTROL_PATH:-}"
@@ -35,11 +37,24 @@ if [[ "${BUILD_IMAGE}" == "true" ]]; then
     echo "Dockerfile 不存在：${DOCKERFILE}" >&2
     exit 1
   fi
+  if [[ ! -f "${BASE_DOCKERFILE}" ]]; then
+    echo "基础镜像 Dockerfile 不存在：${BASE_DOCKERFILE}" >&2
+    exit 1
+  fi
 
-  echo "正在为目标服务器构建 ${TARGET_PLATFORM} 镜像：${IMAGE_NAME}"
+  echo "正在为目标服务器构建 ${TARGET_PLATFORM} 基础镜像：${BASE_IMAGE_NAME}"
+  docker buildx build \
+    --platform "${TARGET_PLATFORM}" \
+    --file "${BASE_DOCKERFILE}" \
+    --tag "${BASE_IMAGE_NAME}" \
+    --load \
+    "${BUILD_CONTEXT}"
+
+  echo "正在基于 ${BASE_IMAGE_NAME} 构建业务镜像：${IMAGE_NAME}"
   docker buildx build \
     --platform "${TARGET_PLATFORM}" \
     --file "${DOCKERFILE}" \
+    --build-arg "APP_BASE_IMAGE=${BASE_IMAGE_NAME}" \
     --tag "${IMAGE_NAME}" \
     --load \
     "${BUILD_CONTEXT}"

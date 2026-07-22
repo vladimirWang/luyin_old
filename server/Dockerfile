@@ -1,16 +1,11 @@
-FROM node:22-bookworm
+ARG APP_BASE_IMAGE=luyin-old-app-base:node22-bookworm-ffmpeg-v1
+FROM ${APP_BASE_IMAGE}
 
 WORKDIR /app
 
-RUN apt-get update \
-  && apt-get install -y --no-install-recommends ffmpeg \
-  && rm -rf /var/lib/apt/lists/*
-
 COPY package.json pnpm-lock.yaml .npmrc ./server/
 ARG INSTALL_DEV=false
-RUN corepack enable \
-  && corepack prepare pnpm@9.15.9 --activate \
-  && if [ "$INSTALL_DEV" = "true" ]; then \
+RUN if [ "$INSTALL_DEV" = "true" ]; then \
        pnpm --dir server install --frozen-lockfile; \
      else \
        pnpm --dir server install --prod --frozen-lockfile; \

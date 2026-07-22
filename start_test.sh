@@ -2,14 +2,21 @@
 set -euo pipefail
 
 COMPOSE=(docker compose --env-file .env.test -f docker-compose.test.yml)
+BASE_IMAGE="${APP_BASE_IMAGE:-luyin-old-app-base:node22-bookworm-ffmpeg-v1}"
 
 build_service() {
   local service="$1"
+  local profile="${2:-}"
   local attempt
+  local -a build_command=("${COMPOSE[@]}")
+
+  if [ -n "$profile" ]; then
+    build_command+=(--profile "$profile")
+  fi
 
   for attempt in 1 2; do
     echo "构建 ${service}（第 ${attempt}/2 次）..."
-    if "${COMPOSE[@]}" --progress plain build "$service"; then
+    if "${build_command[@]}" --progress plain build "$service"; then
       return 0
     fi
 
@@ -23,8 +30,36 @@ build_service() {
   return 1
 }
 
+ensure_base_image() {
+  local image_platform
+  local server_platform
+
+  if ! docker image inspect "$BASE_IMAGE" >/dev/null 2>&1; then
+    echo "未找到基础镜像 ${BASE_IMAGE}，将在当前服务器构建一次。"
+    echo "建议预先在构建机生成 linux/amd64 基础镜像并 docker load，以避免服务器下载 ffmpeg。"
+    build_service app-base build-base
+  else
+    echo "复用已加载的基础镜像：${BASE_IMAGE}"
+  fi
+
+  image_platform=$(docker image inspect "$BASE_IMAGE" --format '{{.Os}}/{{.Architecture}}')
+  server_platform=$(docker version --format '{{.Server.Os}}/{{.Server.Arch}}')
+  if [ "$image_platform" != "$server_platform" ]; then
+    echo "基础镜像平台不匹配：镜像=${image_platform}，服务器=${server_platform}" >&2
+    echo "请重新加载为 ${server_platform} 构建的 ${BASE_IMAGE}。" >&2
+    return 1
+  fi
+
+  if ! docker run --rm "$BASE_IMAGE" ffmpeg -version >/dev/null 2>&1; then
+    echo "基础镜像中无法执行 ffmpeg：${BASE_IMAGE}" >&2
+    return 1
+  fi
+
+  echo "基础镜像检查通过：${BASE_IMAGE}（${image_platform}）"
+}
+
 echo "启动阿里云测试环境完整服务栈..."
-echo "1/4 启动并等待 MySQL 健康..."
+echo "1/5 启动并等待 MySQL 健康..."
 if ! "${COMPOSE[@]}" up -d --wait --wait-timeout 180 mysql; then
   echo "MySQL 启动失败，输出诊断信息："
   "${COMPOSE[@]}" ps mysql || true
@@ -32,14 +67,20 @@ if ! "${COMPOSE[@]}" up -d --wait --wait-timeout 180 mysql; then
   exit 1
 fi
 
-echo "2/4 构建后端应用镜像..."
+echo "2/5 检查 Node + ffmpeg 基础镜像..."
+if ! ensure_base_image; then
+  echo "基础镜像准备失败。" >&2
+  exit 1
+fi
+
+echo "3/5 构建后端业务镜像..."
 if ! build_service app; then
   echo "镜像构建失败，输出当前 Docker Compose 状态："
   "${COMPOSE[@]}" ps || true
   exit 1
 fi
 
-echo "3/4 启动并等待后端服务健康..."
+echo "4/5 启动并等待后端服务健康..."
 if ! "${COMPOSE[@]}" up -d --no-build --wait --wait-timeout 180 app; then
   echo "后端服务启动失败，输出诊断信息："
   "${COMPOSE[@]}" ps || true
@@ -47,7 +88,7 @@ if ! "${COMPOSE[@]}" up -d --no-build --wait --wait-timeout 180 app; then
   exit 1
 fi
 
-echo "4/4 检查证书并启动 Nginx..."
+echo "5/5 检查证书并启动 Nginx..."
 if [ ! -r client/dist/index.html ]; then
   echo "Nginx 启动失败：缺少 client/dist/index.html，请先完成前端构建或上传 dist 目录。"
   exit 1
