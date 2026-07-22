@@ -163,11 +163,19 @@ router.get("/", async (request, response, next) => {
       include: { segments: { orderBy: { startMs: "asc" } } },
       orderBy: { createdAt: "desc" },
     });
+    // for (let i of rows) {
+    //   if (i.id === "429d3888-47b1-462e-84aa-4570f6a64162") {
+    //     logger.debug("排查转写数据: ", {message: `isArray: ${Array.isArray(i.segments)}`})
+    //     if (Array.isArray(i.segments)) {
+    //       logger.debug("排查转写数据: ", {message: `length: ${i.segments.length}`})
+    //     }
+    //   }
+    // }
     const recordings = rows
       .map((row) => ({
         // recordings: row
         recording: recordingFromPrisma(row),
-        // segments: row.segments.map(transcriptSegmentFromPrisma),
+        segments: row.segments.map(transcriptSegmentFromPrisma),
       }))
       // .filter(({ recording }) => canDeleteAll || canReadRecording(recording, clientId))
       .map(({ recording, segments }) =>
@@ -187,7 +195,7 @@ router.get("/", async (request, response, next) => {
 });
 
 router.post("/", upload.single("audio"), async (request, response, next) => {
-  const { queueTranscriptionJob, verifiedStoredRecording = fileInfo, publicRecording } = dependencies;
+  const { queueTranscriptionJob, verifiedStoredRecording, publicRecording } = dependencies;
   try {
     if (!request.file) {
       response.status(400).json({ error: "缺少录音文件" });
@@ -204,53 +212,73 @@ router.post("/", upload.single("audio"), async (request, response, next) => {
     const fileName = `${id}.mp3`;
     const storagePath = path.join(audioDir, fileName);
     const now = new Date().toISOString();
-    const { userId, ownerClientId, ownerName } = trustedOwner;
+    // // ----------用本地假音频模拟上传文件 start-----------
+    // const trustedOwner = {
+    //   ownerClientId: 'user1231',
+    //   userId: "1231",
+    //   ownerName: "user1231 ownerName"
+    // }
+    // const mockMp3Path = path.join(projectRoot, "mock/audio/e6676bf0-0db2-4bef-9e5a-3e52719e4c43.mp3");
+    // const { copyFile } = await import("node:fs/promises");
+    // await copyFile(mockMp3Path, storagePath);
+    // const mockOwner = { userId: "mock-user-001", ownerClientId: "mock-client-001", ownerName: "Mock测试用户" };
+    // const { size: fileSize } = statSync(mockMp3Path);
+    // const { probeAudioDurationMs } = await import("../media.mjs");
+    // const durationMs = await probeAudioDurationMs(storagePath) || 0;
+    // // ----------用本地假音频模拟上传文件 end-----------
+
     await convertAudioFileToMp3(request.file.path, storagePath);
     await removeFileIfExists(request.file.path);
     const { storedFile, durationMs } = await verifiedStoredRecording(storagePath, request.body.durationMs);
-    const recording = await updateDb((db) => {
-      db.counters.recordingSeq += 1;
-      const seq = db.counters.recordingSeq;
-      const item = {
+    const fileSize = storedFile.fileSize
+    const lastRecording = await prisma.recording.findFirst({
+      orderBy: {
+        seq: 'desc'
+      }
+    })
+    const seq = lastRecording ? lastRecording.seq + 1 : 1
+
+    logger.info("recording.uploaded lastRecording", { message: `lastRecording.id: ${lastRecording.id}, seq: ${seq}` });
+    logger.info("recording.uploaded mock", { message: `recordingId: ${id}, ownerClientId: ${mockOwner.ownerClientId}, ownerName: ${mockOwner.ownerName}, durationMs: ${durationMs}, fileSize: ${fileSize}` });
+    const insertResult = await prisma.recording.create({
+      data: {
         id,
         seq,
         name: request.body.name || `录音 ${String(seq).padStart(3, "0")}`,
         createdAt: now,
         updatedAt: now,
-        durationMs,
+        durationMs: BigInt(durationMs),
         mimeType: "audio/mpeg",
-        size: storedFile.size,
+        fileSize: BigInt(fileSize),
         fileName,
-        storagePath,
+        storageProvider: "local",
+        storageKey: storagePath,
         transcriptPath: "",
         favorite: false,
-        userId,
-        ownerClientId,
-        ownerName,
+        userId: trustedOwner.userId,
+        ownerClientId: trustedOwner.ownerClientId,
+        ownerName: trustedOwner.ownerName,
         shared: false,
-        sharedAt: "",
+        sharedAt: null,
         speakerName: request.body.speakerName || "说话人 1",
-        speakerMap: {},
+        speakerMapJson: JSON.stringify({}),
         tag: request.body.tag || "",
         deletedAt: null,
         transcriptProvider: getTranscriptionMode(),
         transcriptSource: "",
-        transcribedAt: "",
+        transcribedAt: null,
         folderId: request.body.folderId || null,
         status: "uploaded",
         source: "wecom-h5",
         userAgent: request.get("user-agent") || "",
-      };
-
-      db.recordings.push(item);
-      return item;
+      }
     });
-
+    const recording = recordingFromPrisma(insertResult);
+    logger.info("recording insert success", { message: `id: ${id}, durationMs: ${recording.durationMs}, size: ${recording.size}` });
     const queued = await queueTranscriptionJob(id, recording);
+    logger.debug("queueTranscriptionJob success", { message: `queued: ${queued}` });
     const responseRecording = queued ? { ...recording, status: "transcribing", errorMessage: "" } : recording;
-
-    logger.info("recording.uploaded", {message: `recordingId: ${id}, ownerClientId: ${ownerClientId}, ownerName: ${ownerName}, queued: ${queued}, durationMs: ${durationMs}, fileName: ${fileName}`, recordingId: id, ownerClientId, ownerName, queued, durationMs, fileName});
-    response.status(201).json({ recording: publicRecording(responseRecording, [], ownerClientId, ownerName) });
+    response.status(201).json({ recording: publicRecording(responseRecording, [], mockOwner.ownerClientId, mockOwner.ownerName) });
   } catch (error) {
     next(error);
   }

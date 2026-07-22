@@ -3746,37 +3746,61 @@ async function runMeetingOutlineJob(recordingId, segments = [], options = {}, jo
 }
 
 async function runTranscriptionJob(recordingId, jobVersion = recordingJobVersion(recordingId)) {
-  if (isRecordingJobCancelled(recordingId, jobVersion)) return;
+  logger.info("[call] transcription.job step 0", {message: ""});
+  if (isRecordingJobCancelled(recordingId, jobVersion)) {
+    logger.info("[call] transcription.job step 1", {message: ""});
+    return
+  }
   const recordingRow = await prisma.recording.findFirst({
     where: {
       id: recordingId,
       deletedAt: null,
     },
   })
+  logger.info("[call] transcription.job step 2", {message: ""});
   const recording = recordingRow ? recordingFromPrisma(recordingRow) : null;
-  logger.info("transcription.job.start", {message: `recordingId: ${recordingId}, source: ${recording?.source || "unknown"}`, recordingId, source: recording?.source || "unknown"});
-  if (!recording) return;
+  logger.info("[call] transcription.job step 3", {message: `recordingId: ${recordingId}, source: ${recording?.source || "unknown"}`});
+  if (!recording) {
+    logger.info("[call] transcription.job step 4", {message: "不存在recording,中断任务"});
+    return
+  }
   if (!isLocalApiTranscriptionRecording(recording)) {
+    logger.info("[call] transcription.job step 5", {message: ""});
     if (isTencentMeetingRecording(recording)) {
+      logger.info("[call] transcription.job step 6", {message: ""});
       logger.info("[Transcription] Tencent Meeting transcript waits for smart.transcripts", { message: recording.id });
     } else {
+      logger.info("[call] transcription.job step 7", {message: ""});
       console.warn("[Transcription] skipped API job for unsupported source:", recording.source || "unknown");
     }
     return;
   }
-  if (!isRecordingApiTranscriptionEnabled()) return;
+  if (!isRecordingApiTranscriptionEnabled()) {
+    logger.info("[call] transcription.job step 8", {message: ""});
+    return;
+  }
 
   try {
+    logger.info("[call] transcription.job step 9", {message: ""});
     const segments = await transcribeRecording({
       ...recording,
       asrAudioUrl: createAsrAudioUrl(recording),
     });
-    if (isRecordingJobCancelled(recordingId, jobVersion)) return;
+    logger.info("[call] transcription.job step 10", {message: ""});
+    if (isRecordingJobCancelled(recordingId, jobVersion)) {
+      logger.info("[call] transcription.job step 11", {message: ""});
+      return;
+    }
     const translation = await translateTranscriptToChinese(recording, segments);
-    if (isRecordingJobCancelled(recordingId, jobVersion)) return;
+    logger.info("[call] transcription.job step 12", {message: ""});
+    if (isRecordingJobCancelled(recordingId, jobVersion)) {
+      logger.info("[call] transcription.job step 13", {message: ""});
+      return;
+    }
     const autoTag = "";
     const { transcriptPath, transcriptRawPath, transcriptCorrectedPath, transcriptionMetaPath } = await transcriptStoragePaths(recordingId, recording);
     await writeTranscriptTextFile(recording, segments, transcriptPath);
+    logger.info("[call] transcription.job step 14", {message: ""});
     if (segments.rawText) await writeFile(transcriptRawPath, `${segments.rawText.trim()}\n`, "utf8");
     if (segments.correctedText) await writeFile(transcriptCorrectedPath, `${segments.correctedText.trim()}\n`, "utf8");
     if (segments.transcriptionMeta) {
@@ -3841,9 +3865,14 @@ async function runTranscriptionJob(recordingId, jobVersion = recordingJobVersion
     await markDailyBriefDirtyForRecording(recordingId);
     logger.info("transcription.job.success", {message: `recordingId: ${recordingId}, segmentCount: ${segments.length}, transcriptSource: ${recording?.source || "unknown"}`, recordingId, segmentCount: segments.length, transcriptSource: recording?.source || "unknown"});
   } catch (error) {
-    if (isRecordingJobCancelled(recordingId, jobVersion)) return;
-    logger.error("transcription.job.failed", {message: `recordingId: ${recordingId}, error: ${error instanceof Error ? error.message : error}`, recordingId, error: error instanceof Error ? { message: error.message, stack: error.stack } : error});
+    logger.error("transcription.job.failed step 0", {message: `recordingId: ${recordingId}, error: ${error instanceof Error ? error.message : error}`});
+    if (isRecordingJobCancelled(recordingId, jobVersion)) {
+      logger.error("transcription.job.failed step 1", {message: `recordingId: ${recordingId}, error: ${error instanceof Error ? error.message : error}`});
+      return;
+    }
     const existingSegmentCount = await prisma.transcriptSegment.count({ where: { recordingId } });
+    logger.error("transcription.job.failed step 2", {message: `recordingId: ${recordingId}, error: ${error instanceof Error ? error.message : error}`});
+
     await prisma.recording.updateMany({
       where: { id: recordingId, deletedAt: null },
       data: {
@@ -3852,20 +3881,31 @@ async function runTranscriptionJob(recordingId, jobVersion = recordingJobVersion
         transcriptionStartedAt: null,
       },
     });
+    logger.error("transcription.job.failed step 3", {message: `recordingId: ${recordingId}, error: ${error instanceof Error ? error.message : error}`});
   }
 }
 
 async function queueTranscriptionJob(recordingId, recordingForSource = null) {
-  logger.debug(`call queueTranscriptionJob: recordingId: ${recordingId}, recordingForSource: ${recordingForSource}`)
+  logger.debug(`call queueTranscriptionJob step 0: recordingId: ${recordingId}, recordingForSource: ${recordingForSource}`)
   const id = String(recordingId || "").trim();
-  if (!id || isRecordingJobCancelled(id)) return false;
+  if (!id || isRecordingJobCancelled(id)) {
+    logger.debug(`call queueTranscriptionJob step 1: recordingId: ${recordingId}, recordingForSource: ${recordingForSource}`)
+    return false;
+  }
 
   // 如果传入了 recordingForSource ，但该录音的来源 不支持本地 API 转写 ，则直接返回 false ， 不加入转写队列
   if (recordingForSource && !isLocalApiTranscriptionRecording(recordingForSource)) {
+    logger.debug(`call queueTranscriptionJob step 2: recordingId: ${recordingId}, recordingForSource: ${recordingForSource}`)
     return false;
   }
-  if (!isRecordingApiTranscriptionEnabled()) return false;
-  if (transcriptionJobs.has(id)) return false;
+  if (!isRecordingApiTranscriptionEnabled()) {
+    logger.debug(`call queueTranscriptionJob step 3: recordingId: ${recordingId}, recordingForSource: ${recordingForSource}`)
+    return false;
+  }
+  if (transcriptionJobs.has(id)) {
+    logger.debug(`call queueTranscriptionJob step 4: recordingId: ${recordingId}, recordingForSource: ${recordingForSource}`)
+    return false;
+  }
   const jobVersion = recordingJobVersion(id);
 
   transcriptionJobs.add(id);
@@ -3887,6 +3927,7 @@ async function queueTranscriptionJob(recordingId, recordingForSource = null) {
   }
   if (!claimed.count) {
     transcriptionJobs.delete(id);
+    logger.debug(`call queueTranscriptionJob step 5: recordingId: ${recordingId}, recordingForSource: ${recordingForSource}`)
     return false;
   }
 
@@ -3894,11 +3935,12 @@ async function queueTranscriptionJob(recordingId, recordingForSource = null) {
     .catch(() => {})
     .then(() => runTranscriptionJob(id, jobVersion))
     .catch((error) => {
-      console.warn("[Transcription] queued job failed:", error instanceof Error ? error.message : error);
+      logger.warn("[Transcription] call queueTranscriptionJob failed:", {message: error instanceof Error ? error.message : error});
     })
     .finally(() => {
       if (recordingJobVersion(id) === jobVersion) transcriptionJobs.delete(id);
     });
+  logger.info("[Transcription] call queueTranscriptionJob success:");
 
   return true;
 }
@@ -4040,7 +4082,7 @@ app.get("/", (req, res) => {
 // app.use("/static", express.static(storagePath));
 
 app.use((error, request, response, _next) => {
-  logger.error("server.unhandled_error", {message: `method: ${request?.method}, path: ${request?.path}, originalUrl: ${request?.originalUrl}`});
+  logger.error("server.unhandled_error", {message: `method: ${request?.method}, path: ${request?.path}, originalUrl: ${request?.originalUrl}, error: ${error.message}`});
   if (response.headersSent) return;
   const isPayloadTooLarge =
     error?.type === "entity.too.large" ||
