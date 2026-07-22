@@ -16,13 +16,11 @@ import {
   LogOut,
   UserRound,
 } from "lucide-react";
-import { uiText, api } from "../../utils/index.js";
+import { uiText } from "../../utils/index.js";
 import { IconButton } from "../../components/IconButton.jsx";
 import { UploadingRecordCard } from "./UploadingRecordCard.jsx";
 import { RecordCard } from "./RecordCard.jsx";
 import { RecordPreviewOverlay } from "./RecordPreviewOverlay.jsx";
-import {isUploadableMediaFile, getAudioFileDuration} from '../../utils/audio.js'
-import {showToast} from '../../utils/index.js'
 import { isInWeCom } from "../../utils/wecom.js";
 
 export function RecordsView({
@@ -32,18 +30,12 @@ export function RecordsView({
   recordsTitle,
   selectedFolderId,
   loading,
-  deletingRecordIds = [],
   uploadBusy,
   onOpenSettings,
   user,
   onLogout,
   onStartRecording,
-  createUploadCard,
-  updateUploadCard,
-  failUploadCard,
-  // uploadRecording,
-  finishUploadCard,
-  uploadRecordingSegments,
+  onUploadFiles,
   onCreateFolder,
   onRenameFolder,
   onDeleteFolder,
@@ -113,51 +105,6 @@ export function RecordsView({
       await onCreateFolder(name);
     } finally {
       setCreatingBusy(false);
-    }
-  }
-
-  async function uploadRecording(blob, durationMs, options = {}) {
-    const loadingMsg = options.uploadMessage || "正在上传录音并准备转写";
-    const uploadId = options.uploadId || (options.showUploadCard === false || options.silent
-      ? ""
-      : createUploadCard({
-          name: options.name || "新录音",
-          durationMs,
-          message: loadingMsg,
-        }));
-
-    updateUploadCard(uploadId, {
-      name: options.name || "新录音",
-      durationMs,
-      message: loadingMsg,
-    });
-
-    const formData = new FormData();
-    formData.append("audio", blob, options.fileName || `recording-${Date.now()}.webm`);
-    formData.append("durationMs", String(durationMs));
-    formData.append("mimeType", blob.type || "audio/webm");
-    if (options.name) formData.append("name", options.name);
-    if (options.folderId) formData.append("folderId", options.folderId);
-
-    try {
-      const payload = await api("/api/recordings", {
-        method: "POST",
-        body: formData,
-      });
-
-      finishUploadCard(uploadId, payload.recording);
-      if (options.toastMessage) {
-        showToast(options.toastMessage);
-      } else if (!options.silent) {
-        showToast("录音已上传服务器，可在记录里查看");
-      }
-      if (onRefresh) {
-        window.setTimeout(onRefresh, 2600);
-      }
-      return payload.recording;
-    } catch (error) {
-      failUploadCard(uploadId);
-      throw error;
     }
   }
 
@@ -284,62 +231,7 @@ export function RecordsView({
   async function handleUploadFile(event) {
     const files = Array.from(event.target.files || []);
     event.target.value = "";
-    if (files.length === 0) return;
-
-    const mediaFiles = files.filter(isUploadableMediaFile);
-    if (mediaFiles.length === 0) {
-      showToast("请选择音频或视频文件");
-      return;
-    }
-    if (mediaFiles.length !== files.length) {
-      showToast("已跳过不支持的文件");
-    } else if (mediaFiles.length > 1) {
-      showToast(`正在上传 ${mediaFiles.length} 个录音文件`);
-    }
-
-    const folderId =
-      selectedFolderId !== "all" &&
-      selectedFolderId !== "uncategorized" &&
-      selectedFolderId !== "favorites" &&
-      selectedFolderId !== "trash"
-        ? selectedFolderId
-        : undefined;
-
-    const firstDisplayName = mediaFiles[0]?.name?.replace(/\.[^.]+$/, "") || "新录音";
-    const uploadId = createUploadCard({
-      name: mediaFiles.length > 1 ? "上传录音" : firstDisplayName,
-      durationMs: 0,
-      message: "正在读取文件，准备上传",
-    });
-
-    try {
-      if (mediaFiles.length === 1) {
-        const file = mediaFiles[0];
-        const durationMs = await getAudioFileDuration(file);
-        const rawName = file.name.replace(/\.[^.]+$/, "");
-        await uploadRecording(file, durationMs, {
-          name: rawName || undefined,
-          fileName: file.name,
-          folderId,
-          uploadId,
-          toastMessage: "录音已上传并开始转写",
-        });
-        return;
-      }
-
-      const durations = await Promise.all(mediaFiles.map((file) => getAudioFileDuration(file)));
-      const durationMs = durations.reduce((total, value) => total + Math.max(0, value || 0), 0);
-      await uploadRecordingSegments(mediaFiles, durationMs, {
-        name: "上传录音",
-        folderId,
-        uploadId,
-        toastMessage: `${mediaFiles.length} 个录音文件已上传并开始转写`,
-      });
-    } catch (error) {
-      console.error("call handleUploadFile failed: ", error.message)
-      failUploadCard(uploadId);
-      showToast(`调用 handleUploadFile failed: ${error.message}`, 4000);
-    }
+    await onUploadFiles?.(files);
   }
 
   return (
@@ -575,7 +467,6 @@ export function RecordsView({
                   folders={folders}
                   isTrashView={selectedFolderId === "trash"}
                   isExpanded={expandedRecordingId === recording.id}
-                  isDeleting={deletingRecordIds.includes(recording.id)}
                   bulkDeleteMode={bulkDeleteMode}
                   bulkDeleteSelected={bulkDeleteSelectedSet.has(recording.id)}
                   onBulkDeleteToggle={toggleBulkDeleteSelection}

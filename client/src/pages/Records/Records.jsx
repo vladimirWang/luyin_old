@@ -31,9 +31,6 @@ import {
 } from "lucide-react";
 import {RecordsView} from './RecordsView.jsx'
 import {IconButton} from '../../components/IconButton.jsx'
-import { RecordCard } from './RecordCard.jsx'
-import { UploadingRecordCard } from './UploadingRecordCard.jsx'
-import { RecordPreviewOverlay } from './RecordPreviewOverlay.jsx'
 import {
   formatDuration,
   formatShortDate,
@@ -102,6 +99,7 @@ import {
   fetchWithClient
 } from '../../utils/index.js'
 import {loadImageSource, compressAvatarImage} from '../../utils/image.js'
+import {isUploadableMediaFile, getAudioFileDuration} from '../../utils/audio.js'
 import { isInWeCom } from '../../utils/wecom.js'
 import {useUploadManager} from '../../hooks/useUploadManager.js'
 import { useWecomAuthStore } from '../../stores/useWecomAuthStore.js'
@@ -253,7 +251,6 @@ export default function Records() {
   const [loading, setLoading] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [shareSheet, setShareSheet] = useState(null);
-  const [deletingRecordIds, setDeletingRecordIds] = useState([]);
   const {
     uploadingRecords,
     uploadBusy,
@@ -280,6 +277,112 @@ export default function Records() {
     if (selectedFolderId === "trash") return recordings;
     return [...uploadingRecords, ...recordings];
   }, [recordings, selectedFolderId, uploadingRecords]);
+
+  async function uploadRecording(blob, durationMs, options = {}) {
+    const loadingMsg = options.uploadMessage || "正在上传录音并准备转写";
+    const uploadId = options.uploadId || (options.showUploadCard === false || options.silent
+      ? ""
+      : createUploadCard({
+          name: options.name || "新录音",
+          durationMs,
+          message: loadingMsg,
+        }));
+
+    updateUploadCard(uploadId, {
+      name: options.name || "新录音",
+      durationMs,
+      message: loadingMsg,
+    });
+
+    const formData = new FormData();
+    formData.append("audio", blob, options.fileName || `recording-${Date.now()}.webm`);
+    formData.append("durationMs", String(durationMs));
+    formData.append("mimeType", blob.type || "audio/webm");
+    if (options.name) formData.append("name", options.name);
+    if (options.folderId) formData.append("folderId", options.folderId);
+
+    try {
+      const payload = await api("/api/recordings", {
+        method: "POST",
+        body: formData,
+      });
+
+      finishUploadCard(uploadId, payload.recording);
+      if (options.toastMessage) {
+        showToast(options.toastMessage);
+      } else if (!options.silent) {
+        showToast("录音已上传服务器，可在记录里查看");
+      }
+      window.setTimeout(() => {
+        refreshRecordings("", selectedFolderId).catch(() => {});
+        refreshFolders().catch(() => {});
+      }, 2600);
+      return payload.recording;
+    } catch (error) {
+      failUploadCard(uploadId);
+      throw error;
+    }
+  }
+
+  async function uploadFiles(filesInput) {
+    const files = Array.from(filesInput || []);
+    if (files.length === 0) return;
+
+    const mediaFiles = files.filter(isUploadableMediaFile);
+    if (mediaFiles.length === 0) {
+      showToast("请选择音频或视频文件");
+      return;
+    }
+    if (mediaFiles.length !== files.length) {
+      showToast("已跳过不支持的文件");
+    } else if (mediaFiles.length > 1) {
+      showToast(`正在上传 ${mediaFiles.length} 个录音文件`);
+    }
+
+    const folderId =
+      selectedFolderId !== "all" &&
+      selectedFolderId !== "uncategorized" &&
+      selectedFolderId !== "favorites" &&
+      selectedFolderId !== "trash"
+        ? selectedFolderId
+        : undefined;
+
+    const firstDisplayName = mediaFiles[0]?.name?.replace(/\.[^.]+$/, "") || "新录音";
+    const uploadId = createUploadCard({
+      name: mediaFiles.length > 1 ? "上传录音" : firstDisplayName,
+      durationMs: 0,
+      message: "正在读取文件，准备上传",
+    });
+
+    try {
+      if (mediaFiles.length === 1) {
+        const file = mediaFiles[0];
+        const durationMs = await getAudioFileDuration(file);
+        const rawName = file.name.replace(/\.[^.]+$/, "");
+        await uploadRecording(file, durationMs, {
+          name: rawName || undefined,
+          fileName: file.name,
+          folderId,
+          uploadId,
+          toastMessage: "录音已上传并开始转写",
+        });
+        return;
+      }
+
+      const durations = await Promise.all(mediaFiles.map((file) => getAudioFileDuration(file)));
+      const durationMs = durations.reduce((total, value) => total + Math.max(0, value || 0), 0);
+      await uploadRecordingSegments(mediaFiles, durationMs, {
+        name: "上传录音",
+        folderId,
+        uploadId,
+        toastMessage: `${mediaFiles.length} 个录音文件已上传并开始转写`,
+      });
+    } catch (error) {
+      console.error("upload files failed:", error);
+      failUploadCard(uploadId);
+      showToast(error instanceof Error ? `上传失败：${error.message}` : "上传失败，请稍后重试", 4000);
+    }
+  }
 
   useEffect(
     () => () => {
@@ -797,14 +900,6 @@ export default function Records() {
     }
   }
 
-  function markRecordingDeleting(id, deleting) {
-    if (!id) return;
-    setDeletingRecordIds((current) => {
-      if (deleting) return current.includes(id) ? current : [...current, id];
-      return current.filter((item) => item !== id);
-    });
-  }
-
   function adjustFolderStatsAfterRecordingRemoval(recording, { permanent = false } = {}) {
     setFolderStats((current) => {
       const wasInTrash = Boolean(recording.deletedAt);
@@ -955,23 +1050,18 @@ export default function Records() {
   return (
     <>
       <RecordsView
-        finishUploadCard={finishUploadCard}
         recordings={recordsForView}
         folders={folders}
         folderStats={folderStats}
         recordsTitle={profile.recordsTitle || "我的录音"}
         selectedFolderId={selectedFolderId}
         loading={loading}
-        deletingRecordIds={deletingRecordIds}
-        uploadBusy={uploadingRecords.length > 0}
+        uploadBusy={uploadBusy}
         onOpenSettings={() => setSettingsOpen(true)}
         user={wecomUser}
         onLogout={logoutWecom}
         onStartRecording={() => routerNavigate("/recorder")}
-        createUploadCard={createUploadCard}
-        updateUploadCard={updateUploadCard}
-        failUploadCard={failUploadCard}
-        uploadRecordingSegments={uploadRecordingSegments}
+        onUploadFiles={uploadFiles}
         onCreateFolder={createFolder}
         onRenameFolder={renameFolder}
         onDeleteFolder={deleteFolder}
