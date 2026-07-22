@@ -25,3 +25,5 @@ docker-compose.override.yml
 dist.*
 client/ssl
 
+
+app_images/
