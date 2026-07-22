@@ -15,6 +15,8 @@ services:
       dockerfile: Dockerfile
       args:
         APP_BASE_IMAGE: *app-base-image
+    ports:
+      - "8787:8787"
     expose:
       - "8787"
     env_file:
