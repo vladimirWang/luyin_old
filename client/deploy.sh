@@ -29,7 +29,8 @@ echo "==== Vite打包+压缩ZIP+单文件上传（平滑进度）===="
 # read -p "服务器IP: " SERVER_IP
 read -r -p "SSH用户名: " SSH_USER
 # read -p "远程目录: " REMOTE_DIR
-SERVER_IP=139.224.68.145
+# SERVER_IP=139.224.68.145 # 阿里云
+SERVER_IP=172.16.200.9 # hyp
 REMOTE_DIR="luyin_old/client"
 LOCAL_DIST="./dist"
 ZIP_NAME="dist.zip"
