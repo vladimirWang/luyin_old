@@ -2,7 +2,13 @@ import { useEffect, useRef, useState } from "react";
 import { createWWLoginPanel } from "@wecom/jssdk";
 import { ShieldCheck } from "lucide-react";
 import { useLocation, useNavigate } from "react-router-dom";
-import { api, clearStoredAuth, saveLocalProfile } from "../../utils/index.js";
+import {
+  exchangeWecomCode,
+  getWecomLoginConfig,
+  getWecomOAuthUrl,
+  updateWecomProfile,
+} from "../../api/wecom.js";
+import { clearStoredAuth, saveLocalProfile } from "../../utils/index.js";
 import { isInWeCom } from "../../utils/wecom.js";
 import { hasWecomIdentity, useWecomAuthStore } from "../../stores/useWecomAuthStore.js";
 import LoginFailed from "./components/LoginFailed.jsx";
@@ -64,14 +70,12 @@ function requestEmbeddedLoginUrl() {
   const redirectUri = `${window.location.origin}${window.location.pathname}`;
   window.sessionStorage.setItem(OAUTH_STATE_KEY, state);
   window.sessionStorage.setItem(AUTO_LOGIN_STARTED_KEY, String(previousAttempts + 1));
-  embeddedLoginRequest = api(
-    `/api/wecom/oauth-url?redirect=${encodeURIComponent(redirectUri)}&state=${encodeURIComponent(state)}`,
-  );
+  embeddedLoginRequest = getWecomOAuthUrl(redirectUri, state);
   return embeddedLoginRequest;
 }
 
 async function exchangeCode(code) {
-  const payload = await api(`/api/wecom/me?code=${encodeURIComponent(code)}`);
+  const payload = await exchangeWecomCode(code);
   if (!payload.configured) throw new Error("服务端尚未配置企业微信应用 Secret");
   if (!payload.authenticated || !payload.user) throw new Error("未能获取企业微信用户身份");
 
@@ -87,10 +91,7 @@ async function exchangeCode(code) {
     wecomConfigured: true,
   };
   clearStoredAuth();
-  const profileResponse = await api("/api/profile", {
-    method: "PUT",
-    body: JSON.stringify(profilePayload),
-  });
+  const profileResponse = await updateWecomProfile(profilePayload, user.authToken);
   const profile = { ...(profileResponse.profile || {}), ...profilePayload };
   saveLocalProfile(profile);
   return { profile, user };
@@ -159,7 +160,7 @@ export default function WeComLogin() {
         const stateSearch = location.state?.from?.search || "";
         const requestedLocation = window.sessionStorage.getItem(LOGIN_RETURN_TO_KEY) || `${statePath}${stateSearch}`;
         window.sessionStorage.removeItem(LOGIN_RETURN_TO_KEY);
-        navigate(requestedLocation && !requestedLocation.startsWith("/login") ? requestedLocation : "/recorder", { replace: true });
+        navigate(requestedLocation && !requestedLocation.startsWith("/login") ? requestedLocation : "/records", { replace: true });
       } catch (requestError) {
         if (cancelled) return;
         loginStartedRef.current = false;
@@ -192,8 +193,7 @@ export default function WeComLogin() {
 
     async function mountLoginPanel() {
       try {
-        let config = await api("/api/wecom/login-config");
-        console.log("wecom login config: ", config)
+        const config = await getWecomLoginConfig();
         if (cancelled) return;
         if (!config.configured || !config.appid || !config.agentid) {
           throw new Error("服务端尚未完整配置企业微信 CorpID、AgentID 和 Secret");
@@ -216,17 +216,14 @@ export default function WeComLogin() {
             lang: "zh",
             color_scheme: "light",
           }
-        console.log("二维码入参: ", params)
         window.sessionStorage.setItem(OAUTH_STATE_KEY, state);
         panelRef.current = createWWLoginPanel({
           el: "#wecom-login-panel",
           params,
           onLoginSuccess({ code }) {
-            console.log("ww login success: ", code)
             finishLogin(code);
           },
           onLoginFail(loginError) {
-            console.log("ww login fail: ", loginError)
             if (cancelled) return;
             setError(errorMessage(loginError));
             setStatus("error");
@@ -255,7 +252,6 @@ export default function WeComLogin() {
     if (returnPath && !returnPath.startsWith("/login")) {
       window.sessionStorage.setItem(LOGIN_RETURN_TO_KEY, returnPath);
     }
-    console.log("call back code: ", callbackCode)
     if (hasWecomIdentity(storedUser)) {
       navigate("/", { replace: true });
     } else if (callbackCode) {

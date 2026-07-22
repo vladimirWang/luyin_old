@@ -16,8 +16,7 @@ unstableSetRender((node, container) => {
   };
 });
 
-const isProd = process.env.NODE_ENV === "prod"
-if (true) {
+if (import.meta.env.DEV || import.meta.env.MODE === "debug") {
   import("vconsole").then(({ default: VConsole }) => {
     new VConsole();
   });

@@ -20,7 +20,7 @@ export default function AppRouter() {
             {/* <Route path="/recorder" element={<Recorder />} /> */}
             <Route path="/records" element={<Records />} />
             <Route path="/detail" element={<Detail />} />
-            <Route path="/verify" element={<Verify />} />
+            {/* <Route path="/verify" element={<Verify />} /> */}
           </Route>
           <Route path="/user" element={<User />} />
           <Route path="*" element={<NotFound />} />
