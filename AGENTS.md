@@ -28,7 +28,7 @@ Test deployment decisions: `py_server` is intentionally disabled because the cur
 
 Records menu decisions: the avatar dropdown uses a compact, content-driven width with mobile viewport bounds instead of a fixed width, and its icon-only action buttons center their icons.
 
-Detail component decisions: keep the chat-history panel in `client/src/pages/Detail/components` as a controlled component. Its owner controls visibility through `open` and `onClose`, while panel-only state such as the history/favorites tab remains inside the panel.
+Detail component decisions: `client/src/pages/Detail/Detail.jsx` is the route-level owner and page orchestrator; do not reintroduce a broad `DetailView` wrapper. Split cohesive visual regions and message/composer parts into `client/src/pages/Detail/components`, and keep route loading in focused hooks under `client/src/pages/Detail/hooks`. Keep the chat-history panel as a controlled component: its owner controls visibility through `open` and `onClose`, while panel-only state such as the history/favorites tab remains inside the panel.
 
 Server router dependency decisions: functions needed by server routes should be imported directly from focused utility modules whenever practical. Do not pass importable utility functions through router `configure()` dependency objects; reserve configuration injection for behavior that genuinely belongs to the application composition root or would otherwise create circular dependencies.
 

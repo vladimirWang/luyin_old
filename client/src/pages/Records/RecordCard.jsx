@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef } from "react";
-import { Check, Share2, RefreshCw, LoaderCircle, Trash2 } from "lucide-react";
+import { Check, Share2, RefreshCw, Trash2 } from "lucide-react";
 import {
   formatCardDateParts,
   formatClockTime,
@@ -20,7 +20,6 @@ export function RecordCard({
   folders,
   isTrashView,
   isExpanded,
-  isDeleting = false,
   bulkDeleteMode = false,
   bulkDeleteSelected = false,
   onBulkDeleteToggle,
@@ -134,7 +133,7 @@ export function RecordCard({
   async function handleCardShare(mode, event) {
     event?.preventDefault();
     event?.stopPropagation();
-    if (shareBusyMode || isDeleting) return;
+    if (shareBusyMode) return;
     setShareBusyMode(mode);
     try {
       await onShare?.(mode);
@@ -146,7 +145,7 @@ export function RecordCard({
 
   function handleCardPointerDown(event) {
     if (bulkDeleteMode) return;
-    if (isDeleting || isTrashView || isCardInteractiveTarget(event.target)) return;
+    if (isTrashView || isCardInteractiveTarget(event.target)) return;
     const start = {
       x: event.clientX,
       y: event.clientY,
@@ -185,7 +184,6 @@ export function RecordCard({
   }
 
   function handleCardClick(event) {
-    if (isDeleting) return;
     if (bulkDeleteMode) {
       if (!isTrashView && canDeleteThisRecording) onBulkDeleteToggle?.(recording.id);
       return;
@@ -214,13 +212,13 @@ export function RecordCard({
   const sourceMeta = recordSourceMeta(recording);
   const dateParts = formatCardDateParts(recording.createdAt);
   const showDeleteUnderlay = !isTrashView && canDeleteThisRecording;
-  const canBulkDelete = !isTrashView && canDeleteThisRecording && !isDeleting;
+  const canBulkDelete = !isTrashView && canDeleteThisRecording;
   const cardClassName = `record-card ${color} ${visualClass} ${sourceMeta.className}${isTrashView ? " in-trash" : ""}${
     isExpanded ? " expanded" : ""
-  }${isDeleting ? " is-deleting" : ""}${isToday(recording.createdAt) ? " is-today" : ""}`;
+  }${isToday(recording.createdAt) ? " is-today" : ""}`;
   const shellClassName = `record-card-shell${deleteRevealed ? " delete-revealed" : ""}${
-    isDeleting ? " is-deleting" : ""
-  }${deleteModeActive ? " delete-mode-active" : ""}${shareMenuOpen ? " share-open" : ""}${
+    deleteModeActive ? " delete-mode-active" : ""
+  }${shareMenuOpen ? " share-open" : ""}${
     bulkDeleteMode ? " bulk-delete-mode" : ""
   }${bulkDeleteSelected ? " bulk-delete-selected" : ""} ${sourceMeta.className}`;
 
@@ -234,7 +232,6 @@ export function RecordCard({
         onPointerUp={handleCardPointerEnd}
         onPointerCancel={handleCardPointerEnd}
         style={{ "--record-title-size": recordTitleSize(draftName) }}
-        aria-busy={isDeleting}
       >
         <div className="record-source-strip" aria-hidden="true">
           <span>{sourceMeta.label}</span>
@@ -274,7 +271,6 @@ export function RecordCard({
                   event.stopPropagation();
                   setShareMenuOpen((open) => !open);
                 }}
-                disabled={isDeleting}
               >
                 <Share2 size={15} strokeWidth={2.1} />
               </IconButton>
@@ -289,7 +285,7 @@ export function RecordCard({
           value={draftName}
           onChange={(event) => setDraftName(event.target.value)}
           onBlur={commitName}
-          disabled={isDeleting || isTrashView}
+          disabled={isTrashView}
           onKeyDown={(event) => {
             if (event.key === "Enter") {
               event.preventDefault();
@@ -314,7 +310,7 @@ export function RecordCard({
               commitMeta();
               setTagExpanded(false);
             }}
-            disabled={isDeleting || isTrashView || recording.canManage === false}
+            disabled={isTrashView || recording.canManage === false}
             onFocus={() => setTagExpanded(true)}
             onClick={(event) => {
               event.stopPropagation();
@@ -336,7 +332,7 @@ export function RecordCard({
             onClick={(event) => event.stopPropagation()}
             onPointerDown={(event) => event.stopPropagation()}
             onTouchStart={(event) => event.stopPropagation()}
-            disabled={isTrashView || isDeleting || recording.canManage === false}
+            disabled={isTrashView || recording.canManage === false}
           >
             <option value="">未分类</option>
             {folders.map((folder) => (
@@ -358,7 +354,6 @@ export function RecordCard({
               type="checkbox"
               checked={recording.shared !== false}
               onChange={(event) => onUpdateMeta({ shared: event.target.checked })}
-              disabled={isDeleting}
             />
             <i aria-hidden="true" />
           </label>
@@ -372,32 +367,26 @@ export function RecordCard({
         >
           {isTrashView ? (
             <>
-              <IconButton label="恢复录音" onClick={onRestore} disabled={isDeleting}>
+              <IconButton label="恢复录音" onClick={onRestore}>
                 <RefreshCw size={18} />
               </IconButton>
-              <IconButton label={isDeleting ? "删除中" : "彻底删除"} onClick={isDeleting ? undefined : onPermanentDelete} disabled={isDeleting}>
-                {isDeleting ? <LoaderCircle className="spin-icon" size={18} /> : <Trash2 size={18} />}
+              <IconButton label="彻底删除" onClick={onPermanentDelete}>
+                <Trash2 size={18} />
               </IconButton>
             </>
           ) : (
             <>
               {canRetranscribe ? (
-                <IconButton className="card-secondary-action" label="重新转写" onClick={onRetranscribe} disabled={isDeleting}>
+                <IconButton className="card-secondary-action" label="重新转写" onClick={onRetranscribe}>
                   <RefreshCw size={18} />
                 </IconButton>
               ) : null}
-              <button className="qa-card-button" type="button" onClick={onAsk} disabled={isDeleting}>
+              <button className="qa-card-button" type="button" onClick={onAsk}>
                 问答
               </button>
             </>
           )}
         </div>
-        {isDeleting ? (
-          <div className="record-card-busy" aria-live="polite">
-            <LoaderCircle className="spin-icon" size={18} />
-            <span>删除中</span>
-          </div>
-        ) : null}
         {showDeleteUnderlay && deleteRevealed ? (
           <button
             type="button"
@@ -408,7 +397,6 @@ export function RecordCard({
               onDeleteModeChange?.("");
               onDelete?.();
             }}
-            disabled={isDeleting}
           >
             <Trash2 size={18} />
             <span>删除</span>
