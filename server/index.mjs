@@ -2157,7 +2157,8 @@ function publicRecording(recording, segments = [], viewerClientId = "", viewerNa
     isTencentMeetingImport && expandedSegments.length > 0 && recording.transcriptSource === "tencent-meeting"
       ? "ready"
       : recording.status;
-
+  
+  const tmpStoragePath = recording.storagePath.replace("/app/server/storage", '')
   return {
     id: recording.id,
     seq: recording.seq,
@@ -2223,7 +2224,7 @@ function publicRecording(recording, segments = [], viewerClientId = "", viewerNa
             ? "当前显示的是模拟转写，请点击重新转写获取真实内容。"
             : diagnostics.message,
     },
-    audioUrl: `${process.env.SERVER_URL}/static/${recording.storagePath}`,
+    audioUrl: `${process.env.SERVER_URL}/static/${tmpStoragePath}`,
     transcript: expandedSegments.map((segment, index) => {
       const speakerKey = segmentSpeakerKey(segment, index);
       const speaker = speakerByKey.get(speakerKey) || speakers[0] || { key: "speaker-1", name: primarySpeaker };
