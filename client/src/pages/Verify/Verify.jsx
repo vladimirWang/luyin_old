@@ -91,7 +91,11 @@ export default function Verify() {
       const result = await api("/api/wecom/contacts");
       const nextContacts = Array.isArray(result.users) ? result.users : [];
       setContacts(nextContacts);
-      showToast(`已获取 ${nextContacts.length} 位企业成员`);
+      showToast(
+        result.partial
+          ? `已获取 ${nextContacts.length} 位可见成员，部分部门无权读取`
+          : `已获取 ${nextContacts.length} 位企业成员`,
+      );
       if (selectedUserId && !nextContacts.some((item) => item.userId === selectedUserId)) {
         setSelectedUserId("");
         setSelectedUser(null);

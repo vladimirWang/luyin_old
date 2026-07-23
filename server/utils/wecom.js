@@ -190,7 +190,10 @@ async function requestWecomJson(path, accessToken = "") {
   );
   const payload = await response.json();
   if (!response.ok || payload.errcode) {
-    throw new Error(payload.errmsg || `企业微信通讯录请求失败（HTTP ${response.status}）`);
+    const error = new Error(payload.errmsg || `企业微信通讯录请求失败（HTTP ${response.status}）`);
+    error.errcode = Number(payload.errcode || 0);
+    error.httpStatus = response.status;
+    throw error;
   }
   return { payload, token };
 }
@@ -210,14 +213,52 @@ export async function listWecomContacts() {
     ]),
   );
   const rootDepartmentId = departments.find((department) => Number(department.parentid || 0) === 0)?.id || 1;
-  const { payload: userPayload } = await requestWecomJson(
-    `user/simplelist?department_id=${encodeURIComponent(rootDepartmentId)}&fetch_child=1`,
-    token,
-  );
-  const users = Array.isArray(userPayload.userlist) ? userPayload.userlist : [];
+  let users = [];
+  const deniedDepartmentIds = [];
+
+  try {
+    const { payload: userPayload } = await requestWecomJson(
+      `user/simplelist?department_id=${encodeURIComponent(rootDepartmentId)}&fetch_child=1`,
+      token,
+    );
+    users = Array.isArray(userPayload.userlist) ? userPayload.userlist : [];
+  } catch (error) {
+    if (error?.errcode !== 60011) throw error;
+
+    // An application may only be allowed to see selected departments. In that
+    // case querying the company root with fetch_child=1 crosses its visibility
+    // boundary, so retry each returned department without traversing children.
+    const usersById = new Map();
+    for (const department of departments) {
+      try {
+        const { payload: userPayload } = await requestWecomJson(
+          `user/simplelist?department_id=${encodeURIComponent(department.id)}&fetch_child=0`,
+          token,
+        );
+        for (const user of Array.isArray(userPayload.userlist) ? userPayload.userlist : []) {
+          const userId = String(user.userid || "").trim();
+          if (userId) usersById.set(userId, user);
+        }
+      } catch (departmentError) {
+        if (departmentError?.errcode !== 60011) throw departmentError;
+        deniedDepartmentIds.push(Number(department.id));
+      }
+    }
+    users = [...usersById.values()];
+  }
+
+  if (!users.length && deniedDepartmentIds.length) {
+    const error = new Error(
+      "企业微信应用没有可读取的通讯录成员。请在企业微信管理后台扩大该自建应用的可见范围，并确认 WECOM_APP_SECRET 是该应用的 Secret。",
+    );
+    error.errcode = 60011;
+    throw error;
+  }
 
   return {
     departments: [...departmentById.values()],
+    partial: deniedDepartmentIds.length > 0,
+    deniedDepartmentIds,
     users: users.map((user) => {
       const departmentIds = Array.isArray(user.department) ? user.department.map(Number) : [];
       return {
