@@ -531,12 +531,16 @@ export function tencentMeetingSummaryFilesFromPayload(payload = {}) {
     ...asArray(payload.summaryFiles),
     ...asArray(payload.transcript_files),
     ...asArray(payload.transcriptFiles),
+    ...asArray(payload.ai_meeting_transcripts),
+    ...asArray(payload.aiMeetingTranscripts),
     ...asArray(nested.meeting_summary),
     ...asArray(nested.meetingSummary),
     ...asArray(nested.summary_files),
     ...asArray(nested.summaryFiles),
     ...asArray(nested.transcript_files),
     ...asArray(nested.transcriptFiles),
+    ...asArray(nested.ai_meeting_transcripts),
+    ...asArray(nested.aiMeetingTranscripts),
   ];
 }
 
@@ -615,12 +619,18 @@ export function tencentMeetingTranscriptRetryIntervalMs(recording = {}) {
 }
 
 export function isTencentMeetingTranscriptUnavailableError(error) {
-  const message = String(error instanceof Error ? error.message : error || "");
+  const normalizedMessage = String(error instanceof Error ? error.message : error || "");
+  if (/30001|30003|content.*generating|transcript.*generat/i.test(normalizedMessage)) return true;
+  const message = normalizedMessage;
   return /108030001|108000403|纪要不存在|会议纪要|转写.*不存在|暂无.*转写|暂无.*纪要|transcript.*not/i.test(message);
 }
 
 export function tencentMeetingTranscriptErrorKind(error) {
-  const message = String(error instanceof Error ? error.message : error || "");
+  const normalizedMessage = String(error instanceof Error ? error.message : error || "");
+  if (/\b403\b|permission|forbidden/i.test(normalizedMessage)) return "permission";
+  if (/30002|transcript.*empty|no.*transcript.*content/i.test(normalizedMessage)) return "empty";
+  if (/4049|record.*not.*exist/i.test(normalizedMessage)) return "missing";
+  const message = normalizedMessage;
   if (/1009009042|暂无权限|无权限|permission|forbidden/i.test(message)) return "permission";
   if (/108030002|纪要无内容|转写无内容|无内容/i.test(message)) return "empty";
   if (/108004051|录制文件已经被删除|108004049|不存在的记录|record.*not.*exist/i.test(message)) return "missing";
@@ -1058,6 +1068,19 @@ export function tencentMeetingApiConfigured() {
 
 export function isTencentMeetingTranscriptReadyEvent(payload = {}) {
   return String(payload?.event || "").trim() === "smart.transcripts";
+}
+
+export function isTencentMeetingRecorderTranscriptEvent(payload = {}) {
+  return String(payload?.event || "").trim() === "recording.audio-completed";
+}
+
+export function isTencentMeetingTranscriptSyncEvent(payload = {}) {
+  return isTencentMeetingTranscriptReadyEvent(payload) || isTencentMeetingRecorderTranscriptEvent(payload);
+}
+
+export function tencentMeetingTranscriptSyncMaxAttempts(info = {}) {
+  if (!isTencentMeetingRecorderTranscriptEvent(info)) return 1;
+  return boundedNumber(process.env.TENCENT_MEETING_RECORDER_TRANSCRIPT_MAX_ATTEMPTS, 6, 1, 24);
 }
 
 export const TENCENT_MEETING_TRANSCRIPT_DIAGNOSTIC_START_MARKER =

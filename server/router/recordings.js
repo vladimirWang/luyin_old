@@ -730,7 +730,13 @@ router.get("/:id/meeting-outline.pdf", async (request, response, next) => {
 });
 
 router.post("/:id/transcribe", async (request, response) => {
-  const { queueTranscriptionJob, isLocalApiTranscriptionRecording, findRecording, canManageRecording } = dependencies;
+  const {
+    queueTranscriptionJob,
+    queueTencentMeetingTranscriptSync,
+    isLocalApiTranscriptionRecording,
+    findRecording,
+    canManageRecording,
+  } = dependencies;
   logger.info("[CALL] /api/recordings/:id/transcribe", {message: `request.params.id: ${request.params.id}`});
   const db = await loadDb();
   const clientId = requestClientIdBetter(request);
@@ -742,6 +748,21 @@ router.post("/:id/transcribe", async (request, response) => {
   }
 
   if (isTencentMeetingRecording(recording)) {
+    const syncInfo = tencentMeetingSyncInfoFromRecording(recording);
+    if (syncInfo.sourceKind === "recorder") {
+      const queued = queueTencentMeetingTranscriptSync(recording.id, {
+        ...syncInfo,
+        event: "recording.audio-completed",
+      });
+      response.status(202).json({
+        ok: true,
+        queued,
+        status: queued ? "processing" : "pending",
+        source: "tencent-meeting-recorder",
+        message: queued ? "已开始同步腾讯会议录音笔转写。" : "录音笔转写同步任务已在处理中。",
+      });
+      return;
+    }
     response.status(202).json({
       ok: true,
       status: "pending",

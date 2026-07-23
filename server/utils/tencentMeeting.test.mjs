@@ -2,7 +2,12 @@ import test from "node:test";
 import assert from "node:assert/strict";
 
 import {
+  isTencentMeetingRecorderTranscriptEvent,
   isTencentMeetingTranscriptReadyEvent,
+  isTencentMeetingTranscriptSyncEvent,
+  tencentMeetingTranscriptErrorKind,
+  tencentMeetingTranscriptSyncMaxAttempts,
+  tencentMeetingSummaryDownloadUrlsFromPayload,
   tencentMeetingWebhookEventAction,
   tencentMeetingTranscriptSegmentsFromPayload,
   tencentMeetingTranscriptSegmentsFromText,
@@ -13,6 +18,40 @@ test("only the canonical smart.transcripts event marks a transcript as ready", (
   assert.equal(isTencentMeetingTranscriptReadyEvent({ event: "recording.completed" }), false);
   assert.equal(isTencentMeetingTranscriptReadyEvent({ event_type: "smart.transcripts" }), false);
   assert.equal(isTencentMeetingTranscriptReadyEvent({ Event: "smart.transcripts" }), false);
+});
+
+test("canonical recorder completion events can start recorder transcript synchronization", () => {
+  assert.equal(isTencentMeetingRecorderTranscriptEvent({ event: "recording.audio-completed" }), true);
+  assert.equal(isTencentMeetingRecorderTranscriptEvent({ event_type: "recording.audio-completed" }), false);
+  assert.equal(isTencentMeetingTranscriptSyncEvent({ event: "recording.audio-completed" }), true);
+  assert.equal(isTencentMeetingTranscriptSyncEvent({ event: "smart.transcripts" }), true);
+  assert.equal(isTencentMeetingTranscriptSyncEvent({ event: "recording.completed" }), false);
+});
+
+test("recorder transcript synchronization retries content-generation responses", () => {
+  const previous = process.env.TENCENT_MEETING_RECORDER_TRANSCRIPT_MAX_ATTEMPTS;
+  process.env.TENCENT_MEETING_RECORDER_TRANSCRIPT_MAX_ATTEMPTS = "4";
+  try {
+    assert.equal(tencentMeetingTranscriptSyncMaxAttempts({ event: "recording.audio-completed" }), 4);
+    assert.equal(tencentMeetingTranscriptSyncMaxAttempts({ event: "smart.transcripts" }), 1);
+    assert.equal(tencentMeetingTranscriptErrorKind(new Error("Tencent Meeting API failed: 500 30003 content generating")), "pending");
+    assert.equal(tencentMeetingTranscriptErrorKind(new Error("Tencent Meeting API failed: 500 30002 transcript empty")), "empty");
+  } finally {
+    if (previous === undefined) delete process.env.TENCENT_MEETING_RECORDER_TRANSCRIPT_MAX_ATTEMPTS;
+    else process.env.TENCENT_MEETING_RECORDER_TRANSCRIPT_MAX_ATTEMPTS = previous;
+  }
+});
+
+test("recorder detail payload exposes intelligent transcript text downloads", () => {
+  assert.deepEqual(
+    tencentMeetingSummaryDownloadUrlsFromPayload({
+      ai_meeting_transcripts: [
+        { file_type: "txt", download_address: "https://example.test/recorder-transcript.txt" },
+        { file_type: "pdf", download_address: "https://example.test/recorder-transcript.pdf" },
+      ],
+    }),
+    ["https://example.test/recorder-transcript.txt"],
+  );
 });
 
 test("Tencent Meeting webhook events map to separate canonical actions", () => {

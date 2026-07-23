@@ -32,6 +32,18 @@ function logTencentMeetingWebhookTrace(stage, details = {}) {
   console.info(`[Tencent Meeting][Webhook] ${stage}`, metadata);
 }
 
+function emitTencentMeetingTranscriptDiagnosticStart(payload, eventId) {
+  const diagnosticDetails = {
+    event: payload?.event || "",
+    eventId,
+  };
+  logger.info("tencent_meeting.transcript.diagnostic_start", {
+    message: TENCENT_MEETING_TRANSCRIPT_DIAGNOSTIC_START_MARKER,
+    ...diagnosticDetails,
+  });
+  console.info(TENCENT_MEETING_TRANSCRIPT_DIAGNOSTIC_START_MARKER, diagnosticDetails);
+}
+
 export function configure(deps) {
   dependencies = deps;
 }
@@ -176,18 +188,11 @@ router.post("/webhook", async (request, response) => {
               await importTencentMeetingRecordingCompletedPayload(payload);
               break;
             case "audio-completed":
+              emitTencentMeetingTranscriptDiagnosticStart(payload, eventId);
               await importTencentMeetingAudioCompletedPayload(payload);
               break;
             case "transcript-ready": {
-              const diagnosticDetails = {
-                event: payload.event || "",
-                eventId,
-              };
-              logger.info("tencent_meeting.transcript.diagnostic_start", {
-                message: TENCENT_MEETING_TRANSCRIPT_DIAGNOSTIC_START_MARKER,
-                ...diagnosticDetails,
-              });
-              console.info(TENCENT_MEETING_TRANSCRIPT_DIAGNOSTIC_START_MARKER, diagnosticDetails);
+              emitTencentMeetingTranscriptDiagnosticStart(payload, eventId);
               await importTencentMeetingTranscriptReadyPayload(payload);
               break;
             }
@@ -220,12 +225,17 @@ router.post("/webhook", async (request, response) => {
             );
           }
           console.warn("[Tencent Meeting] webhook background import failed:", error instanceof Error ? error.message : error);
-          if (action === "transcript-ready") {
-            console.info(TENCENT_MEETING_TRANSCRIPT_DIAGNOSTIC_END_MARKER, {
+          if (action === "audio-completed" || action === "transcript-ready") {
+            const diagnosticDetails = {
               event: payload?.event || "",
               eventId,
               outcome: "dispatch_failed",
+            };
+            logger.info("tencent_meeting.transcript.diagnostic_end", {
+              message: TENCENT_MEETING_TRANSCRIPT_DIAGNOSTIC_END_MARKER,
+              ...diagnosticDetails,
             });
+            console.info(TENCENT_MEETING_TRANSCRIPT_DIAGNOSTIC_END_MARKER, diagnosticDetails);
           }
         });
     } else {
