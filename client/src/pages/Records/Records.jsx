@@ -967,7 +967,6 @@ export default function Records() {
         onOpenSettings={() => setSettingsOpen(true)}
         user={wecomUser}
         onLogout={logoutWecom}
-        onStartRecording={() => routerNavigate("/recorder")}
         createUploadCard={createUploadCard}
         updateUploadCard={updateUploadCard}
         failUploadCard={failUploadCard}

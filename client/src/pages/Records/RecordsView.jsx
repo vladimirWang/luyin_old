@@ -37,7 +37,6 @@ export function RecordsView({
   onOpenSettings,
   user,
   onLogout,
-  onStartRecording,
   createUploadCard,
   updateUploadCard,
   failUploadCard,
@@ -607,10 +606,6 @@ export function RecordsView({
             </div>
             <h2>还没有录音</h2>
             <p>点击下方录音按钮，完成后会上传服务器并生成卡片。</p>
-            <button className="primary-pill" type="button" onClick={onStartRecording}>
-              <Mic size={18} />
-              录音
-            </button>
           </div>
         )}
       </div>

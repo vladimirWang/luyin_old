@@ -8,6 +8,7 @@ import Records from "./pages/Records/Records.jsx";
 import User from "./pages/User/User.jsx";
 import Verify from "./pages/Verify/Verify.jsx";
 import ProtectedRoute from "./routes/ProtectedRoute.jsx";
+import appConfig from "./config.js";
 
 export default function AppRouter() {
   return (
@@ -20,7 +21,9 @@ export default function AppRouter() {
             {/* <Route path="/recorder" element={<Recorder />} /> */}
             <Route path="/records" element={<Records />} />
             <Route path="/detail" element={<Detail />} />
-            <Route path="/verify" element={<Verify />} />
+            {appConfig.showDebug && (
+              <Route path="/verify" element={<Verify />} />
+            )}
           </Route>
           <Route path="/user" element={<User />} />
           <Route path="*" element={<NotFound />} />

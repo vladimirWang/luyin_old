@@ -16,15 +16,14 @@ unstableSetRender((node, container) => {
   };
 });
 
-const isProd = process.env.NODE_ENV === "prod"
-if (true) {
+import appConfig from "./config.js";
+
+if (appConfig.showDebug) {
   import("vconsole").then(({ default: VConsole }) => {
     new VConsole();
   });
 }
 
 createRoot(document.getElementById("root")).render(
-  <React.StrictMode>
-    <AppRouter />
-  </React.StrictMode>,
+  <AppRouter />
 );
