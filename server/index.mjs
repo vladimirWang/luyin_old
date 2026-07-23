@@ -2503,8 +2503,6 @@ function publicRecording(recording, segments = [], viewerClientId = "", viewerNa
       ? "ready"
       : recording.status;
   
-  // const tmpStoragePath = recording.storagePath.replace("/app/server/storage", '')
-  console.log("recording.audioUrl:  ", recording.audioUrl, '; recording ', recording)
   return {
     id: recording.id,
     seq: recording.seq,

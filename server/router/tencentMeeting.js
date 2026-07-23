@@ -178,13 +178,19 @@ router.post("/webhook", async (request, response) => {
             case "audio-completed":
               await importTencentMeetingAudioCompletedPayload(payload);
               break;
-            case "transcript-ready":
-              console.info(TENCENT_MEETING_TRANSCRIPT_DIAGNOSTIC_START_MARKER, {
+            case "transcript-ready": {
+              const diagnosticDetails = {
                 event: payload.event || "",
                 eventId,
+              };
+              logger.info("tencent_meeting.transcript.diagnostic_start", {
+                message: TENCENT_MEETING_TRANSCRIPT_DIAGNOSTIC_START_MARKER,
+                ...diagnosticDetails,
               });
+              console.info(TENCENT_MEETING_TRANSCRIPT_DIAGNOSTIC_START_MARKER, diagnosticDetails);
               await importTencentMeetingTranscriptReadyPayload(payload);
               break;
+            }
             default:
               logger.info("tencent_meeting.webhook.ignored", {
                 message: `event: ${payload.event || ""}`,
