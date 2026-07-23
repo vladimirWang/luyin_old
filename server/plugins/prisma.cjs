@@ -1,5 +1,6 @@
 const { PrismaClient } = require("@prisma/client");
 const { PrismaMariaDb } = require("@prisma/adapter-mariadb");
+const { default: logger } = require("../utils/log");
 
 const { DATABASE_URL } = process.env;
 
@@ -9,6 +10,10 @@ function getDatabaseConfig() {
   // DATABASE_URL is the canonical connection setting for Prisma. In local
   // development MYSQL_HOST can still be set to the Docker-only host `mysql`,
   // so preferring the split MYSQL_* variables makes a host-run server time out.
+  logger.debug('process.env', {message: `DATABASE_URL: ${process.env.DATABASE_URL}`})
+  logger.debug('process.env', {message: `MYSQL_PASSWORD: ${process.env.MYSQL_PASSWORD}`})
+  logger.debug('process.env', {message: `MYSQL_USER: ${process.env.MYSQL_USER}`})
+  logger.debug('process.env', {message: `MYSQL_HOST: ${process.env.MYSQL_HOST}`})
   if (DATABASE_URL) return DATABASE_URL;
 
   const baseConfig = {
