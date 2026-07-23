@@ -2223,7 +2223,7 @@ function publicRecording(recording, segments = [], viewerClientId = "", viewerNa
             ? "当前显示的是模拟转写，请点击重新转写获取真实内容。"
             : diagnostics.message,
     },
-    audioUrl: `/api/recordings/${recording.id}/audio`,
+    audioUrl: `${process.env.SERVER_URL}/static/${recording.storageKey}`,
     transcript: expandedSegments.map((segment, index) => {
       const speakerKey = segmentSpeakerKey(segment, index);
       const speaker = speakerByKey.get(speakerKey) || speakers[0] || { key: "speaker-1", name: primarySpeaker };
