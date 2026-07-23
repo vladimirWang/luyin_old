@@ -99,6 +99,7 @@ import {
   isTencentMeetingTranscriptSyncEvent,
   tencentMeetingTranscriptRetryIntervalMs,
   tencentMeetingTranscriptSyncMaxAttempts,
+  TENCENT_MEETING_RECORDER_CALLBACK_DIAGNOSTIC_READY_MARKER,
   TENCENT_MEETING_RECORDER_CALLBACK_DIAGNOSTIC_STEP_MARKER,
   TENCENT_MEETING_TRANSCRIPT_DIAGNOSTIC_END_MARKER,
   tencentMeetingQuery,
@@ -685,6 +686,16 @@ function logTencentMeetingRecorderCallbackDiagnostic(stage, details = {}) {
   });
   console.info(TENCENT_MEETING_RECORDER_CALLBACK_DIAGNOSTIC_STEP_MARKER, metadata);
 }
+
+logger.info("tencent_meeting.recorder_callback.diagnostic_ready", {
+  message: TENCENT_MEETING_RECORDER_CALLBACK_DIAGNOSTIC_READY_MARKER,
+  stage: "ready",
+  processId: process.pid,
+});
+console.info(TENCENT_MEETING_RECORDER_CALLBACK_DIAGNOSTIC_READY_MARKER, {
+  stage: "ready",
+  processId: process.pid,
+});
 
 function emitTencentMeetingTranscriptDiagnosticEnd(details = {}) {
   logger.info("tencent_meeting.transcript.diagnostic_end", {
