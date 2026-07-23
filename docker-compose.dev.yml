@@ -2,7 +2,7 @@ services:
   app:
     build:
       context: ./server
-      dockerfile: Dockerfile.complete
+      dockerfile: Dockerfile.dev
     image: wecom-recorder-app:dev
     env_file:
       - .env.dev
@@ -15,8 +15,8 @@ services:
       MYSQL_PORT: 3306
       MYSQL_USER: ${MYSQL_USER:-wecom_recorder}
       MYSQL_PASSWORD: ${MYSQL_PASSWORD:-123456}
-      MYSQL_DATABASE: ${MYSQL_DATABASE:-wecom_recorder_test}
-      DATABASE_URL: mysql://${MYSQL_USER:-wecom_recorder}:${MYSQL_PASSWORD:-123456}@mysql:3306/${MYSQL_DATABASE:-wecom_recorder_test}
+      MYSQL_DATABASE: ${MYSQL_DATABASE:-wecom_recorder_dev}
+      DATABASE_URL: mysql://${MYSQL_USER:-wecom_recorder}:${MYSQL_PASSWORD:-123456}@mysql:3306/${MYSQL_DATABASE:-wecom_recorder_dev}
       REDIS_HOST: redis
       REDIS_PORT: 6379
       REDIS_URL: redis://redis:6379
@@ -28,7 +28,7 @@ services:
       - "${APP_DEBUG_PORT:-9229}:9229"
     volumes:
       - ./server:/app/server
-      - server-node-modules:/app/server/node_modules
+      - server-node-modules-dev:/app/server/node_modules
       - app-logs:/app/logs
       - app-storage:/app/server/storage
     depends_on:
@@ -104,7 +104,7 @@ services:
     restart: unless-stopped
 
 volumes:
-  server-node-modules:
+  server-node-modules-dev:
   app-logs:
   app-storage:
   mysql-data:
