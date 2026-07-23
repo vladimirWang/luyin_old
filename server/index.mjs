@@ -604,6 +604,11 @@ const upload = multer({
 const tencentMeetingImportJobs = new Set();
 const tencentMeetingTranscriptJobs = new Set();
 const tencentMeetingCreatorNameCache = new Map();
+const TENCENT_MEETING_SSE_MOCK_DELAY_MS = 4_000;
+
+function sleep(delayMs) {
+  return new Promise((resolve) => setTimeout(resolve, delayMs));
+}
 
 async function publishRecordingSnapshot(recordingId, type = "recording.updated") {
   const row = await prisma.recording.findFirst({
@@ -1923,7 +1928,7 @@ function queueTencentMeetingImportSync(recordingId, info = {}) {
 }
 
 function waitForTencentMeetingTranscriptRetry(delayMs) {
-  return new Promise((resolve) => setTimeout(resolve, delayMs));
+  return sleep(delayMs);
 }
 
 async function runTencentMeetingTranscriptSyncAttempts(recordingId, info, jobVersion) {
@@ -2280,7 +2285,12 @@ async function upsertTencentMeetingRecordingInfos(recordInfos = [], userAgent = 
 
 async function importTencentMeetingWebhookPayload(
   payload,
-  { syncAudio = false, syncTranscript = false, userAgent = "tencent-meeting-webhook" } = {},
+  {
+    syncAudio = false,
+    syncTranscript = false,
+    sseMockDelayMs = 0,
+    userAgent = "tencent-meeting-webhook",
+  } = {},
 ) {
   logger.debug("触发ststoken获取", {message: 'step2'})
   const event = String(payload?.event || "").trim();
@@ -2325,6 +2335,23 @@ async function importTencentMeetingWebhookPayload(
     createdCount: results.filter((result) => result.created).length,
   });
 
+  const normalizedSseMockDelayMs = Math.max(0, Number(sseMockDelayMs) || 0);
+  if (results.length > 0 && normalizedSseMockDelayMs > 0) {
+    logger.info("tencent_meeting.sse_mock_delay_started", {
+      message: `event=${event}, recordingCount=${results.length}, delayMs=${normalizedSseMockDelayMs}`,
+      event,
+      recordingCount: results.length,
+      delayMs: normalizedSseMockDelayMs,
+    });
+    await sleep(normalizedSseMockDelayMs);
+    logger.info("tencent_meeting.sse_mock_delay_finished", {
+      message: `event=${event}, recordingCount=${results.length}, delayMs=${normalizedSseMockDelayMs}`,
+      event,
+      recordingCount: results.length,
+      delayMs: normalizedSseMockDelayMs,
+    });
+  }
+
   for (const result of results) {
     if (syncTranscript) {
       const queued = queueTencentMeetingTranscriptSync(result.recordingId, {
@@ -2349,6 +2376,7 @@ async function importTencentMeetingWebhookPayload(
 async function importTencentMeetingRecordingCompletedPayload(payload) {
   return importTencentMeetingWebhookPayload(payload, {
     syncAudio: true,
+    sseMockDelayMs: TENCENT_MEETING_SSE_MOCK_DELAY_MS,
     userAgent: "tencent-meeting-recording-completed",
   });
 }
@@ -2357,6 +2385,7 @@ async function importTencentMeetingAudioCompletedPayload(payload) {
   return importTencentMeetingWebhookPayload(payload, {
     syncAudio: true,
     syncTranscript: true,
+    sseMockDelayMs: TENCENT_MEETING_SSE_MOCK_DELAY_MS,
     userAgent: "tencent-meeting-audio-completed",
   });
 }
