@@ -211,6 +211,9 @@ router.post("/", upload.single("audio"), async (request, response, next) => {
     const id = crypto.randomUUID();
     const fileName = `${id}.mp3`;
     const storagePath = path.join(audioDir, fileName);
+    const storagePathForVisit = `/audio/${fileName}`
+    logger.debug("post /api/recordings logger.debug: ", {message: `storagePathForVisit: ${storagePathForVisit}`})
+    console.log("post /api/recordings: console.log", {message: `storagePathForVisit: ${storagePathForVisit}`})
     const now = new Date().toISOString();
     // // ----------用本地假音频模拟上传文件 start-----------
     // const trustedOwner = {
@@ -255,7 +258,7 @@ router.post("/", upload.single("audio"), async (request, response, next) => {
         fileName,
         storageProvider: "local",
         storageKey: storagePath,
-        transcriptPath: "",
+        // transcriptPath: "",
         favorite: false,
         userId: userId,
         ownerClientId: ownerClientId,
@@ -273,6 +276,7 @@ router.post("/", upload.single("audio"), async (request, response, next) => {
         status: "uploaded",
         source: "wecom-h5",
         userAgent: request.get("user-agent") || "",
+        audioUrl: storagePathForVisit
       }
     });
     const recording = recordingFromPrisma(insertResult);
@@ -349,6 +353,7 @@ router.post("/segments", upload.array("audio", 480), async (request, response, n
       status: "uploaded",
       source: files.length > 1 ? "wecom-h5-resumed" : "wecom-h5",
       userAgent: request.get("user-agent") || "",
+      audioUrl: ''
     };
     logger.debug('request segements: ', {message: `request /segments lastSeq: ${latestRecording.seq}, durationMs: ${durationMs}`})
     await prisma.recording.create({
@@ -382,6 +387,7 @@ router.post("/segments", upload.array("audio", 480), async (request, response, n
         status: recording.status,
         source: recording.source,
         userAgent: recording.userAgent,
+        audioUrl: 'recording.audioUrl'
       },
     });
 

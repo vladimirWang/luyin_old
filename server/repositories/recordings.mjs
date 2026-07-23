@@ -24,6 +24,8 @@ function nullableDate(value) {
 }
 
 export function recordingFromPrisma(row = {}) {
+  console.log(`--recordingFromPrisma SERVER_URL: ${process.env.SERVER_URL}`)
+  console.log(`--recordingFromPrisma audioUrl: ${row.audioUrl}`)
   return {
     id: row.id,
     userId: row.userId || "",
@@ -70,6 +72,7 @@ export function recordingFromPrisma(row = {}) {
     tencentMeetingMeetingRecordId: row.tencentMeetingMeetingRecordId || "",
     tencentMeetingSourceKind: row.tencentMeetingSourceKind || "",
     userAgent: row.userAgent || "",
+    audioUrl: `${process.env.SERVER_URL}/static${row.audioUrl}`,
   };
 }
 

@@ -73,6 +73,7 @@ model Recording {
   userAgent                     String?   @map("user_agent") @db.LongText
   createdAt                     DateTime  @default(now()) @map("created_at") @db.Timestamp(0)
   updatedAt                     DateTime  @default(now()) @updatedAt @map("updated_at") @db.Timestamp(0)
+  audioUrl                      String?   @db.VarChar(80)
 
   user      AppUser?            @relation(fields: [userId], references: [id])
   folder    RecordingFolder?    @relation(fields: [folderId], references: [id])

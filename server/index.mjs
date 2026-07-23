@@ -2158,7 +2158,8 @@ function publicRecording(recording, segments = [], viewerClientId = "", viewerNa
       ? "ready"
       : recording.status;
   
-  const tmpStoragePath = recording.storagePath.replace("/app/server/storage", '')
+  // const tmpStoragePath = recording.storagePath.replace("/app/server/storage", '')
+  console.log("recording.audioUrl:  ", recording.audioUrl, '; recording ', recording)
   return {
     id: recording.id,
     seq: recording.seq,
@@ -2224,7 +2225,8 @@ function publicRecording(recording, segments = [], viewerClientId = "", viewerNa
             ? "当前显示的是模拟转写，请点击重新转写获取真实内容。"
             : diagnostics.message,
     },
-    audioUrl: `${process.env.SERVER_URL}/static/${tmpStoragePath}`,
+    audioUrl: recording.audioUrl,
+    // audioUrl: recording.audioUrl,
     transcript: expandedSegments.map((segment, index) => {
       const speakerKey = segmentSpeakerKey(segment, index);
       const speaker = speakerByKey.get(speakerKey) || speakers[0] || { key: "speaker-1", name: primarySpeaker };
