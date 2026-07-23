@@ -237,9 +237,9 @@ router.post("/", upload.single("audio"), async (request, response, next) => {
       }
     })
     const seq = lastRecording ? lastRecording.seq + 1 : 1
-
+    const {ownerClientId, ownerName, userId} = trustedOwner
     logger.info("recording.uploaded lastRecording", { message: `lastRecording.id: ${lastRecording? lastRecording.id: "没有lastRecording"}, seq: ${seq}` });
-    logger.info("recording.uploaded mock", { message: `recordingId: ${id}, ownerClientId: ${mockOwner.ownerClientId}, ownerName: ${mockOwner.ownerName}, durationMs: ${durationMs}, fileSize: ${fileSize}` });
+    // logger.info("recording.uploaded mock", { message: `recordingId: ${id}, ownerClientId: ${mockOwner.ownerClientId}, ownerName: ${mockOwner.ownerName}, durationMs: ${durationMs}, fileSize: ${fileSize}` });
     const insertResult = await prisma.recording.create({
       data: {
         id,
@@ -255,9 +255,9 @@ router.post("/", upload.single("audio"), async (request, response, next) => {
         storageKey: storagePath,
         transcriptPath: "",
         favorite: false,
-        userId: trustedOwner.userId,
-        ownerClientId: trustedOwner.ownerClientId,
-        ownerName: trustedOwner.ownerName,
+        userId: userId,
+        ownerClientId: ownerClientId,
+        ownerName: ownerName,
         shared: false,
         sharedAt: null,
         speakerName: request.body.speakerName || "说话人 1",
@@ -278,7 +278,7 @@ router.post("/", upload.single("audio"), async (request, response, next) => {
     const queued = await queueTranscriptionJob(id, recording);
     logger.debug("queueTranscriptionJob success", { message: `queued: ${queued}` });
     const responseRecording = queued ? { ...recording, status: "transcribing", errorMessage: "" } : recording;
-    response.status(201).json({ recording: publicRecording(responseRecording, [], mockOwner.ownerClientId, mockOwner.ownerName) });
+    response.status(201).json({ recording: publicRecording(responseRecording, [], ownerClientId, ownerName) });
   } catch (error) {
     next(error);
   }
