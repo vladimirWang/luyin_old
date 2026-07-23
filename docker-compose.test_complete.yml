@@ -1,6 +1,8 @@
+name: luyin-test
+
 services:
   app:
-    image: ${APP_IMAGE:-luyin_old-app:test-complete}
+    image: luyin-app:test
     build:
       context: ./server
       dockerfile: Dockerfile.complete

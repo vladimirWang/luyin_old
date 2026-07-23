@@ -5,7 +5,7 @@ services:
     build:
       context: ./server
       dockerfile: Dockerfile.dev
-    image: wecom-recorder-app:dev
+    image: luyin-app:dev
     env_file:
       - .env.dev
     environment:

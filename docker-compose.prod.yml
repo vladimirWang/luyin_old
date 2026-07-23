@@ -1,5 +1,8 @@
+name: luyin-prod
+
 services:
   app:
+    image: luyin-app:prod
     build:
       context: ./server
       dockerfile: Dockerfile
