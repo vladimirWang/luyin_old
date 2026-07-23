@@ -230,7 +230,7 @@ router.post("/", upload.single("audio"), async (request, response, next) => {
     await convertAudioFileToMp3(request.file.path, storagePath);
     await removeFileIfExists(request.file.path);
     const { storedFile, durationMs } = await verifiedStoredRecording(storagePath, request.body.durationMs);
-    const fileSize = storedFile.fileSize
+    const fileSize = storedFile.size
     const lastRecording = await prisma.recording.findFirst({
       orderBy: {
         seq: 'desc'
@@ -240,6 +240,8 @@ router.post("/", upload.single("audio"), async (request, response, next) => {
     const {ownerClientId, ownerName, userId} = trustedOwner
     logger.info("recording.uploaded lastRecording", { message: `lastRecording.id: ${lastRecording? lastRecording.id: "没有lastRecording"}, seq: ${seq}` });
     // logger.info("recording.uploaded mock", { message: `recordingId: ${id}, ownerClientId: ${mockOwner.ownerClientId}, ownerName: ${mockOwner.ownerName}, durationMs: ${durationMs}, fileSize: ${fileSize}` });
+    const safeDurationMs = BigInt(durationMs || 0);
+    const safeFileSize = BigInt(fileSize || 0);
     const insertResult = await prisma.recording.create({
       data: {
         id,
@@ -247,9 +249,9 @@ router.post("/", upload.single("audio"), async (request, response, next) => {
         name: request.body.name || `录音 ${String(seq).padStart(3, "0")}`,
         createdAt: now,
         updatedAt: now,
-        durationMs: BigInt(durationMs),
+        durationMs: safeDurationMs,
         mimeType: "audio/mpeg",
-        fileSize: BigInt(fileSize),
+        fileSize: safeFileSize,
         fileName,
         storageProvider: "local",
         storageKey: storagePath,
