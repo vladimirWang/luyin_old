@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef } from "react";
-import { Check, Share2, RefreshCw, Trash2 } from "lucide-react";
+import { Check, FileAudio, FileText, Share2, RefreshCw, Trash2 } from "lucide-react";
 import {
   formatCardDateParts,
   formatClockTime,
@@ -9,6 +9,12 @@ import {
   recordVisualClass,
   recordSourceMeta,
   recordingStatusLabel,
+  recordingFileStatus,
+  recordingFileStatusLabel,
+  recordingTranscriptStatus,
+  recordingTranscriptStatusLabel,
+  recordingCanPlay,
+  recordingCanAsk,
   getClientName,
   cardColors,
 } from "../../utils/index.js";
@@ -57,6 +63,20 @@ export function RecordCard({
     recording.canManage !== false &&
     (recording.status === "failed" || recording.transcriptHealth?.isFallback);
   const canDeleteThisRecording = recording.canDelete !== false;
+  const fileStatus = recordingFileStatus(recording);
+  const transcriptStatus = recordingTranscriptStatus(recording);
+  const canPlay = recordingCanPlay(recording);
+  const canAsk = recordingCanAsk(recording);
+  const statusHint =
+    !canPlay && !canAsk
+      ? "文件处理完成后可播放，转写完成后可问答"
+      : !canPlay
+        ? "文件处理完成后即可播放"
+        : transcriptStatus === "unavailable"
+          ? "当前没有可用转写，暂不能问答"
+          : !canAsk
+            ? "转写完成后即可问答"
+            : "";
   const ownerLabel = recording.ownerName && recording.ownerName !== "未设置姓名" ? recording.ownerName : getClientName();
 
   useEffect(() => {
@@ -201,6 +221,7 @@ export function RecordCard({
       onDeleteModeChange?.("");
       return;
     }
+    if (!canPlay) return;
     onToggleExpand?.(event);
   }
 
@@ -215,7 +236,7 @@ export function RecordCard({
   const canBulkDelete = !isTrashView && canDeleteThisRecording;
   const cardClassName = `record-card ${color} ${visualClass} ${sourceMeta.className}${isTrashView ? " in-trash" : ""}${
     isExpanded ? " expanded" : ""
-  }${isToday(recording.createdAt) ? " is-today" : ""}`;
+  }${isToday(recording.createdAt) ? " is-today" : ""}${!canPlay || !canAsk ? " is-processing" : ""}`;
   const shellClassName = `record-card-shell${deleteRevealed ? " delete-revealed" : ""}${
     deleteModeActive ? " delete-mode-active" : ""
   }${shareMenuOpen ? " share-open" : ""}${
@@ -231,6 +252,7 @@ export function RecordCard({
         onPointerMove={handleCardPointerMove}
         onPointerUp={handleCardPointerEnd}
         onPointerCancel={handleCardPointerEnd}
+        aria-disabled={!isTrashView && !canPlay}
         style={{ "--record-title-size": recordTitleSize(draftName) }}
       >
         <div className="record-source-strip" aria-hidden="true">
@@ -294,10 +316,29 @@ export function RecordCard({
           }}
           onClick={(event) => event.stopPropagation()}
         />
-        <div style={{color: 'red', fontSize: 12}}>{recording.id.slice(0,5)}</div>
         <div className="record-meta">
           <span>{dayjs(recording.createdAt).format("YYYY-MM-DD")}</span>
         </div>
+
+        {!isTrashView ? (
+          <div className="record-processing-panel" role="status" aria-live="polite" onClick={(event) => event.stopPropagation()}>
+            <div className={`record-processing-stage file-stage ${fileStatus}`}>
+              <FileAudio size={15} aria-hidden="true" />
+              <span>
+                <small>录音文件</small>
+                <strong>{recordingFileStatusLabel(recording)}</strong>
+              </span>
+            </div>
+            <div className={`record-processing-stage transcript-stage ${transcriptStatus}`}>
+              <FileText size={15} aria-hidden="true" />
+              <span>
+                <small>文字转写</small>
+                <strong>{recordingTranscriptStatusLabel(recording)}</strong>
+              </span>
+            </div>
+            {statusHint ? <p>{statusHint}</p> : null}
+          </div>
+        ) : null}
 
         <div className="card-mark-row" onClick={(event) => event.stopPropagation()}>
           <textarea
@@ -381,7 +422,13 @@ export function RecordCard({
                   <RefreshCw size={18} />
                 </IconButton>
               ) : null}
-              <button className="qa-card-button" type="button" onClick={onAsk}>
+              <button
+                className="qa-card-button"
+                type="button"
+                onClick={onAsk}
+                disabled={!canAsk}
+                title={canAsk ? "打开录音问答" : "文字转写完成后才能问答"}
+              >
                 问答
               </button>
             </>

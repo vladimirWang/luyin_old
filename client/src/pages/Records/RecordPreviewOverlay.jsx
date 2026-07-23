@@ -6,6 +6,7 @@ import {
   isTencentMeetingWaitingTranscript,
   isTencentMeetingNoTranscript,
   meetingReportBlocks,
+  recordingCanAsk,
   api,
   showToast,
 } from "../../utils/index.js";
@@ -69,6 +70,7 @@ export function RecordPreviewOverlay({ recording, onClose, onAsk, onShare, onRet
     };
   }, [recording, onRetranscribe]);
   const { transcriptLines, isTranscriptGenerating, canRetranscribe } = transcriptState;
+  const canAsk = recordingCanAsk(recording);
   const outlineCount = useMemo(() => {
     if (!meetingOutline) return 0;
     return (
@@ -396,7 +398,12 @@ export function RecordPreviewOverlay({ recording, onClose, onAsk, onShare, onRet
               <Share2 size={15} />
               分享
             </button>
-            <button type="button" onClick={onAsk}>
+            <button
+              type="button"
+              onClick={onAsk}
+              disabled={!canAsk}
+              title={canAsk ? "打开录音问答" : "文字转写完成后才能问答"}
+            >
               问答
             </button>
           </div>

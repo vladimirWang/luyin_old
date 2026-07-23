@@ -47,6 +47,7 @@ import authRouter, { configure as configureAuthRouter } from "./router/auth.js";
 import foldersRouter, { configure as configureFoldersRouter } from "./router/folders.js";
 import algoRouter from "./router/algo.js";
 import { requestClientIdBetter, resolveRecordingAudioPath, resolveRecordingAudioPathBetter } from "./utils/recordings.js";
+import { publishRecordingEvent } from "./utils/recordingEvents.mjs";
 import {
   expandTencentMeetingKeyCandidates,
   loadTencentMeetingStsToken,
@@ -603,6 +604,28 @@ const upload = multer({
 const tencentMeetingImportJobs = new Set();
 const tencentMeetingTranscriptJobs = new Set();
 const tencentMeetingCreatorNameCache = new Map();
+
+async function publishRecordingSnapshot(recordingId, type = "recording.updated") {
+  const row = await prisma.recording.findFirst({
+    where: { id: recordingId, deletedAt: null },
+  });
+  if (!row) return null;
+  const recording = recordingFromPrisma(row);
+  publishRecordingEvent(type, recording);
+  return recording;
+}
+
+async function updateRecordingRealtimeState(recordingId, data = {}) {
+  const updated = await prisma.recording.updateMany({
+    where: { id: recordingId, deletedAt: null },
+    data: {
+      ...data,
+      updatedAt: data.updatedAt || new Date(),
+    },
+  });
+  if (updated.count) await publishRecordingSnapshot(recordingId);
+  return updated;
+}
 let tencentMeetingCloudDiscoveryJob = null;
 
 function logTencentMeetingTranscriptTrace(stage, details = {}) {
@@ -1506,6 +1529,7 @@ async function storeTencentMeetingBuiltInTranscript(recordingId, transcriptResul
   const now = new Date();
   const recordingData = {
     status: "ready",
+    transcriptStatus: "ready",
     updatedAt: now,
     errorMessage: "",
     transcribedAt: now,
@@ -1524,6 +1548,9 @@ async function storeTencentMeetingBuiltInTranscript(recordingId, transcriptResul
   }
 
   let persistenceStats = { deletedSegmentCount: 0, createdSegmentCount: 0, updatedRecordingCount: 0 };
+  await updateRecordingRealtimeState(recordingId, {
+    transcriptStatus: "persisting",
+  });
   await prisma.$transaction(async (tx) => {
     const deleted = await tx.transcriptSegment.deleteMany({ where: { recordingId } });
     const created = await tx.transcriptSegment.createMany({
@@ -1554,6 +1581,7 @@ async function storeTencentMeetingBuiltInTranscript(recordingId, transcriptResul
     recordFileId,
     ...persistenceStats,
   });
+  await publishRecordingSnapshot(recordingId);
 
   if (isRecordingJobCancelled(recordingId, jobVersion)) return false;
 
@@ -1607,6 +1635,9 @@ async function syncTencentMeetingBuiltInTranscript(recordingId, info = {}, jobVe
     return false;
   }
   const recording = recordingFromPrisma(recordingRow);
+  await updateRecordingRealtimeState(recordingId, {
+    transcriptStatus: "fetching",
+  });
   const existingSegmentCount = await prisma.transcriptSegment.count({ where: { recordingId } });
   logger.info("[CALL] syncTencentMeetingBuiltInTranscript", {message: `transcriptSource: ${recording.transcriptSource}, existingSegments.length: ${existingSegmentCount}`});
   logTencentMeetingTranscriptTrace("recording_loaded", {
@@ -1617,6 +1648,9 @@ async function syncTencentMeetingBuiltInTranscript(recordingId, info = {}, jobVe
     existingSegmentCount,
   });
   if (existingSegmentCount > 0 && recording.transcriptSource === "tencent-meeting") {
+    await updateRecordingRealtimeState(recordingId, {
+      transcriptStatus: "ready",
+    });
     logger.info("[CALL] syncTencentMeetingBuiltInTranscript", {message: `已有撰写片段，且转写来源是腾讯会议，无需同步转写`});
     logTencentMeetingTranscriptTrace("sync_completed", {
       recordingId,
@@ -1647,11 +1681,9 @@ async function syncTencentMeetingBuiltInTranscript(recordingId, info = {}, jobVe
     const failureKind = transcriptResult?.failureKind || "pending";
     const finalStatus = tencentMeetingTranscriptFinalStatus(failureKind, recording);
     if (String(recording.source || "").startsWith(TENCENT_MEETING_SOURCE_PREFIX)) {
-      const updated = await prisma.recording.updateMany({
-        where: { id: recordingId, deletedAt: null },
-        data: {
-          updatedAt: new Date(),
+      const updated = await updateRecordingRealtimeState(recordingId, {
           status: recording.status === "transcribing" || recording.status === "processing" ? "uploaded" : recording.status,
+          transcriptStatus: finalStatus.final ? "unavailable" : "waiting",
           tag: tencentMeetingImportTag({ ...info, sourceKind: recording.tencentMeetingSourceKind }, finalStatus.statusText),
           errorMessage: finalStatus.errorMessage,
           transcriptProvider: "tencent-meeting",
@@ -1664,7 +1696,6 @@ async function syncTencentMeetingBuiltInTranscript(recordingId, info = {}, jobVe
                 transcriptionMetaPath: "",
               }
             : {}),
-        },
       });
       logTencentMeetingTranscriptTrace("no_segments_status_persisted", {
         recordingId,
@@ -1737,7 +1768,14 @@ async function syncTencentMeetingRecordingAudio(recordingId, info = {}, jobVersi
     where: { id: recordingId, deletedAt: null },
   });
   if (!recordingBeforeSync) return false;
-  if (resolveRecordingAudioPathBetter(recordingBeforeSync, projectRoot)) return true;
+  if (resolveRecordingAudioPathBetter(recordingBeforeSync, projectRoot)) {
+    if (recordingBeforeSync.fileStatus !== "ready") {
+      await updateRecordingRealtimeState(recordingId, { fileStatus: "ready" });
+    }
+    return true;
+  }
+
+  await updateRecordingRealtimeState(recordingId, { fileStatus: "downloading" });
 
   console.info(`[CALL] syncTencentMeetingRecordingAudio: recordingId: ${recordingId}`);
   const target = await findTencentMeetingDownloadTarget(info);
@@ -1750,6 +1788,7 @@ async function syncTencentMeetingRecordingAudio(recordingId, info = {}, jobVersi
     if (isRecordingJobCancelled(recordingId, jobVersion)) return false;
     const data = {
       updatedAt: new Date(),
+      fileStatus: "waiting",
       tencentMeetingSourceKind: info.sourceKind || recordingBeforeSync.tencentMeetingSourceKind || "",
       tag: tencentMeetingImportTag(info, "等待下载权限"),
       errorMessage: needsIdentity
@@ -1786,10 +1825,7 @@ async function syncTencentMeetingRecordingAudio(recordingId, info = {}, jobVersi
           ? "腾讯会议录音笔已完成音频处理，正在同步录音笔转写内容；如果文字仍在生成，后台会按计划重试。"
           : "腾讯会议转写内容尚未返回，后台会等待对应事件后继续同步。";
     }
-    await prisma.recording.updateMany({
-      where: { id: recordingId, deletedAt: null },
-      data,
-    });
+    await updateRecordingRealtimeState(recordingId, data);
     return false;
   }
 
@@ -1798,6 +1834,7 @@ async function syncTencentMeetingRecordingAudio(recordingId, info = {}, jobVersi
   const storagePath = path.join(audioDir, fileName);
   try {
     const downloadInfo = await downloadTencentMeetingFile(target.downloadUrl, tempPath);
+    await updateRecordingRealtimeState(recordingId, { fileStatus: "processing" });
     const inspection = await inspectTencentMeetingDownloadedFile(tempPath, downloadInfo);
     const conversionInput =
       inspection.useRemoteInput || isTencentMeetingStreamingMedia(target.downloadUrl, downloadInfo) ? target.downloadUrl : tempPath;
@@ -1826,6 +1863,7 @@ async function syncTencentMeetingRecordingAudio(recordingId, info = {}, jobVersi
       storageProvider: "local",
       storageKey: storagePath,
       audioUrl: tencentMeetingRecordingAudioUrl(recordingId),
+      fileStatus: "ready",
       status: segmentCount > 0 ? "ready" : "uploaded",
       errorMessage: "",
       tag: tencentMeetingImportTag(info, segmentCount > 0 ? "已同步转写" : "等待录音笔转写"),
@@ -1844,10 +1882,7 @@ async function syncTencentMeetingRecordingAudio(recordingId, info = {}, jobVersi
     if (target.record?.meeting_code || target.record?.meetingCode) {
       data.tencentMeetingMeetingCode = target.record.meeting_code || target.record.meetingCode;
     }
-    const synced = await prisma.recording.updateMany({
-      where: { id: recordingId, deletedAt: null },
-      data,
-    });
+    const synced = await updateRecordingRealtimeState(recordingId, data);
     if (!synced.count) {
       await removeFileIfExists(storagePath);
       return false;
@@ -1861,10 +1896,12 @@ async function syncTencentMeetingRecordingAudio(recordingId, info = {}, jobVersi
         where: { id: recordingId, deletedAt: null },
         data: {
           updatedAt: new Date(),
+          fileStatus: "failed",
           tag: tencentMeetingImportTag(info, "等待重试"),
           errorMessage: error instanceof Error ? error.message : String(error),
         },
       });
+      await publishRecordingSnapshot(recordingId);
     }
     throw error;
   }
@@ -1998,7 +2035,11 @@ function queueTencentMeetingTranscriptSync(recordingId, info = {}) {
       recordFileId,
       jobVersion,
     });
-    runTencentMeetingTranscriptSyncAttempts(recordingId, info, jobVersion)
+    const statusReady = updateRecordingRealtimeState(recordingId, { transcriptStatus: "queued" }).catch((error) =>
+      console.warn("[Tencent Meeting] transcript queued status update failed:", error instanceof Error ? error.message : error),
+    );
+    statusReady
+      .then(() => runTencentMeetingTranscriptSyncAttempts(recordingId, info, jobVersion))
       .then((result) => {
         outcome = result.outcome;
         return result.stored;
@@ -2011,6 +2052,15 @@ function queueTencentMeetingTranscriptSync(recordingId, info = {}) {
           jobVersion,
           error: error instanceof Error ? error.message : String(error),
         });
+        updateRecordingRealtimeState(recordingId, {
+          transcriptStatus: "failed",
+          errorMessage: error instanceof Error ? error.message : String(error),
+        }).catch((statusError) =>
+          console.warn(
+            "[Tencent Meeting] transcript failed status update failed:",
+            statusError instanceof Error ? statusError.message : statusError,
+          ),
+        );
         console.warn("[Tencent Meeting] transcript sync failed:", error instanceof Error ? error.message : error);
       })
       .finally(() => {
@@ -2105,7 +2155,7 @@ async function upsertTencentMeetingRecordingInfos(recordInfos = [], userAgent = 
   if (!uniqueInfos.length) return [];
 
   const now = new Date();
-  return prisma.$transaction(async (tx) => {
+  const results = await prisma.$transaction(async (tx) => {
     const latest = await tx.recording.findFirst({ orderBy: { seq: "desc" }, select: { seq: true } });
     let nextSeq = Number(latest?.seq || 0);
     const results = [];
@@ -2149,6 +2199,13 @@ async function upsertTencentMeetingRecordingInfos(recordInfos = [], userAgent = 
           ownerName,
           audioUrl: tencentMeetingRecordingAudioUrl(existing.id),
           transcriptProvider: existing.transcriptSource === "tencent-meeting" || !hasSegments ? "tencent-meeting" : existing.transcriptProvider,
+          fileStatus: existing.fileStatus || (existing.storageKey ? "ready" : "pending"),
+          transcriptStatus:
+            eventInfo.event === "smart.transcripts"
+              ? "queued"
+              : hasSegments
+                ? "ready"
+                : existing.transcriptStatus || "waiting",
         };
         if (eventInfo.subject) data.name = tencentMeetingPlaceholderName(eventInfo);
         const eventDurationMs = Number(eventInfo.durationMs || 0);
@@ -2197,6 +2254,8 @@ async function upsertTencentMeetingRecordingInfos(recordInfos = [], userAgent = 
           transcriptSource: "",
           transcribedAt: null,
           status: "uploaded",
+          fileStatus: "pending",
+          transcriptStatus: eventInfo.event === "smart.transcripts" ? "queued" : "waiting",
           source,
           tencentMeetingCreatorUserid: eventInfo.creatorUserid || "",
           tencentMeetingMeetingId: eventInfo.meetingId || "",
@@ -2213,6 +2272,10 @@ async function upsertTencentMeetingRecordingInfos(recordInfos = [], userAgent = 
     }
     return results;
   });
+  for (const result of results) {
+    await publishRecordingSnapshot(result.recordingId, result.created ? "recording.created" : "recording.updated");
+  }
+  return results;
 }
 
 async function importTencentMeetingWebhookPayload(
@@ -2608,6 +2671,18 @@ function publicRecording(recording, segments = [], viewerClientId = "", viewerNa
     translationText: recording.translationText || "",
     detectedLanguage: recording.detectedLanguage || "",
     status: displayStatus,
+    fileStatus: recording.fileStatus || (recording.storagePath ? "ready" : "pending"),
+    transcriptStatus:
+      recording.transcriptStatus ||
+      (expandedSegments.length > 0
+        ? "ready"
+        : recording.transcriptSource === "tencent-meeting-unavailable"
+          ? "unavailable"
+          : displayStatus === "failed"
+            ? "failed"
+            : displayStatus === "transcribing" || displayStatus === "processing"
+              ? "transcribing"
+              : "waiting"),
     errorMessage: recording.errorMessage ? userSafeErrorMessage(recording.errorMessage, "转写失败，请稍后点击重新转写。") : "",
     transcriptText,
     transcriptProvider: isTencentMeetingImport ? recording.transcriptProvider || "tencent-meeting" : recording.transcriptProvider || diagnostics.mode,

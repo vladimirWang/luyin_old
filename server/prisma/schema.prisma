@@ -52,6 +52,8 @@ model Recording {
   transcriptCorrectedPath       String?   @map("transcript_corrected_path") @db.VarChar(500)
   transcriptionMetaPath         String?   @map("transcription_meta_path") @db.VarChar(500)
   status                        String?   @db.VarChar(32)
+  fileStatus                    String?   @map("file_status") @db.VarChar(32)
+  transcriptStatus              String?   @map("transcript_status") @db.VarChar(32)
   favorite                      Boolean?  @default(false)
   deletedAt                     DateTime? @map("deleted_at") @db.Timestamp(0)
   transcriptProvider            String?   @map("transcript_provider") @db.VarChar(80)

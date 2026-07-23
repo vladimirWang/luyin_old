@@ -35,6 +35,10 @@ import {
   recordingFromPrisma,
   transcriptSegmentFromPrisma,
 } from "../repositories/recordings.mjs";
+import {
+  formatRecordingSseEvent,
+  subscribeRecordingEvents,
+} from "../utils/recordingEvents.mjs";
 
 const prisma = await import('../plugins/prisma.cjs').then(m => m.default || m);
 
@@ -192,6 +196,46 @@ router.get("/", async (request, response, next) => {
   } catch (error) {
     next(error);
   }
+});
+
+router.get("/events", (request, response) => {
+  const clientId = requestClientIdBetter(request);
+  let closed = false;
+
+  response.status(200);
+  response.setHeader("Content-Type", "text/event-stream; charset=utf-8");
+  response.setHeader("Cache-Control", "no-cache, no-transform");
+  response.setHeader("Connection", "keep-alive");
+  response.setHeader("X-Accel-Buffering", "no");
+  response.flushHeaders?.();
+  response.write("retry: 3000\n\n");
+  response.write(
+    formatRecordingSseEvent({
+      id: String(Date.now()),
+      type: "recordings.connected",
+      data: { connected: true, timestamp: new Date().toISOString() },
+    }),
+  );
+
+  const unsubscribe = subscribeRecordingEvents((event) => {
+    if (closed || !canReadRecording(event.recording, clientId)) return;
+    response.write(formatRecordingSseEvent(event));
+  });
+  const heartbeat = setInterval(() => {
+    if (!closed) response.write(`: heartbeat ${Date.now()}\n\n`);
+  }, 15_000);
+
+  function close() {
+    if (closed) return;
+    closed = true;
+    clearInterval(heartbeat);
+    unsubscribe();
+  }
+
+  request.on("close", close);
+  request.on("aborted", close);
+  response.on("close", close);
+  response.on("error", close);
 });
 
 router.post("/", upload.single("audio"), async (request, response, next) => {

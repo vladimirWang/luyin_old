@@ -158,6 +158,16 @@ export function publicRecording(recording, segments, clientId, clientName, optio
     transcribedAt: recording.transcribedAt,
     folderId: recording.folderId,
     status: recording.status,
+    fileStatus: recording.fileStatus || (recording.storagePath ? "ready" : "pending"),
+    transcriptStatus:
+      recording.transcriptStatus ||
+      ((segments || []).length > 0
+        ? "ready"
+        : recording.status === "failed"
+          ? "failed"
+          : recording.status === "transcribing" || recording.status === "processing"
+            ? "transcribing"
+            : "waiting"),
     source: recording.source,
     errorMessage: recording.errorMessage || "",
     transcriptPath: canManage ? recording.transcriptPath : "",

@@ -102,6 +102,7 @@ import {loadImageSource, compressAvatarImage} from '../../utils/image.js'
 import {isUploadableMediaFile, getAudioFileDuration} from '../../utils/audio.js'
 import { isInWeCom } from '../../utils/wecom.js'
 import {useUploadManager} from '../../hooks/useUploadManager.js'
+import { useRecordingEvents } from "../../hooks/useRecordingEvents.js";
 import { useWecomAuthStore } from '../../stores/useWecomAuthStore.js'
 import {QA_ACTIVE_MESSAGE_KEY, DAILY_BRIEF_ACTIVE_KEY, PROFILE_STORAGE_KEY} from '../../constant.js'
 import {appendUrlParam} from '../../utils/index.js'
@@ -430,6 +431,33 @@ export default function Records() {
         : [payload.recording, ...current],
     );
   }
+
+  useRecordingEvents((event) => {
+    if (event.type === "recordings.connected") {
+      refreshRecordings("", selectedFolderId, { silent: true }).catch(() => {});
+      return;
+    }
+
+    const patch = event.data || {};
+    if (!patch.id) return;
+    if (event.type === "recording.created") {
+      refreshRecordings("", selectedFolderId, { silent: true }).catch(() => {});
+      refreshFolders().catch(() => {});
+      return;
+    }
+    if (event.type !== "recording.updated") return;
+
+    setRecordings((current) =>
+      current.map((recording) =>
+        recording.id === patch.id
+          ? {
+              ...recording,
+              ...patch,
+            }
+          : recording,
+      ),
+    );
+  });
 
   useEffect(() => {
     const sharedId = new URLSearchParams(window.location.search).get("recording");

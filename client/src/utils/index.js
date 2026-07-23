@@ -588,6 +588,62 @@ export function recordingStatusLabel(recording, isTrashView = false) {
   return "处理中";
 }
 
+export function recordingFileStatus(recording = {}) {
+  const explicit = String(recording.fileStatus || "").trim();
+  if (explicit) return explicit;
+  if (isTencentMeetingWaitingDownload(recording)) return "waiting";
+  return recording.status === "failed" ? "failed" : "ready";
+}
+
+export function recordingTranscriptStatus(recording = {}) {
+  const explicit = String(recording.transcriptStatus || "").trim();
+  if (explicit) return explicit;
+  if (isTencentMeetingNoTranscript(recording)) return "unavailable";
+  if (Array.isArray(recording.transcript) && recording.transcript.length > 0) return "ready";
+  if (recording.transcriptText) return "ready";
+  if (recording.status === "failed") return "failed";
+  if (recording.status === "transcribing" || recording.status === "processing") return "transcribing";
+  return "waiting";
+}
+
+export function recordingFileStatusLabel(recording = {}) {
+  const labels = {
+    pending: "等待文件",
+    waiting: "等待下载",
+    queued: "等待下载",
+    downloading: "下载中",
+    processing: "文件处理中",
+    ready: "文件就绪",
+    failed: "文件失败",
+  };
+  const status = recordingFileStatus(recording);
+  return labels[status] || "文件处理中";
+}
+
+export function recordingTranscriptStatusLabel(recording = {}) {
+  const labels = {
+    pending: "等待转写",
+    waiting: "等待转写",
+    queued: "转写排队",
+    fetching: "转写中",
+    transcribing: "转写中",
+    persisting: "正在写入",
+    ready: "转写就绪",
+    unavailable: "暂无转写",
+    failed: "转写失败",
+  };
+  const status = recordingTranscriptStatus(recording);
+  return labels[status] || "转写处理中";
+}
+
+export function recordingCanPlay(recording = {}) {
+  return recordingFileStatus(recording) === "ready";
+}
+
+export function recordingCanAsk(recording = {}) {
+  return recordingTranscriptStatus(recording) === "ready";
+}
+
 export function recordingDetailStatusLabel(recording) {
   if (isTencentMeetingNoTranscript(recording)) return "腾讯无文字";
   if (isTencentMeetingWaitingDownload(recording)) return "等待同步";

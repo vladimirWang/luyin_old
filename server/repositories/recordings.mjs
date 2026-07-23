@@ -23,6 +23,21 @@ function nullableDate(value) {
   return Number.isNaN(date.getTime()) ? null : date;
 }
 
+function derivedFileStatus(row = {}) {
+  if (row.fileStatus) return row.fileStatus;
+  if (row.storageKey || row.storagePath) return "ready";
+  return row.status === "failed" ? "failed" : "pending";
+}
+
+function derivedTranscriptStatus(row = {}) {
+  if (row.transcriptStatus) return row.transcriptStatus;
+  if (row.transcribedAt || row.transcriptSource === "tencent-meeting") return "ready";
+  if (row.transcriptSource === "tencent-meeting-unavailable") return "unavailable";
+  if (row.status === "failed") return "failed";
+  if (row.status === "transcribing" || row.status === "processing") return "transcribing";
+  return "waiting";
+}
+
 export function recordingFromPrisma(row = {}) {
   return {
     id: row.id,
@@ -53,6 +68,8 @@ export function recordingFromPrisma(row = {}) {
     folderId: row.folderId || null,
     deletedAt: iso(row.deletedAt) || null,
     status: row.status || "uploaded",
+    fileStatus: derivedFileStatus(row),
+    transcriptStatus: derivedTranscriptStatus(row),
     errorMessage: row.errorMessage || "",
     transcriptProvider: row.transcriptProvider || "",
     transcriptSource: row.transcriptSource || "",
@@ -167,6 +184,8 @@ function recordingPrismaScalarData(recording = {}) {
     transcriptCorrectedPath: recording.transcriptCorrectedPath || "",
     transcriptionMetaPath: recording.transcriptionMetaPath || "",
     status: recording.status || "uploaded",
+    fileStatus: recording.fileStatus || derivedFileStatus(recording),
+    transcriptStatus: recording.transcriptStatus || derivedTranscriptStatus(recording),
     favorite: Boolean(recording.favorite),
     deletedAt: nullableDate(recording.deletedAt),
     transcriptProvider: recording.transcriptProvider || "",

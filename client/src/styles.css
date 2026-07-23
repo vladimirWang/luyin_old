@@ -1762,6 +1762,185 @@ button {
   display: none;
 }
 
+/* Recording lifecycle: file and transcript progress are independent. */
+.record-card[aria-disabled="true"] {
+  cursor: progress;
+}
+
+.record-processing-panel {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 7px;
+  margin-top: 9px;
+}
+
+.record-processing-stage {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  gap: 7px;
+  min-height: 42px;
+  padding: 7px 8px;
+  border-radius: 14px;
+  color: #596272;
+  background: rgba(255, 255, 255, 0.62);
+  box-shadow:
+    inset 0 0 0 1px rgba(125, 135, 151, 0.1),
+    0 8px 18px rgba(36, 42, 54, 0.035);
+}
+
+.record-processing-stage > svg {
+  flex: 0 0 auto;
+}
+
+.record-processing-stage > span {
+  display: grid;
+  min-width: 0;
+  gap: 1px;
+}
+
+.record-processing-stage small,
+.record-processing-stage strong {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.record-processing-stage small {
+  color: #8a92a0;
+  font-size: 9px;
+  font-weight: 800;
+}
+
+.record-processing-stage strong {
+  color: #4c5565;
+  font-size: 11px;
+  font-weight: 950;
+}
+
+.record-processing-stage.downloading,
+.record-processing-stage.processing,
+.record-processing-stage.fetching,
+.record-processing-stage.transcribing,
+.record-processing-stage.persisting,
+.record-processing-stage.queued {
+  color: var(--card-accent, #5f6ee8);
+  background: rgba(var(--card-accent-rgb, 95, 110, 232), 0.1);
+}
+
+.record-processing-stage.downloading strong,
+.record-processing-stage.processing strong,
+.record-processing-stage.fetching strong,
+.record-processing-stage.transcribing strong,
+.record-processing-stage.persisting strong,
+.record-processing-stage.queued strong {
+  color: var(--card-accent, #5f6ee8);
+}
+
+.record-processing-stage.downloading > svg,
+.record-processing-stage.processing > svg,
+.record-processing-stage.fetching > svg,
+.record-processing-stage.transcribing > svg,
+.record-processing-stage.persisting > svg,
+.record-processing-stage.queued > svg {
+  animation: recording-status-pulse 1.3s ease-in-out infinite;
+}
+
+.record-processing-stage.ready {
+  color: #23856e;
+  background: rgba(35, 133, 110, 0.1);
+}
+
+.record-processing-stage.ready strong {
+  color: #1f745f;
+}
+
+.record-processing-stage.failed {
+  color: #cf575a;
+  background: rgba(207, 87, 90, 0.1);
+}
+
+.record-processing-stage.failed strong {
+  color: #b9474b;
+}
+
+.record-processing-stage.unavailable {
+  color: #7e8794;
+  background: rgba(126, 135, 148, 0.1);
+}
+
+.record-processing-panel > p {
+  grid-column: 1 / -1;
+  margin: -1px 2px 0;
+  color: #7b8492;
+  font-size: 10px;
+  font-weight: 800;
+  line-height: 1.35;
+  text-align: center;
+}
+
+.qa-card-button:disabled {
+  cursor: not-allowed;
+  color: #9299a5;
+  background: rgba(232, 235, 241, 0.78);
+  box-shadow: inset 0 0 0 1px rgba(132, 140, 154, 0.08);
+  opacity: 0.72;
+}
+
+.record-grid.compact .record-processing-panel {
+  gap: 5px;
+  margin-top: 7px;
+}
+
+.record-grid.compact .record-processing-stage {
+  min-height: 36px;
+  gap: 5px;
+  padding: 5px 6px;
+  border-radius: 12px;
+}
+
+.record-grid.compact .record-processing-stage small {
+  display: none;
+}
+
+.record-grid.compact .record-processing-stage strong {
+  font-size: 9px;
+}
+
+.record-grid.dense .record-processing-panel {
+  gap: 4px;
+  margin-top: 5px;
+}
+
+.record-grid.dense .record-processing-stage {
+  min-height: 28px;
+  justify-content: center;
+  gap: 3px;
+  padding: 4px;
+  border-radius: 10px;
+}
+
+.record-grid.dense .record-processing-stage small,
+.record-grid.dense .record-processing-panel > p {
+  display: none;
+}
+
+.record-grid.dense .record-processing-stage strong {
+  font-size: 8px;
+}
+
+@keyframes recording-status-pulse {
+  0%,
+  100% {
+    opacity: 0.55;
+    transform: scale(0.92);
+  }
+  50% {
+    opacity: 1;
+    transform: scale(1);
+  }
+}
+
 /* Final swipe-delete behavior: fixed card size, left swipe reveals a neutral button. */
 .record-card-shell,
 .record-card-shell.delete-revealed {

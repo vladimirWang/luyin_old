@@ -16,7 +16,7 @@ import {
   LogOut,
   UserRound,
 } from "lucide-react";
-import { uiText } from "../../utils/index.js";
+import { recordingCanAsk, recordingCanPlay, uiText } from "../../utils/index.js";
 import { IconButton } from "../../components/IconButton.jsx";
 import { UploadingRecordCard } from "./UploadingRecordCard.jsx";
 import { RecordCard } from "./RecordCard.jsx";
@@ -149,7 +149,8 @@ export function RecordsView({
   const visibleFolderItems = foldersExpanded && canExpandFolders ? folderItems : collapsedFolderItems;
 
   const previewRecording = useMemo(() => {
-    return recordings.find((item) => item.id === expandedRecordingId)
+    const recording = recordings.find((item) => item.id === expandedRecordingId);
+    return recordingCanPlay(recording) ? recording : null;
   }, [recordings, expandedRecordingId])
   
   const recordColumns = cardScale < 0.62 ? 6 : cardScale < 0.86 ? 4 : 2;
@@ -471,10 +472,13 @@ export function RecordsView({
                   bulkDeleteSelected={bulkDeleteSelectedSet.has(recording.id)}
                   onBulkDeleteToggle={toggleBulkDeleteSelection}
                   onToggleExpand={() => {
+                    if (!recordingCanPlay(recording)) return;
                     console.log("recording toggle: ", recording.id)
                     setExpandedRecordingId((current) => (current === recording.id ? "" : recording.id))
                   }}
-                  onAsk={() => onOpenDetail(recording.id)}
+                  onAsk={() => {
+                    if (recordingCanAsk(recording)) onOpenDetail(recording.id);
+                  }}
                   onRename={(name) => onRename(recording.id, name)}
                   onUpdateMeta={(patch) => onUpdateMeta(recording.id, patch)}
                   onMove={(folderId) => onMove(recording.id, folderId)}
