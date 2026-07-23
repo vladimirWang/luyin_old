@@ -47,7 +47,7 @@ import authRouter, { configure as configureAuthRouter } from "./router/auth.js";
 import foldersRouter, { configure as configureFoldersRouter } from "./router/folders.js";
 import algoRouter from "./router/algo.js";
 import { requestClientIdBetter, resolveRecordingAudioPath, resolveRecordingAudioPathBetter } from "./utils/recordings.js";
-import { publishRecordingEvent } from "./utils/recordingEvents.mjs";
+import { publishRecordingEvent, recordingEventSubscriberCount } from "./utils/recordingEvents.mjs";
 import {
   expandTencentMeetingKeyCandidates,
   loadTencentMeetingStsToken,
@@ -99,6 +99,7 @@ import {
   isTencentMeetingTranscriptSyncEvent,
   tencentMeetingTranscriptRetryIntervalMs,
   tencentMeetingTranscriptSyncMaxAttempts,
+  TENCENT_MEETING_RECORDER_CALLBACK_DIAGNOSTIC_STEP_MARKER,
   TENCENT_MEETING_TRANSCRIPT_DIAGNOSTIC_END_MARKER,
   tencentMeetingQuery,
   tencentMeetingSearchWindow,
@@ -610,14 +611,45 @@ function sleep(delayMs) {
   return new Promise((resolve) => setTimeout(resolve, delayMs));
 }
 
-async function publishRecordingSnapshot(recordingId, type = "recording.updated") {
-  const row = await prisma.recording.findFirst({
-    where: { id: recordingId, deletedAt: null },
+async function publishRecordingSnapshot(recordingId, type = "recording.updated", diagnostic = {}) {
+  logTencentMeetingRecorderCallbackDiagnostic("sse_snapshot_started", {
+    ...diagnostic,
+    recordingId,
+    eventType: type,
+    subscriberCount: recordingEventSubscriberCount(),
   });
-  if (!row) return null;
-  const recording = recordingFromPrisma(row);
-  publishRecordingEvent(type, recording);
-  return recording;
+  try {
+    const row = await prisma.recording.findFirst({
+      where: { id: recordingId, deletedAt: null },
+    });
+    if (!row) {
+      logTencentMeetingRecorderCallbackDiagnostic("sse_snapshot_skipped", {
+        ...diagnostic,
+        recordingId,
+        eventType: type,
+        reason: "recording_not_found",
+      });
+      return null;
+    }
+    const recording = recordingFromPrisma(row);
+    const publishedEvent = publishRecordingEvent(type, recording);
+    logTencentMeetingRecorderCallbackDiagnostic("sse_snapshot_published", {
+      ...diagnostic,
+      recordingId,
+      eventType: type,
+      sseEventId: publishedEvent.id,
+      subscriberCount: recordingEventSubscriberCount(),
+    });
+    return recording;
+  } catch (error) {
+    logTencentMeetingRecorderCallbackDiagnostic("sse_snapshot_failed", {
+      ...diagnostic,
+      recordingId,
+      eventType: type,
+      error: error instanceof Error ? error.message : String(error),
+    });
+    throw error;
+  }
 }
 
 async function updateRecordingRealtimeState(recordingId, data = {}) {
@@ -642,6 +674,16 @@ function logTencentMeetingTranscriptTrace(stage, details = {}) {
     ...metadata,
   });
   console.info(`[Tencent Meeting][Transcript] ${stage}`, metadata);
+}
+
+function logTencentMeetingRecorderCallbackDiagnostic(stage, details = {}) {
+  if (!details.diagnosticId) return;
+  const metadata = { stage, ...details };
+  logger.info("tencent_meeting.recorder_callback.diagnostic", {
+    message: TENCENT_MEETING_RECORDER_CALLBACK_DIAGNOSTIC_STEP_MARKER,
+    ...metadata,
+  });
+  console.info(TENCENT_MEETING_RECORDER_CALLBACK_DIAGNOSTIC_STEP_MARKER, metadata);
 }
 
 function emitTencentMeetingTranscriptDiagnosticEnd(details = {}) {
@@ -1348,10 +1390,20 @@ async function findTencentMeetingDownloadTarget(info) {
 // 从腾讯会议 API 获取录音的内置转写内容
 async function fetchTencentMeetingBuiltInTranscript(info = {}, durationMs = 0) {
   const recordFileId = String(info.recordFileId || info.record_file_id || "").trim();
+  const diagnostic = {
+    diagnosticId: info.diagnosticId || "",
+    eventId: info.webhookEventId || "",
+    event: info.event || "",
+    recordFileId,
+  };
   if (!recordFileId) {
     logTencentMeetingTranscriptTrace("fetch_skipped", {
       reason: "missing_record_file_id",
       event: info.event || "",
+    });
+    logTencentMeetingRecorderCallbackDiagnostic("transcript_fetch_skipped", {
+      ...diagnostic,
+      reason: "missing_record_file_id",
     });
     return null;
   }
@@ -1359,6 +1411,10 @@ async function fetchTencentMeetingBuiltInTranscript(info = {}, durationMs = 0) {
     logTencentMeetingTranscriptTrace("fetch_skipped", {
       reason: "api_not_configured",
       recordFileId,
+    });
+    logTencentMeetingRecorderCallbackDiagnostic("transcript_fetch_skipped", {
+      ...diagnostic,
+      reason: "api_not_configured",
     });
     return null;
   }
@@ -1372,6 +1428,12 @@ async function fetchTencentMeetingBuiltInTranscript(info = {}, durationMs = 0) {
   logger.info("[CALL] fetchTencentMeetingBuiltInTranscript", {message: `operatorParamsList: ${JSON.stringify(operatorParamsList)}`});
   logTencentMeetingTranscriptTrace("fetch_started", {
     recordFileId,
+    meetingId: info.meetingId || info.meeting_id || "",
+    durationMs: Number(durationMs || 0),
+    operatorCandidateCount: operatorParamsList.length,
+  });
+  logTencentMeetingRecorderCallbackDiagnostic("transcript_fetch_started", {
+    ...diagnostic,
     meetingId: info.meetingId || info.meeting_id || "",
     durationMs: Number(durationMs || 0),
     operatorCandidateCount: operatorParamsList.length,
@@ -1399,6 +1461,12 @@ async function fetchTencentMeetingBuiltInTranscript(info = {}, durationMs = 0) {
         responseKeys: Object.keys(payload || {}).join(","),
         segmentCount: result.segments.length,
       });
+      logTencentMeetingRecorderCallbackDiagnostic("transcript_fetch_response_parsed", {
+        ...diagnostic,
+        attempt: attemptIndex + 1,
+        segmentCount: result.segments.length,
+        responseKeys: Object.keys(payload || {}).join(","),
+      });
       if (result.segments.length > 0) {
         return {
           ...result,
@@ -1412,6 +1480,12 @@ async function fetchTencentMeetingBuiltInTranscript(info = {}, durationMs = 0) {
       failureKinds.push(failureKind);
       logTencentMeetingTranscriptTrace("fetch_attempt_failed", {
         recordFileId,
+        attempt: attemptIndex + 1,
+        failureKind,
+        error: error instanceof Error ? error.message : String(error),
+      });
+      logTencentMeetingRecorderCallbackDiagnostic("transcript_fetch_attempt_failed", {
+        ...diagnostic,
         attempt: attemptIndex + 1,
         failureKind,
         error: error instanceof Error ? error.message : String(error),
@@ -1445,6 +1519,11 @@ async function fetchTencentMeetingBuiltInTranscript(info = {}, durationMs = 0) {
     failureKind,
     attemptCount: operatorParamsList.length,
   });
+  logTencentMeetingRecorderCallbackDiagnostic("transcript_fetch_exhausted", {
+    ...diagnostic,
+    failureKind,
+    attemptCount: operatorParamsList.length,
+  });
   return {
     segments: [],
     unavailable: true,
@@ -1453,8 +1532,16 @@ async function fetchTencentMeetingBuiltInTranscript(info = {}, durationMs = 0) {
   };
 }
 
-async function storeTencentMeetingBuiltInTranscript(recordingId, transcriptResult, jobVersion) {
+async function storeTencentMeetingBuiltInTranscript(recordingId, transcriptResult, jobVersion, info = {}) {
   const recordFileId = String(transcriptResult?.recordFileId || "").trim();
+  const diagnostic = {
+    diagnosticId: info.diagnosticId || "",
+    eventId: info.webhookEventId || "",
+    event: info.event || "",
+    recordingId,
+    recordFileId,
+    jobVersion,
+  };
   if (!transcriptResult?.segments?.length) {
     logTencentMeetingTranscriptTrace("store_skipped", {
       recordingId,
@@ -1496,6 +1583,11 @@ async function storeTencentMeetingBuiltInTranscript(recordingId, transcriptResul
   logTencentMeetingTranscriptTrace("store_started", {
     recordingId,
     recordFileId,
+    inputSegmentCount: transcriptResult.segments.length,
+    normalizedSegmentCount: segments.length,
+  });
+  logTencentMeetingRecorderCallbackDiagnostic("transcript_store_started", {
+    ...diagnostic,
     inputSegmentCount: transcriptResult.segments.length,
     normalizedSegmentCount: segments.length,
   });
@@ -1586,7 +1678,11 @@ async function storeTencentMeetingBuiltInTranscript(recordingId, transcriptResul
     recordFileId,
     ...persistenceStats,
   });
-  await publishRecordingSnapshot(recordingId);
+  logTencentMeetingRecorderCallbackDiagnostic("transcript_store_committed", {
+    ...diagnostic,
+    ...persistenceStats,
+  });
+  await publishRecordingSnapshot(recordingId, "recording.updated", diagnostic);
 
   if (isRecordingJobCancelled(recordingId, jobVersion)) return false;
 
@@ -1712,7 +1808,7 @@ async function syncTencentMeetingBuiltInTranscript(recordingId, info = {}, jobVe
     }
     return false;
   }
-  const stored = await storeTencentMeetingBuiltInTranscript(recordingId, transcriptResult, jobVersion);
+  const stored = await storeTencentMeetingBuiltInTranscript(recordingId, transcriptResult, jobVersion, info);
   logTencentMeetingTranscriptTrace("sync_completed", {
     recordingId,
     recordFileId,
@@ -1768,22 +1864,56 @@ async function inspectTencentMeetingDownloadedFile(targetPath, downloadInfo = {}
 }
 
 async function syncTencentMeetingRecordingAudio(recordingId, info = {}, jobVersion = recordingJobVersion(recordingId)) {
-  if (isRecordingJobCancelled(recordingId, jobVersion)) return false;
+  const diagnostic = {
+    diagnosticId: info.diagnosticId || "",
+    eventId: info.webhookEventId || "",
+    event: info.event || "",
+    recordingId,
+    recordFileId: String(info.recordFileId || info.record_file_id || "").trim(),
+    jobVersion,
+  };
+  logTencentMeetingRecorderCallbackDiagnostic("audio_sync_started", diagnostic);
+  if (isRecordingJobCancelled(recordingId, jobVersion)) {
+    logTencentMeetingRecorderCallbackDiagnostic("audio_sync_skipped", {
+      ...diagnostic,
+      reason: "job_cancelled_before_lookup",
+    });
+    return false;
+  }
   const recordingBeforeSync = await prisma.recording.findFirst({
     where: { id: recordingId, deletedAt: null },
   });
-  if (!recordingBeforeSync) return false;
+  if (!recordingBeforeSync) {
+    logTencentMeetingRecorderCallbackDiagnostic("audio_sync_skipped", {
+      ...diagnostic,
+      reason: "recording_not_found",
+    });
+    return false;
+  }
   if (resolveRecordingAudioPathBetter(recordingBeforeSync, projectRoot)) {
     if (recordingBeforeSync.fileStatus !== "ready") {
       await updateRecordingRealtimeState(recordingId, { fileStatus: "ready" });
     }
+    logTencentMeetingRecorderCallbackDiagnostic("audio_sync_completed", {
+      ...diagnostic,
+      outcome: "audio_already_present",
+    });
     return true;
   }
 
   await updateRecordingRealtimeState(recordingId, { fileStatus: "downloading" });
+  logTencentMeetingRecorderCallbackDiagnostic("audio_status_updated", {
+    ...diagnostic,
+    fileStatus: "downloading",
+  });
 
   console.info(`[CALL] syncTencentMeetingRecordingAudio: recordingId: ${recordingId}`);
   const target = await findTencentMeetingDownloadTarget(info);
+  logTencentMeetingRecorderCallbackDiagnostic("audio_download_target_resolved", {
+    ...diagnostic,
+    hasDownloadUrl: Boolean(target?.downloadUrl),
+    hasTarget: Boolean(target),
+  });
   console.info(`[CALL] syncTencentMeetingRecordingAudio`);
   if (!target?.downloadUrl) {
     const needsIdentity = !tencentMeetingCandidateDownloadIdentityParams(info).length;
@@ -1831,6 +1961,13 @@ async function syncTencentMeetingRecordingAudio(recordingId, info = {}, jobVersi
           : "腾讯会议转写内容尚未返回，后台会等待对应事件后继续同步。";
     }
     await updateRecordingRealtimeState(recordingId, data);
+    logTencentMeetingRecorderCallbackDiagnostic("audio_sync_completed", {
+      ...diagnostic,
+      outcome: "waiting_for_download_target",
+      needsIdentity,
+      hasStsToken,
+      canRequestStsToken,
+    });
     return false;
   }
 
@@ -1839,6 +1976,11 @@ async function syncTencentMeetingRecordingAudio(recordingId, info = {}, jobVersi
   const storagePath = path.join(audioDir, fileName);
   try {
     const downloadInfo = await downloadTencentMeetingFile(target.downloadUrl, tempPath);
+    logTencentMeetingRecorderCallbackDiagnostic("audio_download_completed", {
+      ...diagnostic,
+      downloadedBytes: Number(downloadInfo.size || 0),
+      contentType: downloadInfo.contentType || "",
+    });
     await updateRecordingRealtimeState(recordingId, { fileStatus: "processing" });
     const inspection = await inspectTencentMeetingDownloadedFile(tempPath, downloadInfo);
     const conversionInput =
@@ -1890,8 +2032,18 @@ async function syncTencentMeetingRecordingAudio(recordingId, info = {}, jobVersi
     const synced = await updateRecordingRealtimeState(recordingId, data);
     if (!synced.count) {
       await removeFileIfExists(storagePath);
+      logTencentMeetingRecorderCallbackDiagnostic("audio_sync_completed", {
+        ...diagnostic,
+        outcome: "recording_missing_after_download",
+      });
       return false;
     }
+    logTencentMeetingRecorderCallbackDiagnostic("audio_sync_completed", {
+      ...diagnostic,
+      outcome: "stored",
+      storedBytes: Number(storedFile.size || 0),
+      durationMs: Number(durationMs || 0),
+    });
     return true;
   } catch (error) {
     await removeFileIfExists(tempPath);
@@ -1908,20 +2060,84 @@ async function syncTencentMeetingRecordingAudio(recordingId, info = {}, jobVersi
       });
       await publishRecordingSnapshot(recordingId);
     }
+    logTencentMeetingRecorderCallbackDiagnostic("audio_sync_failed", {
+      ...diagnostic,
+      error: error instanceof Error ? error.message : String(error),
+    });
     throw error;
   }
 }
 
 function queueTencentMeetingImportSync(recordingId, info = {}) {
-  if (!tencentMeetingAudioSyncEnabled()) return false;
-  if (!recordingId || isRecordingJobCancelled(recordingId) || tencentMeetingImportJobs.has(recordingId)) return false;
+  const diagnostic = {
+    diagnosticId: info.diagnosticId || "",
+    eventId: info.webhookEventId || "",
+    event: info.event || "",
+    recordingId,
+    recordFileId: String(info.recordFileId || info.record_file_id || "").trim(),
+  };
+  if (!tencentMeetingAudioSyncEnabled()) {
+    logTencentMeetingRecorderCallbackDiagnostic("audio_queue_skipped", {
+      ...diagnostic,
+      reason: "audio_sync_disabled",
+    });
+    return false;
+  }
+  if (!recordingId) {
+    logTencentMeetingRecorderCallbackDiagnostic("audio_queue_skipped", {
+      ...diagnostic,
+      reason: "missing_recording_id",
+    });
+    return false;
+  }
+  if (isRecordingJobCancelled(recordingId)) {
+    logTencentMeetingRecorderCallbackDiagnostic("audio_queue_skipped", {
+      ...diagnostic,
+      reason: "job_cancelled",
+    });
+    return false;
+  }
+  if (tencentMeetingImportJobs.has(recordingId)) {
+    logTencentMeetingRecorderCallbackDiagnostic("audio_queue_skipped", {
+      ...diagnostic,
+      reason: "job_already_queued",
+    });
+    return false;
+  }
   const jobVersion = recordingJobVersion(recordingId);
   tencentMeetingImportJobs.add(recordingId);
+  logTencentMeetingRecorderCallbackDiagnostic("audio_queued", {
+    ...diagnostic,
+    jobVersion,
+  });
   setTimeout(() => {
+    logTencentMeetingRecorderCallbackDiagnostic("audio_worker_started", {
+      ...diagnostic,
+      jobVersion,
+    });
     syncTencentMeetingRecordingAudio(recordingId, info, jobVersion)
-      .catch((error) => console.warn("[Tencent Meeting] import sync failed:", error instanceof Error ? error.message : error))
+      .then((synced) => {
+        logTencentMeetingRecorderCallbackDiagnostic("audio_worker_result", {
+          ...diagnostic,
+          jobVersion,
+          synced,
+        });
+      })
+      .catch((error) => {
+        logTencentMeetingRecorderCallbackDiagnostic("audio_worker_failed", {
+          ...diagnostic,
+          jobVersion,
+          error: error instanceof Error ? error.message : String(error),
+        });
+        console.warn("[Tencent Meeting] import sync failed:", error instanceof Error ? error.message : error);
+      })
       .finally(() => {
         if (recordingJobVersion(recordingId) === jobVersion) tencentMeetingImportJobs.delete(recordingId);
+        logTencentMeetingRecorderCallbackDiagnostic("audio_worker_finished", {
+          ...diagnostic,
+          jobVersion,
+          stillQueued: tencentMeetingImportJobs.has(recordingId),
+        });
       });
   }, 50);
   return true;
@@ -1933,8 +2149,21 @@ function waitForTencentMeetingTranscriptRetry(delayMs) {
 
 async function runTencentMeetingTranscriptSyncAttempts(recordingId, info, jobVersion) {
   const recordFileId = String(info.recordFileId || info.record_file_id || "").trim();
+  const diagnostic = {
+    diagnosticId: info.diagnosticId || "",
+    eventId: info.webhookEventId || "",
+    event: info.event || "",
+    recordingId,
+    recordFileId,
+    jobVersion,
+  };
   const maxAttempts = tencentMeetingTranscriptSyncMaxAttempts(info);
   for (let attempt = 1; attempt <= maxAttempts; attempt += 1) {
+    logTencentMeetingRecorderCallbackDiagnostic("transcript_sync_attempt_started", {
+      ...diagnostic,
+      attempt,
+      maxAttempts,
+    });
     logTencentMeetingTranscriptTrace("sync_attempt_started", {
       recordingId,
       recordFileId,
@@ -1947,6 +2176,12 @@ async function runTencentMeetingTranscriptSyncAttempts(recordingId, info, jobVer
     logTencentMeetingTranscriptTrace("sync_attempt_finished", {
       recordingId,
       recordFileId,
+      attempt,
+      maxAttempts,
+      stored,
+    });
+    logTencentMeetingRecorderCallbackDiagnostic("transcript_sync_attempt_finished", {
+      ...diagnostic,
       attempt,
       maxAttempts,
       stored,
@@ -1984,14 +2219,26 @@ async function runTencentMeetingTranscriptSyncAttempts(recordingId, info, jobVer
       maxAttempts,
       retryDelayMs,
     });
+    logTencentMeetingRecorderCallbackDiagnostic("transcript_retry_scheduled", {
+      ...diagnostic,
+      nextAttempt: attempt + 1,
+      maxAttempts,
+      retryDelayMs,
+    });
     await waitForTencentMeetingTranscriptRetry(retryDelayMs);
   }
   return { stored: false, outcome: "not_stored", attempt: maxAttempts, maxAttempts };
 }
 
 function queueTencentMeetingTranscriptSync(recordingId, info = {}) {
-  logger.info("call queueTencentMeetingTranscriptSync: ", {message: 'step 0'})
   const recordFileId = String(info.recordFileId || info.record_file_id || "").trim();
+  const diagnostic = {
+    diagnosticId: info.diagnosticId || "",
+    eventId: info.webhookEventId || "",
+    event: info.event || "",
+    recordingId,
+    recordFileId,
+  };
   if (!recordingId) {
     logTencentMeetingTranscriptTrace("queue_skipped", {
       recordFileId,
@@ -2000,6 +2247,10 @@ function queueTencentMeetingTranscriptSync(recordingId, info = {}) {
     emitTencentMeetingTranscriptDiagnosticEnd({
       recordFileId,
       outcome: "queue_skipped_missing_recording_id",
+    });
+    logTencentMeetingRecorderCallbackDiagnostic("transcript_queue_skipped", {
+      ...diagnostic,
+      reason: "missing_recording_id",
     });
     return false;
   }
@@ -2014,6 +2265,10 @@ function queueTencentMeetingTranscriptSync(recordingId, info = {}) {
       recordFileId,
       outcome: "queue_skipped_job_cancelled",
     });
+    logTencentMeetingRecorderCallbackDiagnostic("transcript_queue_skipped", {
+      ...diagnostic,
+      reason: "job_cancelled",
+    });
     return false;
   }
   if (tencentMeetingTranscriptJobs.has(recordingId)) {
@@ -2021,6 +2276,10 @@ function queueTencentMeetingTranscriptSync(recordingId, info = {}) {
     logTencentMeetingTranscriptTrace("queue_skipped", {
       recordingId,
       recordFileId,
+      reason: "job_already_queued",
+    });
+    logTencentMeetingRecorderCallbackDiagnostic("transcript_queue_skipped", {
+      ...diagnostic,
       reason: "job_already_queued",
     });
     return false;
@@ -2033,11 +2292,19 @@ function queueTencentMeetingTranscriptSync(recordingId, info = {}) {
     event: info.event || "",
     jobVersion,
   });
+  logTencentMeetingRecorderCallbackDiagnostic("transcript_queued", {
+    ...diagnostic,
+    jobVersion,
+  });
   setTimeout(() => {
     let outcome = "unknown";
     logTencentMeetingTranscriptTrace("worker_started", {
       recordingId,
       recordFileId,
+      jobVersion,
+    });
+    logTencentMeetingRecorderCallbackDiagnostic("transcript_worker_started", {
+      ...diagnostic,
       jobVersion,
     });
     const statusReady = updateRecordingRealtimeState(recordingId, { transcriptStatus: "queued" }).catch((error) =>
@@ -2047,6 +2314,14 @@ function queueTencentMeetingTranscriptSync(recordingId, info = {}) {
       .then(() => runTencentMeetingTranscriptSyncAttempts(recordingId, info, jobVersion))
       .then((result) => {
         outcome = result.outcome;
+        logTencentMeetingRecorderCallbackDiagnostic("transcript_worker_result", {
+          ...diagnostic,
+          jobVersion,
+          outcome: result.outcome,
+          stored: result.stored,
+          attempt: result.attempt,
+          maxAttempts: result.maxAttempts,
+        });
         return result.stored;
       })
       .catch((error) => {
@@ -2054,6 +2329,11 @@ function queueTencentMeetingTranscriptSync(recordingId, info = {}) {
         logTencentMeetingTranscriptTrace("worker_failed", {
           recordingId,
           recordFileId,
+          jobVersion,
+          error: error instanceof Error ? error.message : String(error),
+        });
+        logTencentMeetingRecorderCallbackDiagnostic("transcript_worker_failed", {
+          ...diagnostic,
           jobVersion,
           error: error instanceof Error ? error.message : String(error),
         });
@@ -2074,6 +2354,12 @@ function queueTencentMeetingTranscriptSync(recordingId, info = {}) {
           recordingId,
           recordFileId,
           jobVersion,
+          stillQueued: tencentMeetingTranscriptJobs.has(recordingId),
+        });
+        logTencentMeetingRecorderCallbackDiagnostic("transcript_worker_finished", {
+          ...diagnostic,
+          jobVersion,
+          outcome,
           stillQueued: tencentMeetingTranscriptJobs.has(recordingId),
         });
         emitTencentMeetingTranscriptDiagnosticEnd({
@@ -2143,7 +2429,15 @@ async function backfillTencentMeetingRecorderOwnersFromWebhookHistory() {
   return updated;
 }
 
-async function upsertTencentMeetingRecordingInfos(recordInfos = [], userAgent = "tencent-meeting-sync") {
+async function upsertTencentMeetingRecordingInfos(
+  recordInfos = [],
+  userAgent = "tencent-meeting-sync",
+  diagnostic = {},
+) {
+  logTencentMeetingRecorderCallbackDiagnostic("recording_upsert_started", {
+    ...diagnostic,
+    inputCount: recordInfos.length,
+  });
   const uniqueInfos = [];
   const seen = new Set();
   for (const info of recordInfos) {
@@ -2156,24 +2450,40 @@ async function upsertTencentMeetingRecordingInfos(recordInfos = [], userAgent = 
       ownerName: (await resolveTencentMeetingOwnerName(info)) || info.ownerName || "",
     });
   }
-  logger.info("[call] upsertTencentMeetingRecordingInfos step 1: ", {message: `uniqueInfos`})
+  logTencentMeetingRecorderCallbackDiagnostic("recording_upsert_prepared", {
+    ...diagnostic,
+    uniqueCount: uniqueInfos.length,
+    recordFileIds: uniqueInfos.map((info) => info.recordFileId).join(","),
+  });
   if (!uniqueInfos.length) return [];
 
   const now = new Date();
+  logTencentMeetingRecorderCallbackDiagnostic("recording_transaction_started", {
+    ...diagnostic,
+    uniqueCount: uniqueInfos.length,
+  });
   const results = await prisma.$transaction(async (tx) => {
     const latest = await tx.recording.findFirst({ orderBy: { seq: "desc" }, select: { seq: true } });
     let nextSeq = Number(latest?.seq || 0);
     const results = [];
     for (const eventInfo of uniqueInfos) {
-      logger.info("[call] upsertTencentMeetingRecordingInfos step 2: ", {message: `fileId: ${eventInfo.recordFileId}`})
       const source = tencentMeetingSourceKey(eventInfo.recordFileId);
+      logTencentMeetingRecorderCallbackDiagnostic("recording_lookup_started", {
+        ...diagnostic,
+        recordFileId: eventInfo.recordFileId,
+        source,
+      });
       const existing = await tx.recording.findFirst({
         where: { source },
         include: { segments: { select: { id: true }, take: 1 } },
       });
-      logger.info("[call] upsertTencentMeetingRecordingInfos step 3: ", {message: ``})
+      logTencentMeetingRecorderCallbackDiagnostic("recording_lookup_completed", {
+        ...diagnostic,
+        recordFileId: eventInfo.recordFileId,
+        existingRecordingId: existing?.id || "",
+        found: Boolean(existing),
+      });
       const meetingRecordId = String(eventInfo.meetingRecordId || "").trim();
-      logger.info("[call] upsertTencentMeetingRecordingInfos step 4: ", {message: `meetingRecordId && meetingRecordId !== eventInfo.recordFileId: ${JSON.stringify(meetingRecordId && meetingRecordId !== eventInfo.recordFileId)}`})
       if (meetingRecordId && meetingRecordId !== eventInfo.recordFileId) {
         const duplicate = await tx.recording.findFirst({
           where: { source: tencentMeetingSourceKey(meetingRecordId), deletedAt: null },
@@ -2224,13 +2534,18 @@ async function upsertTencentMeetingRecordingInfos(recordInfos = [], userAgent = 
           data.tag = tencentMeetingImportTag(eventInfo, hasSegments ? "已同步转写" : "等待转写");
         }
         await tx.recording.update({ where: { id: existing.id }, data });
+        logTencentMeetingRecorderCallbackDiagnostic("recording_updated", {
+          ...diagnostic,
+          recordingId: existing.id,
+          recordFileId: eventInfo.recordFileId,
+          source,
+        });
         results.push({ recordingId: existing.id, recordFileId: eventInfo.recordFileId, created: false, info: eventInfo });
         continue;
       }
 
       nextSeq += 1;
       const recordingId = crypto.randomUUID();
-      logger.info("[call] upsertTencentMeetingRecordingInfos step 5: ", {message: `recordFileId: ${eventInfo.recordFileId}, id: ${recordingId}`})
       
       await tx.recording.create({
         data: {
@@ -2272,14 +2587,32 @@ async function upsertTencentMeetingRecordingInfos(recordInfos = [], userAgent = 
           audioUrl: tencentMeetingRecordingAudioUrl(recordingId),
         },
       });
-      logger.info("[call] upsertTencentMeetingRecordingInfos step 6: ", {message: ``})
+      logTencentMeetingRecorderCallbackDiagnostic("recording_created", {
+        ...diagnostic,
+        recordingId,
+        recordFileId: eventInfo.recordFileId,
+        source,
+      });
       results.push({ recordingId, recordFileId: eventInfo.recordFileId, created: true, info: eventInfo });
     }
     return results;
   });
+  logTencentMeetingRecorderCallbackDiagnostic("recording_transaction_committed", {
+    ...diagnostic,
+    resultCount: results.length,
+    recordingIds: results.map((result) => result.recordingId).join(","),
+  });
   for (const result of results) {
-    await publishRecordingSnapshot(result.recordingId, result.created ? "recording.created" : "recording.updated");
+    await publishRecordingSnapshot(
+      result.recordingId,
+      result.created ? "recording.created" : "recording.updated",
+      diagnostic,
+    );
   }
+  logTencentMeetingRecorderCallbackDiagnostic("recording_upsert_completed", {
+    ...diagnostic,
+    resultCount: results.length,
+  });
   return results;
 }
 
@@ -2290,16 +2623,34 @@ async function importTencentMeetingWebhookPayload(
     syncTranscript = false,
     sseMockDelayMs = 0,
     userAgent = "tencent-meeting-webhook",
+    diagnosticId = "",
+    eventId = "",
   } = {},
 ) {
   logger.debug("触发ststoken获取", {message: 'step2'})
   const event = String(payload?.event || "").trim();
+  const diagnostic = { diagnosticId, eventId, event };
+  logTencentMeetingRecorderCallbackDiagnostic("import_started", {
+    ...diagnostic,
+    syncTranscript,
+    syncAudio,
+  });
   logTencentMeetingTranscriptTrace("webhook_import_started", {
     event,
     syncTranscript,
     syncAudio,
   });
-  const events = await enrichTencentMeetingRecorderOwnerContexts(extractTencentMeetingRecordingEvents(payload));
+  const extractedEvents = extractTencentMeetingRecordingEvents(payload);
+  logTencentMeetingRecorderCallbackDiagnostic("record_files_extracted", {
+    ...diagnostic,
+    extractedCount: extractedEvents.length,
+    recordFileIds: extractedEvents.map((item) => item.recordFileId).filter(Boolean).join(","),
+  });
+  const events = await enrichTencentMeetingRecorderOwnerContexts(extractedEvents);
+  logTencentMeetingRecorderCallbackDiagnostic("record_file_owners_enriched", {
+    ...diagnostic,
+    enrichedCount: events.length,
+  });
   logger.debug("触发ststoken获取", {message: `step3 length: ${events.length}`})
   logTencentMeetingTranscriptTrace("webhook_record_files_extracted", {
     event,
@@ -2317,9 +2668,13 @@ async function importTencentMeetingWebhookPayload(
         outcome: "no_record_file_id_extracted",
       });
     }
+    logTencentMeetingRecorderCallbackDiagnostic("import_skipped", {
+      ...diagnostic,
+      reason: "no_record_file_id_extracted",
+    });
     return [];
   }
-  const results = await upsertTencentMeetingRecordingInfos(events, userAgent);
+  const results = await upsertTencentMeetingRecordingInfos(events, userAgent, diagnostic);
   if (results.length) {
     console.info(
       "[Tencent Meeting] webhook imported:",
@@ -2337,6 +2692,11 @@ async function importTencentMeetingWebhookPayload(
 
   const normalizedSseMockDelayMs = Math.max(0, Number(sseMockDelayMs) || 0);
   if (results.length > 0 && normalizedSseMockDelayMs > 0) {
+    logTencentMeetingRecorderCallbackDiagnostic("mock_delay_started", {
+      ...diagnostic,
+      recordingCount: results.length,
+      delayMs: normalizedSseMockDelayMs,
+    });
     logger.info("tencent_meeting.sse_mock_delay_started", {
       message: `event=${event}, recordingCount=${results.length}, delayMs=${normalizedSseMockDelayMs}`,
       event,
@@ -2344,6 +2704,11 @@ async function importTencentMeetingWebhookPayload(
       delayMs: normalizedSseMockDelayMs,
     });
     await sleep(normalizedSseMockDelayMs);
+    logTencentMeetingRecorderCallbackDiagnostic("mock_delay_finished", {
+      ...diagnostic,
+      recordingCount: results.length,
+      delayMs: normalizedSseMockDelayMs,
+    });
     logger.info("tencent_meeting.sse_mock_delay_finished", {
       message: `event=${event}, recordingCount=${results.length}, delayMs=${normalizedSseMockDelayMs}`,
       event,
@@ -2353,23 +2718,42 @@ async function importTencentMeetingWebhookPayload(
   }
 
   for (const result of results) {
+    const jobInfo = {
+      ...result.info,
+      event: payload.event,
+      diagnosticId,
+      webhookEventId: eventId,
+    };
     if (syncTranscript) {
-      const queued = queueTencentMeetingTranscriptSync(result.recordingId, {
-        ...result.info,
-        event: payload.event,
-      });
+      const queued = queueTencentMeetingTranscriptSync(result.recordingId, jobInfo);
       logTencentMeetingTranscriptTrace("webhook_queue_result", {
         event,
         recordingId: result.recordingId,
         recordFileId: result.recordFileId,
         queued,
       });
+      logTencentMeetingRecorderCallbackDiagnostic("transcript_queue_result", {
+        ...diagnostic,
+        recordingId: result.recordingId,
+        recordFileId: result.recordFileId,
+        queued,
+      });
     }
     if (syncAudio) {
-      queueTencentMeetingImportSync(result.recordingId, result.info);
+      const queued = queueTencentMeetingImportSync(result.recordingId, jobInfo);
+      logTencentMeetingRecorderCallbackDiagnostic("audio_queue_result", {
+        ...diagnostic,
+        recordingId: result.recordingId,
+        recordFileId: result.recordFileId,
+        queued,
+      });
     }
   }
 
+  logTencentMeetingRecorderCallbackDiagnostic("import_completed", {
+    ...diagnostic,
+    resultCount: results.length,
+  });
   return results;
 }
 
@@ -2381,12 +2765,13 @@ async function importTencentMeetingRecordingCompletedPayload(payload) {
   });
 }
 
-async function importTencentMeetingAudioCompletedPayload(payload) {
+async function importTencentMeetingAudioCompletedPayload(payload, diagnostic = {}) {
   return importTencentMeetingWebhookPayload(payload, {
     syncAudio: true,
     syncTranscript: true,
     sseMockDelayMs: TENCENT_MEETING_SSE_MOCK_DELAY_MS,
     userAgent: "tencent-meeting-audio-completed",
+    ...diagnostic,
   });
 }
 

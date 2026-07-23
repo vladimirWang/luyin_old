@@ -1,9 +1,13 @@
+import crypto from "node:crypto";
 import express from "express";
 import logger from "../utils/log.js";
 import { parseJsonObject } from "../utils/common.mjs";
 import {
   importTencentMeetingStsTokenPayload,
   requestTencentMeetingStsTokenIfNeeded,
+  TENCENT_MEETING_RECORDER_CALLBACK_DIAGNOSTIC_END_MARKER,
+  TENCENT_MEETING_RECORDER_CALLBACK_DIAGNOSTIC_START_MARKER,
+  TENCENT_MEETING_RECORDER_CALLBACK_DIAGNOSTIC_STEP_MARKER,
   TENCENT_MEETING_TRANSCRIPT_DIAGNOSTIC_END_MARKER,
   TENCENT_MEETING_TRANSCRIPT_DIAGNOSTIC_START_MARKER,
   tencentMeetingWebhookEventAction,
@@ -42,6 +46,21 @@ function emitTencentMeetingTranscriptDiagnosticStart(payload, eventId) {
     ...diagnosticDetails,
   });
   console.info(TENCENT_MEETING_TRANSCRIPT_DIAGNOSTIC_START_MARKER, diagnosticDetails);
+}
+
+function emitTencentMeetingRecorderCallbackDiagnostic(stage, details = {}) {
+  const marker =
+    stage === "request_received"
+      ? TENCENT_MEETING_RECORDER_CALLBACK_DIAGNOSTIC_START_MARKER
+      : stage === "completed"
+        ? TENCENT_MEETING_RECORDER_CALLBACK_DIAGNOSTIC_END_MARKER
+        : TENCENT_MEETING_RECORDER_CALLBACK_DIAGNOSTIC_STEP_MARKER;
+  const metadata = { stage, ...details };
+  logger.info("tencent_meeting.recorder_callback.diagnostic", {
+    message: marker,
+    ...metadata,
+  });
+  console.info(marker, metadata);
 }
 
 export function configure(deps) {
@@ -126,14 +145,31 @@ router.post("/webhook", async (request, response) => {
     importTencentMeetingTranscriptReadyPayload,
     queueTencentMeetingPendingImports,
   } = dependencies;
+  const diagnosticId = crypto.randomUUID();
+  emitTencentMeetingRecorderCallbackDiagnostic("request_received", {
+    diagnosticId,
+    method: request.method,
+    path: request.originalUrl || request.url || "",
+    contentType: request.get("content-type") || "",
+    hasEncryptedData: Boolean(request.body?.data),
+    bodyKeys: Object.keys(request.body || {}).join(","),
+  });
   try {
     const plaintext = tencentMeetingVerifiedPlaintext(request, request.body?.data);
-    logger.info("logger.info listen /webhook tencentmeeting webhook plaintext: ", {message: plaintext})
-    console.log("console.log listen /webhook tencentmeeting webhook plaintext: ", {message: plaintext})
+    emitTencentMeetingRecorderCallbackDiagnostic("signature_verified", {
+      diagnosticId,
+      plaintextLength: Buffer.byteLength(String(plaintext || ""), "utf8"),
+    });
     const payload = parseJsonObject(plaintext);
-    logger.info("logger.info listen /webhook tencentmeeting webhook payload: ", {message: JSON.stringify(payload)})
-    console.log("console.log listen /webhook tencentmeeting webhook payload: ", {message: JSON.stringify(payload)})
     const action = tencentMeetingWebhookEventAction(payload);
+    emitTencentMeetingRecorderCallbackDiagnostic("payload_parsed", {
+      diagnosticId,
+      event: payload?.event || "",
+      action,
+      uniqueSequence: payload?.unique_sequence || "",
+      payloadItemCount: Array.isArray(payload?.payload) ? payload.payload.length : payload?.payload ? 1 : 0,
+      payloadKeys: Object.keys(payload || {}).join(","),
+    });
     logTencentMeetingWebhookTrace("received", {
       event: payload?.event || "",
       action,
@@ -154,7 +190,22 @@ router.post("/webhook", async (request, response) => {
       duplicate: persisted.duplicate,
       previousStatus: persisted.event.status,
     });
+    emitTencentMeetingRecorderCallbackDiagnostic("webhook_event_persisted", {
+      diagnosticId,
+      event: payload?.event || "",
+      action,
+      eventId: persisted.event.id,
+      duplicate: persisted.duplicate,
+      previousStatus: persisted.event.status,
+    });
     response.status(200).type("text/plain").send("successfully received callback");
+    emitTencentMeetingRecorderCallbackDiagnostic("response_sent", {
+      diagnosticId,
+      event: payload?.event || "",
+      action,
+      eventId: persisted.event.id,
+      statusCode: 200,
+    });
     logger.debug("listen /webhook 成功响应腾讯会议webhook: ", {message: '继续后续逻辑'})
     if (payload) {
       const eventId = persisted.event.id;
@@ -165,11 +216,24 @@ router.post("/webhook", async (request, response) => {
           event: payload.event || "",
           eventId,
         });
+        emitTencentMeetingRecorderCallbackDiagnostic("completed", {
+          diagnosticId,
+          event: payload.event || "",
+          action,
+          eventId,
+          outcome: "duplicate_already_handled",
+        });
         return;
       }
       void Promise.resolve()
         .then(async () => {
           await markTencentMeetingWebhookEventProcessing(eventId);
+          emitTencentMeetingRecorderCallbackDiagnostic("dispatch_started", {
+            diagnosticId,
+            event: payload.event || "",
+            action,
+            eventId,
+          });
           logTencentMeetingWebhookTrace("dispatch_started", {
             event: payload.event || "",
             action,
@@ -189,7 +253,7 @@ router.post("/webhook", async (request, response) => {
               break;
             case "audio-completed":
               emitTencentMeetingTranscriptDiagnosticStart(payload, eventId);
-              await importTencentMeetingAudioCompletedPayload(payload);
+              await importTencentMeetingAudioCompletedPayload(payload, { diagnosticId, eventId });
               break;
             case "transcript-ready": {
               emitTencentMeetingTranscriptDiagnosticStart(payload, eventId);
@@ -208,9 +272,23 @@ router.post("/webhook", async (request, response) => {
             action,
             eventId,
           });
+          emitTencentMeetingRecorderCallbackDiagnostic("completed", {
+            diagnosticId,
+            event: payload.event || "",
+            action,
+            eventId,
+            outcome: "dispatch_completed",
+          });
         })
         .catch(async (error) => {
           logTencentMeetingWebhookTrace("dispatch_failed", {
+            event: payload?.event || "",
+            action,
+            eventId,
+            error: error instanceof Error ? error.message : String(error),
+          });
+          emitTencentMeetingRecorderCallbackDiagnostic("dispatch_failed", {
+            diagnosticId,
             event: payload?.event || "",
             action,
             eventId,
@@ -237,14 +315,33 @@ router.post("/webhook", async (request, response) => {
             });
             console.info(TENCENT_MEETING_TRANSCRIPT_DIAGNOSTIC_END_MARKER, diagnosticDetails);
           }
+          emitTencentMeetingRecorderCallbackDiagnostic("completed", {
+            diagnosticId,
+            event: payload?.event || "",
+            action,
+            eventId,
+            outcome: "dispatch_failed",
+          });
         });
     } else {
       console.warn("[Tencent Meeting] webhook decrypted but did not contain JSON payload.");
+      emitTencentMeetingRecorderCallbackDiagnostic("completed", {
+        diagnosticId,
+        outcome: "payload_not_object",
+      });
     }
   } catch (error) {
     logger.error("tencentmeeting webhook failed: ", {message: error.message})
     console.warn("[Tencent Meeting] webhook POST rejected:", error instanceof Error ? error.message : error);
-    response.status(error.statusCode || 400).type("text/plain").send("invalid callback 2");
+    emitTencentMeetingRecorderCallbackDiagnostic("completed", {
+      diagnosticId,
+      outcome: "request_rejected",
+      error: error instanceof Error ? error.message : String(error),
+      responseAlreadySent: response.headersSent,
+    });
+    if (!response.headersSent) {
+      response.status(error.statusCode || 400).type("text/plain").send("invalid callback 2");
+    }
   }
 });
 
