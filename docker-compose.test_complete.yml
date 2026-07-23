@@ -55,6 +55,8 @@ services:
     environment:
       MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD:-123456}
       MYSQL_DATABASE: ${MYSQL_DATABASE:-wecom_recorder_test}
+    ports:
+      - "13306:3306"
     expose:
       - "3306"
     volumes:
@@ -69,6 +71,8 @@ services:
 
   redis:
     image: redis:7.4-alpine
+    ports:
+      - "16379:6379"
     expose:
       - "6379"
     volumes:
