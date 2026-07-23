@@ -73,8 +73,8 @@ services:
 
   redis:
     image: redis:7.4-alpine
-    ports:
-      - "6369:6379"
+    expose:
+      - "6379"
     volumes:
       - test-complete-redis-data:/data
     command: ["redis-server", "--appendonly", "yes"]
