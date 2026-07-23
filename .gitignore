@@ -29,3 +29,6 @@ client/ssl
 app_images/
 client/WW_verify_MZ6eTkDh36YmAXrC.txt
 luyin-old-app-base_node22-bookworm-ffmpeg-v1.tar.gz
+
+
+.pnpm-store
