@@ -1,0 +1,91 @@
+services:
+  app:
+    image: ${APP_IMAGE:-luyin_old-app:test-complete}
+    build:
+      context: ./server
+      dockerfile: Dockerfile.complete
+    ports:
+      - "8787:8787"
+    expose:
+      - "8787"
+    env_file:
+      - .env.test
+    environment:
+      PORT: 8787
+      HOST: 0.0.0.0
+      HTTPS_PORT: 0
+      MYSQL_HOST: mysql
+      MYSQL_PORT: 3306
+      REDIS_URL: redis://redis:6379
+      FFMPEG_PATH: /usr/bin/ffmpeg
+      FFPROBE_PATH: /usr/bin/ffprobe
+    depends_on:
+      mysql:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    volumes:
+      - test-complete-app-logs:/app/logs
+      - test-complete-app-storage:/app/server/storage
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:8787/api/health').then(r=>{if(!r.ok)process.exit(1)}).catch(()=>process.exit(1))"]
+      interval: 30s
+      timeout: 5s
+      retries: 10
+      start_period: 40s
+
+  nginx:
+    image: nginx:1.27-alpine
+    ports:
+      - "8080:80"
+      - "7000:443"
+    depends_on:
+      app:
+        condition: service_healthy
+    volumes:
+      - ./client/nginx.test.conf:/etc/nginx/conf.d/default.conf:ro
+      - ./client/ssl:/etc/nginx/ssl:ro
+      - test-complete-app-storage:/app/server/storage:ro
+      - ./client/dist:/usr/share/nginx/html:ro
+    restart: unless-stopped
+
+  mysql:
+    image: mysql:8.4
+    environment:
+      MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD:-123456}
+      MYSQL_DATABASE: ${MYSQL_DATABASE:-wecom_recorder_test}
+    ports:
+      - "3307:3306"
+    expose:
+      - "3306"
+    volumes:
+      - test-complete-mysql-data:/var/lib/mysql
+    healthcheck:
+      test: ["CMD-SHELL", "mysqladmin ping -h 127.0.0.1 -uroot -p$${MYSQL_ROOT_PASSWORD} --silent"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 20s
+    restart: unless-stopped
+
+  redis:
+    image: redis:7.4-alpine
+    ports:
+      - "6369:6379"
+    volumes:
+      - test-complete-redis-data:/data
+    command: ["redis-server", "--appendonly", "yes"]
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 5s
+    restart: unless-stopped
+
+volumes:
+  test-complete-mysql-data:
+  test-complete-redis-data:
+  test-complete-app-logs:
+  test-complete-app-storage:

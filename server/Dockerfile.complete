@@ -1,0 +1,31 @@
+FROM node:22-bookworm
+
+ARG DEBIAN_MIRROR=https://mirrors.ustc.edu.cn/debian
+ARG DEBIAN_SECURITY_MIRROR=https://mirrors.ustc.edu.cn/debian-security
+
+RUN printf 'Types: deb\nURIs: %s\nSuites: bookworm bookworm-updates\nComponents: main\nSigned-By: /usr/share/keyrings/debian-archive-keyring.gpg\n\nTypes: deb\nURIs: %s\nSuites: bookworm-security\nComponents: main\nSigned-By: /usr/share/keyrings/debian-archive-keyring.gpg\n' \
+    "${DEBIAN_MIRROR}" "${DEBIAN_SECURITY_MIRROR}" \
+    > /etc/apt/sources.list.d/debian.sources \
+  && apt-get -o Acquire::Retries=3 update \
+  && apt-get -o Acquire::Retries=3 install -y --no-install-recommends ffmpeg \
+  && rm -rf /var/lib/apt/lists/* \
+  && corepack enable \
+  && corepack prepare pnpm@9.15.9 --activate
+
+WORKDIR /app
+
+COPY package.json pnpm-lock.yaml .npmrc ./server/
+RUN pnpm --dir server install --prod --frozen-lockfile
+
+COPY . ./server
+
+RUN DATABASE_URL="mysql://prisma:prisma@localhost:3306/prisma" pnpm --dir server exec prisma generate \
+  && chmod +x ./server/docker-entrypoint.sh \
+  && mkdir -p /app/logs /app/server/storage \
+  && chown -R node:node /app/logs /app/server/storage
+
+EXPOSE 8787
+
+ENTRYPOINT ["./server/docker-entrypoint.sh"]
+
+CMD ["node", "server/index.mjs"]
