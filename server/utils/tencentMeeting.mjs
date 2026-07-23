@@ -1060,6 +1060,12 @@ export function isTencentMeetingTranscriptReadyEvent(payload = {}) {
   return String(payload?.event || "").trim() === "smart.transcripts";
 }
 
+export const TENCENT_MEETING_TRANSCRIPT_DIAGNOSTIC_START_MARKER =
+  "===== TENCENT_MEETING_TRANSCRIPT_DIAGNOSTIC_START =====";
+
+export const TENCENT_MEETING_TRANSCRIPT_DIAGNOSTIC_END_MARKER =
+  "===== TENCENT_MEETING_TRANSCRIPT_DIAGNOSTIC_END =====";
+
 export function tencentMeetingWebhookEventAction(payload = {}) {
   switch (String(payload?.event || "").trim()) {
     case "common.sts-token":

@@ -4,6 +4,8 @@ import { parseJsonObject } from "../utils/common.mjs";
 import {
   importTencentMeetingStsTokenPayload,
   requestTencentMeetingStsTokenIfNeeded,
+  TENCENT_MEETING_TRANSCRIPT_DIAGNOSTIC_END_MARKER,
+  TENCENT_MEETING_TRANSCRIPT_DIAGNOSTIC_START_MARKER,
   tencentMeetingWebhookEventAction,
   tencentMeetingVerifiedPlaintext,
   tencentMeetingWebhookStatus,
@@ -18,6 +20,17 @@ import {
 const router = express.Router();
 
 let dependencies = {};
+
+function logTencentMeetingWebhookTrace(stage, details = {}) {
+  const metadata = { stage, ...details };
+  logger.info(`tencent_meeting.webhook.${stage}`, {
+    message: Object.entries(details)
+      .map(([key, value]) => `${key}=${String(value)}`)
+      .join(", "),
+    ...metadata,
+  });
+  console.info(`[Tencent Meeting][Webhook] ${stage}`, metadata);
+}
 
 export function configure(deps) {
   dependencies = deps;
@@ -108,12 +121,26 @@ router.post("/webhook", async (request, response) => {
     const payload = parseJsonObject(plaintext);
     logger.info("logger.info listen /webhook tencentmeeting webhook payload: ", {message: JSON.stringify(payload)})
     console.log("console.log listen /webhook tencentmeeting webhook payload: ", {message: JSON.stringify(payload)})
+    const action = tencentMeetingWebhookEventAction(payload);
+    logTencentMeetingWebhookTrace("received", {
+      event: payload?.event || "",
+      action,
+      uniqueSequence: payload?.unique_sequence || "",
+      payloadItemCount: Array.isArray(payload?.payload) ? payload.payload.length : payload?.payload ? 1 : 0,
+    });
     // 记录腾讯会议webhhook日志
     const persisted = await appendTencentMeetingWebhookEvent({
       receivedAt: new Date().toISOString(),
       event: payload?.event || "",
       uniqueSequence: payload?.unique_sequence || "",
       payload: payload || plaintext,
+    });
+    logTencentMeetingWebhookTrace("persisted", {
+      event: payload?.event || "",
+      action,
+      eventId: persisted.event.id,
+      duplicate: persisted.duplicate,
+      previousStatus: persisted.event.status,
     });
     response.status(200).type("text/plain").send("successfully received callback");
     logger.debug("listen /webhook 成功响应腾讯会议webhook: ", {message: '继续后续逻辑'})
@@ -131,7 +158,11 @@ router.post("/webhook", async (request, response) => {
       void Promise.resolve()
         .then(async () => {
           await markTencentMeetingWebhookEventProcessing(eventId);
-          const action = tencentMeetingWebhookEventAction(payload);
+          logTencentMeetingWebhookTrace("dispatch_started", {
+            event: payload.event || "",
+            action,
+            eventId,
+          });
           switch (action) {
             case "sts-token": {
               const saved = await importTencentMeetingStsTokenPayload(payload);
@@ -148,6 +179,10 @@ router.post("/webhook", async (request, response) => {
               await importTencentMeetingAudioCompletedPayload(payload);
               break;
             case "transcript-ready":
+              console.info(TENCENT_MEETING_TRANSCRIPT_DIAGNOSTIC_START_MARKER, {
+                event: payload.event || "",
+                eventId,
+              });
               await importTencentMeetingTranscriptReadyPayload(payload);
               break;
             default:
@@ -157,8 +192,19 @@ router.post("/webhook", async (request, response) => {
               });
           }
           await markTencentMeetingWebhookEventProcessed(eventId);
+          logTencentMeetingWebhookTrace("dispatch_completed", {
+            event: payload.event || "",
+            action,
+            eventId,
+          });
         })
         .catch(async (error) => {
+          logTencentMeetingWebhookTrace("dispatch_failed", {
+            event: payload?.event || "",
+            action,
+            eventId,
+            error: error instanceof Error ? error.message : String(error),
+          });
           try {
             await markTencentMeetingWebhookEventFailed(eventId, error);
           } catch (persistError) {
@@ -168,6 +214,13 @@ router.post("/webhook", async (request, response) => {
             );
           }
           console.warn("[Tencent Meeting] webhook background import failed:", error instanceof Error ? error.message : error);
+          if (action === "transcript-ready") {
+            console.info(TENCENT_MEETING_TRANSCRIPT_DIAGNOSTIC_END_MARKER, {
+              event: payload?.event || "",
+              eventId,
+              outcome: "dispatch_failed",
+            });
+          }
         });
     } else {
       console.warn("[Tencent Meeting] webhook decrypted but did not contain JSON payload.");
