@@ -238,7 +238,7 @@ router.post("/", upload.single("audio"), async (request, response, next) => {
     })
     const seq = lastRecording ? lastRecording.seq + 1 : 1
 
-    logger.info("recording.uploaded lastRecording", { message: `lastRecording.id: ${lastRecording.id}, seq: ${seq}` });
+    logger.info("recording.uploaded lastRecording", { message: `lastRecording.id: ${lastRecording? lastRecording.id: "没有lastRecording"}, seq: ${seq}` });
     logger.info("recording.uploaded mock", { message: `recordingId: ${id}, ownerClientId: ${mockOwner.ownerClientId}, ownerName: ${mockOwner.ownerName}, durationMs: ${durationMs}, fileSize: ${fileSize}` });
     const insertResult = await prisma.recording.create({
       data: {
