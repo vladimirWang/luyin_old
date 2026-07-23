@@ -6,6 +6,8 @@ services:
     build:
       context: ./server
       dockerfile: Dockerfile.complete
+    ports:
+      - "18787:8787"
     expose:
       - "8787"
     env_file:
