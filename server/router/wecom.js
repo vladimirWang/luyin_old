@@ -1,7 +1,15 @@
 import express from "express";
 import crypto from "node:crypto";
 import logger from "../utils/log.js";
-import { getWecomUserByCode, hasWecomConfig, getWecomConfig, signWecomIdentity } from "../utils/wecom.js";
+import {
+  getWecomUserByCode,
+  getWecomUserByUserId,
+  hasWecomConfig,
+  getWecomConfig,
+  listWecomContacts,
+  requestWecomIdentity,
+  signWecomIdentity,
+} from "../utils/wecom.js";
 
 const router = express.Router();
 const prisma = await import("../plugins/prisma.cjs").then((module) => module.default || module);
@@ -99,6 +107,39 @@ router.get("/me", async (request, response, next) => {
         authExpiresAt: session.expiresAt,
       },
     });
+  } catch (error) {
+    next(error);
+  }
+});
+
+function requireWecomIdentity(request, response) {
+  const identity = requestWecomIdentity(request);
+  if (!identity) {
+    response.status(401).json({ error: "企业微信登录已失效，请重新登录" });
+    return null;
+  }
+  return identity;
+}
+
+router.get("/contacts", async (request, response, next) => {
+  if (!requireWecomIdentity(request, response)) return;
+  try {
+    const contacts = await listWecomContacts();
+    response.json(contacts);
+  } catch (error) {
+    next(error);
+  }
+});
+
+router.get("/contacts/:userId", async (request, response, next) => {
+  if (!requireWecomIdentity(request, response)) return;
+  try {
+    const user = await getWecomUserByUserId(request.params.userId);
+    if (!user) {
+      response.status(404).json({ error: "未找到企业微信成员" });
+      return;
+    }
+    response.json({ user });
   } catch (error) {
     next(error);
   }

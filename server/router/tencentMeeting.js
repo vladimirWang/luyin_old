@@ -4,10 +4,14 @@ import { parseJsonObject } from "../utils/common.mjs";
 import {
   importTencentMeetingStsTokenPayload,
   requestTencentMeetingStsTokenIfNeeded,
+  tencentMeetingApiRequest,
+  tencentMeetingCandidateOperatorParams,
+  tencentMeetingQuery,
   tencentMeetingWebhookEventAction,
   tencentMeetingVerifiedPlaintext,
   tencentMeetingWebhookStatus,
 } from "../utils/tencentMeeting.mjs";
+import { requestWecomIdentity } from "../utils/wecom.js";
 import {
   appendTencentMeetingWebhookEvent,
   markTencentMeetingWebhookEventFailed,
@@ -77,6 +81,77 @@ router.post("/sts-token/request", async (_request, response, next) => {
       requested: true,
       message: "STS Token 申请已提交，请等待腾讯会议回调",
     });
+  } catch (error) {
+    next(error);
+  }
+});
+
+function recentTencentMeetingWindow() {
+  const now = Date.now();
+  return {
+    start_time: Math.floor((now - 8 * 24 * 60 * 60 * 1000) / 1000),
+    end_time: Math.floor((now + 24 * 60 * 60 * 1000) / 1000),
+  };
+}
+
+router.post("/verify-api", async (request, response, next) => {
+  if (!requestWecomIdentity(request)) {
+    response.status(401).json({ error: "企业微信登录已失效，请重新登录" });
+    return;
+  }
+
+  const operation = String(request.body?.operation || "").trim();
+  const input = request.body?.input && typeof request.body.input === "object" ? request.body.input : {};
+  const operatorParams = tencentMeetingCandidateOperatorParams()[0] || {};
+  let uri = "";
+
+  switch (operation) {
+    case "records":
+      uri = tencentMeetingQuery("/v1/records", {
+        ...recentTencentMeetingWindow(),
+        page_size: 20,
+        page: 1,
+        ...operatorParams,
+      });
+      break;
+    case "addresses":
+      if (!input.meetingRecordId) {
+        response.status(400).json({ error: "调用 /v1/addresses 前需要 meeting_record_id" });
+        return;
+      }
+      uri = tencentMeetingQuery("/v1/addresses", {
+        meeting_record_id: String(input.meetingRecordId),
+        ...operatorParams,
+      });
+      break;
+    case "address-detail":
+      if (!input.addressId) {
+        response.status(400).json({ error: "调用 /v1/addresses/:id 前需要地址或录制文件 ID" });
+        return;
+      }
+      uri = tencentMeetingQuery(`/v1/addresses/${encodeURIComponent(String(input.addressId))}`, operatorParams);
+      break;
+    case "transcript-details":
+      if (!input.recordFileId) {
+        response.status(400).json({ error: "调用转写详情前需要 record_file_id" });
+        return;
+      }
+      uri = tencentMeetingQuery("/v1/records/transcripts/details", {
+        record_file_id: String(input.recordFileId),
+        meeting_id: String(input.meetingId || ""),
+        transcripts_type: Number(input.transcriptsType || process.env.TENCENT_MEETING_TRANSCRIPTS_TYPE || 1),
+        ...operatorParams,
+      });
+      break;
+    default:
+      response.status(400).json({ error: "不支持的腾讯会议验证操作" });
+      return;
+  }
+
+  try {
+    await requestTencentMeetingStsTokenIfNeeded();
+    const payload = await tencentMeetingApiRequest("GET", uri);
+    response.json({ ok: true, operation, method: "GET", uri, payload });
   } catch (error) {
     next(error);
   }

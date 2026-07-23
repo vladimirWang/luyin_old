@@ -172,6 +172,63 @@ export async function getWecomUserByUserId(userId, accessToken = "") {
     status: user.status || "",
     qrCode: user.qr_code || "",
     alias: user.alias || "",
+    directLeaders: Array.isArray(user.direct_leader) ? user.direct_leader : [],
+    isLeaderInDepartment: Array.isArray(user.is_leader_in_dept) ? user.is_leader_in_dept : [],
+    mainDepartment: user.main_department || 0,
+    telephone: user.telephone || "",
+    address: user.address || "",
+  };
+}
+
+async function requestWecomJson(path, accessToken = "") {
+  const token = accessToken || (await getWecomAccessToken());
+  if (!token) throw new Error("企业微信通讯录配置不完整");
+
+  const separator = path.includes("?") ? "&" : "?";
+  const response = await fetch(
+    `https://qyapi.weixin.qq.com/cgi-bin/${path}${separator}access_token=${encodeURIComponent(token)}`,
+  );
+  const payload = await response.json();
+  if (!response.ok || payload.errcode) {
+    throw new Error(payload.errmsg || `企业微信通讯录请求失败（HTTP ${response.status}）`);
+  }
+  return { payload, token };
+}
+
+export async function listWecomContacts() {
+  const { payload: departmentPayload, token } = await requestWecomJson("department/list");
+  const departments = Array.isArray(departmentPayload.department) ? departmentPayload.department : [];
+  const departmentById = new Map(
+    departments.map((department) => [
+      Number(department.id),
+      {
+        id: Number(department.id),
+        name: String(department.name || ""),
+        parentId: Number(department.parentid || 0),
+        order: Number(department.order || 0),
+      },
+    ]),
+  );
+  const rootDepartmentId = departments.find((department) => Number(department.parentid || 0) === 0)?.id || 1;
+  const { payload: userPayload } = await requestWecomJson(
+    `user/simplelist?department_id=${encodeURIComponent(rootDepartmentId)}&fetch_child=1`,
+    token,
+  );
+  const users = Array.isArray(userPayload.userlist) ? userPayload.userlist : [];
+
+  return {
+    departments: [...departmentById.values()],
+    users: users.map((user) => {
+      const departmentIds = Array.isArray(user.department) ? user.department.map(Number) : [];
+      return {
+        userId: String(user.userid || ""),
+        name: String(user.name || user.userid || ""),
+        departmentIds,
+        departmentNames: departmentIds
+          .map((departmentId) => departmentById.get(departmentId)?.name)
+          .filter(Boolean),
+      };
+    }),
   };
 }
 
