@@ -25,7 +25,8 @@ for ssl_file in client/ssl/2026_hyp-arch.com.pem client/ssl/2026_hyp-arch.com.ke
 done
 
 echo "正在整体构建并启动测试环境..."
-"${COMPOSE[@]}" up --build -d --wait --wait-timeout 300
+"${COMPOSE[@]}" up --build -d --wait --wait-timeout 300 mysql redis app
+"${COMPOSE[@]}" up -d --wait --wait-timeout 60 nginx
 
 echo "测试环境部署完成。"
 echo "查看状态：${COMPOSE[*]} ps"
