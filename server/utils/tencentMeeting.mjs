@@ -1083,12 +1083,6 @@ export function tencentMeetingTranscriptSyncMaxAttempts(info = {}) {
   return boundedNumber(process.env.TENCENT_MEETING_RECORDER_TRANSCRIPT_MAX_ATTEMPTS, 6, 1, 24);
 }
 
-export const TENCENT_MEETING_TRANSCRIPT_DIAGNOSTIC_START_MARKER =
-  "===== TENCENT_MEETING_TRANSCRIPT_DIAGNOSTIC_START =====";
-
-export const TENCENT_MEETING_TRANSCRIPT_DIAGNOSTIC_END_MARKER =
-  "===== TENCENT_MEETING_TRANSCRIPT_DIAGNOSTIC_END =====";
-
 export function tencentMeetingWebhookEventAction(payload = {}) {
   switch (String(payload?.event || "").trim()) {
     case "common.sts-token":
