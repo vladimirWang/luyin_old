@@ -2,7 +2,7 @@ import cors from "cors";
 import crypto from "node:crypto";
 import express from "express";
 import { createWriteStream, existsSync, statSync } from "node:fs";
-import { mkdir, readFile, readdir, rename, rm, writeFile } from "node:fs/promises";
+import { mkdir, readFile, rename, rm, writeFile } from "node:fs/promises";
 import https from "node:https";
 import path from "node:path";
 import { Readable } from "node:stream";
@@ -108,9 +108,10 @@ import {
 // import prisma from './plugins/prisma.js';
 import {removeFileIfExists} from './utils/file.js'
 import {getWecomUserByUserId} from './utils/wecom.js'
-import {projectRoot, tencentMeetingWebhookDir} from './config.js'
+import {projectRoot} from './config.js'
 import {TENCENT_MEETING_SOURCE_PREFIX} from './constant.js'
 import { recordingFromPrisma, transcriptSegmentFromPrisma } from "./repositories/recordings.mjs";
+import { listTencentMeetingWebhookPayloadHistory } from "./repositories/tencentMeetingWebhookEvents.mjs";
 import {connectRedis} from './plugins/redis.js'
 import { startTencentMeetingStsTokenCron } from "./cron/tencentMeeting.js";
 const prisma = await import('./plugins/prisma.cjs').then(m => m.default || m);
@@ -599,8 +600,6 @@ const upload = multer({
 const tencentMeetingImportJobs = new Set();
 const tencentMeetingTranscriptJobs = new Set();
 const tencentMeetingCreatorNameCache = new Map();
-let tencentMeetingRecorderOwnerContextCache = null;
-let tencentMeetingWebhookPayloadHistoryCache = null;
 let tencentMeetingCloudDiscoveryJob = null;
 const LOCAL_TRANSCRIPTION_SWEEP_INTERVAL_MS = 30 * 1000;
 const LOCAL_TRANSCRIPTION_SWEEP_LIMIT = 8;
@@ -710,9 +709,11 @@ configureTencentMeetingRouter({
   queueTencentMeetingCloudDiscovery,
   queueTencentMeetingPendingImports,
   importTencentMeetingCloudRecordingsFromApi,
-  appendTencentMeetingWebhookEvent,
-  importTencentMeetingWebhookPayload,
+  importTencentMeetingAudioCompletedPayload,
+  importTencentMeetingRecordingCompletedPayload,
+  importTencentMeetingTranscriptReadyPayload,
 });
+app.use("/api/tencentMeeting", tencentMeetingRouter);
 app.use("/api/tencent-meeting", tencentMeetingRouter);
 app.use("/tencent-meeting", tencentMeetingRouter);
 
@@ -831,14 +832,6 @@ configureFoldersRouter({
 app.use("/api/folders", foldersRouter);
 app.use("/api/algo", algoRouter);
 
-async function appendTencentMeetingWebhookEvent(entry) {
-  // await mkdir(tencentMeetingWebhookDir, { recursive: true });
-  const filePath = path.join(tencentMeetingWebhookDir, `${new Date().toISOString().slice(0, 10)}.jsonl`);
-  await writeFile(filePath, `${JSON.stringify(entry)}\n`, { flag: "a" });
-  tencentMeetingRecorderOwnerContextCache = null;
-  tencentMeetingWebhookPayloadHistoryCache = null;
-}
-
 function isLocalApiTranscriptionRecording(recording = {}) {
   const LOCAL_API_TRANSCRIPTION_SOURCES = new Set(["wecom-h5", "wecom-h5-long-session", "wecom-h5-resumed"]);
   const result = LOCAL_API_TRANSCRIPTION_SOURCES.has(String(recording.source).trim());
@@ -863,7 +856,7 @@ function extractTencentMeetingRecordingEvents(payload) {
     const meetingInfo = container.meeting_info || container.meetingInfo || payload.meeting_info || payload.meetingInfo || {};
     const creator = meetingInfo.creator || container.creator || payload.creator || {};
     const operator = container.operator || payload.operator || {};
-    const files = [
+    const nestedFiles = [
       ...asArray(container.recording_files),
       ...asArray(container.recordingFiles),
       ...asArray(container.record_files),
@@ -873,6 +866,11 @@ function extractTencentMeetingRecordingEvents(payload) {
       ...asArray(container.meeting_record),
       ...asArray(container.meetingRecord),
     ];
+    const files = nestedFiles.length
+      ? nestedFiles
+      : tencentMeetingRecordFileId(container)
+        ? [container]
+        : [];
     const operateTime =
       container.operate_time ||
       container.operateTime ||
@@ -1062,36 +1060,17 @@ function buildTencentMeetingRecorderOwnerContexts(webhookPayloads = []) {
 }
 
 async function loadTencentMeetingWebhookPayloadHistory() {
-  if (tencentMeetingWebhookPayloadHistoryCache) return tencentMeetingWebhookPayloadHistoryCache;
-  const payloads = [];
   try {
-    const files = (await readdir(tencentMeetingWebhookDir))
-      .filter((fileName) => /^\d{4}-\d{2}-\d{2}\.jsonl$/.test(fileName))
-      .sort()
-      .slice(-8);
-    for (const fileName of files) {
-      const raw = await readFile(path.join(tencentMeetingWebhookDir, fileName), "utf8");
-      for (const line of raw.split(/\r?\n/)) {
-        const entry = parseJsonObject(line);
-        if (!entry) continue;
-        const payload = entry.payload && typeof entry.payload === "object" ? entry.payload : entry;
-        if (payload && typeof payload === "object") payloads.push(payload);
-      }
-    }
+    return await listTencentMeetingWebhookPayloadHistory({ limit: 2000 });
   } catch (error) {
-    if (error?.code !== "ENOENT") {
-      console.warn("[Tencent Meeting] recorder owner context history skipped:", error instanceof Error ? error.message : error);
-    }
+    console.warn("[Tencent Meeting] recorder owner context history skipped:", error instanceof Error ? error.message : error);
+    return [];
   }
-  tencentMeetingWebhookPayloadHistoryCache = payloads;
-  return tencentMeetingWebhookPayloadHistoryCache;
 }
 
 async function loadTencentMeetingRecorderOwnerContexts() {
-  if (tencentMeetingRecorderOwnerContextCache) return tencentMeetingRecorderOwnerContextCache;
   const payloads = await loadTencentMeetingWebhookPayloadHistory();
-  tencentMeetingRecorderOwnerContextCache = buildTencentMeetingRecorderOwnerContexts(payloads);
-  return tencentMeetingRecorderOwnerContextCache;
+  return buildTencentMeetingRecorderOwnerContexts(payloads);
 }
 
 async function enrichTencentMeetingRecorderOwnerContexts(events = []) {
@@ -1191,7 +1170,6 @@ async function fetchTencentMeetingSummaryTranscript(info = {}, durationMs = 0, f
 }
 
 async function findTencentMeetingDownloadTarget(info) {
-  if (!tencentMeetingApiConfigured()) return null;
   const recordFileId = String(info?.recordFileId || "").trim();
   if (!recordFileId) return null;
   const meetingRecordId = String(info?.meetingRecordId || info?.meeting_record_id || "").trim();
@@ -1207,6 +1185,7 @@ async function findTencentMeetingDownloadTarget(info) {
       downloadUrl: info.downloadUrl,
     };
   }
+  if (!tencentMeetingApiConfigured()) return null;
   const { startTime, endTime } = tencentMeetingSearchWindow(info);
   logger.log("[call] findTencentMeetingDownloadTarget ", {message: `startTime: ${startTime}, endTime: ${endTime}`})
   const identityParams = tencentMeetingCandidateDownloadIdentityParams(info);
@@ -1530,6 +1509,10 @@ async function downloadTencentMeetingFile(url, targetPath) {
   };
 }
 
+function tencentMeetingRecordingAudioUrl(recordingId) {
+  return `/audio/${recordingId}.mp3`;
+}
+
 function isTencentMeetingStreamingMedia(url = "", downloadInfo = {}) {
   const text = String(url || downloadInfo.finalUrl || "").trim();
   const contentType = String(downloadInfo.contentType || "").toLowerCase();
@@ -1557,6 +1540,12 @@ async function inspectTencentMeetingDownloadedFile(targetPath, downloadInfo = {}
 
 async function syncTencentMeetingRecordingAudio(recordingId, info = {}, jobVersion = recordingJobVersion(recordingId)) {
   if (isRecordingJobCancelled(recordingId, jobVersion)) return false;
+  const recordingBeforeSync = await prisma.recording.findFirst({
+    where: { id: recordingId, deletedAt: null },
+  });
+  if (!recordingBeforeSync) return false;
+  if (resolveRecordingAudioPathBetter(recordingBeforeSync, projectRoot)) return true;
+
   console.info(`[CALL] syncTencentMeetingRecordingAudio: recordingId: ${recordingId}`);
   const target = await findTencentMeetingDownloadTarget(info);
   console.info(`[CALL] syncTencentMeetingRecordingAudio`);
@@ -1565,38 +1554,45 @@ async function syncTencentMeetingRecordingAudio(recordingId, info = {}, jobVersi
     const hasStsToken = Boolean(await loadTencentMeetingStsToken());
     const canRequestStsToken = Boolean(tencentMeetingStsOperatorId());
     const waitsForTencentTranscript = info.sourceKind === "recorder" || /audio-completed|smart\.transcripts/i.test(String(info.event || ""));
-    await updateDb((db) => {
-      if (isRecordingJobCancelled(recordingId, jobVersion)) return null;
-      const recording = findRecording(db, recordingId);
-      if (!recording || recording.deletedAt) return null;
-      recording.updatedAt = new Date().toISOString();
-      if (target?.name) recording.name = target.name;
-      if (target?.ownerName) recording.ownerName = target.ownerName;
-      if (target?.creatorUserid) recording.tencentMeetingCreatorUserid = target.creatorUserid;
-      if (target?.meetingRecordId) recording.tencentMeetingMeetingRecordId = target.meetingRecordId;
-      if (target?.record?.meeting_id || target?.record?.meetingId) {
-        recording.tencentMeetingMeetingId = target.record.meeting_id || target.record.meetingId;
-      }
-      if (target?.record?.meeting_code || target?.record?.meetingCode) {
-        recording.tencentMeetingMeetingCode = target.record.meeting_code || target.record.meetingCode;
-      }
-      if (target?.durationMs > 0 && (!recording.durationMs || recording.durationMs < target.durationMs)) {
-        recording.durationMs = target.durationMs;
-      }
-      recording.tencentMeetingSourceKind = info.sourceKind || recording.tencentMeetingSourceKind || "";
-      recording.tag = tencentMeetingImportTag(info, "等待下载权限");
-      recording.errorMessage = needsIdentity
+    if (isRecordingJobCancelled(recordingId, jobVersion)) return false;
+    const data = {
+      updatedAt: new Date(),
+      tencentMeetingSourceKind: info.sourceKind || recordingBeforeSync.tencentMeetingSourceKind || "",
+      tag: tencentMeetingImportTag(info, "等待下载权限"),
+      errorMessage: needsIdentity
         ? "Tencent Meeting recording needs a configured userid or Rooms operator_id before the audio can be downloaded."
         : !hasStsToken && canRequestStsToken
           ? "Tencent Meeting STS-Token has been requested. Waiting for common.sts-token callback before downloading audio."
           : !hasStsToken
             ? "Tencent Meeting recording needs STS-Token. Subscribe common.sts-token and configure an admin userid to generate it."
-            : "Tencent Meeting recording download address is not available yet.";
-      if (waitsForTencentTranscript && !needsIdentity) {
-        recording.tag = tencentMeetingImportTag(info, "等待腾讯会议文字");
-        recording.errorMessage = "腾讯会议录音笔已回调录音完成，正在等待 smart.transcripts 录制转写生成事件或腾讯转写接口返回内容。";
-      }
-      return recording;
+            : "Tencent Meeting recording download address is not available yet.",
+    };
+    if (target?.name) data.name = target.name;
+    const currentOwnerName = String(recordingBeforeSync.ownerName || "").trim();
+    if (
+      target?.ownerName &&
+      (!currentOwnerName || currentOwnerName === tencentMeetingImportOwnerName())
+    ) {
+      data.ownerName = target.ownerName;
+    }
+    if (target?.creatorUserid) data.tencentMeetingCreatorUserid = target.creatorUserid;
+    if (target?.meetingRecordId) data.tencentMeetingMeetingRecordId = target.meetingRecordId;
+    if (target?.record?.meeting_id || target?.record?.meetingId) {
+      data.tencentMeetingMeetingId = target.record.meeting_id || target.record.meetingId;
+    }
+    if (target?.record?.meeting_code || target?.record?.meetingCode) {
+      data.tencentMeetingMeetingCode = target.record.meeting_code || target.record.meetingCode;
+    }
+    if (target?.durationMs > Number(recordingBeforeSync.durationMs || 0n)) {
+      data.durationMs = BigInt(Math.max(0, Math.round(Number(target.durationMs))));
+    }
+    if (waitsForTencentTranscript && !needsIdentity) {
+      data.tag = tencentMeetingImportTag(info, "等待腾讯会议文字");
+      data.errorMessage = "腾讯会议录音笔已回调录音完成，正在等待 smart.transcripts 录制转写生成事件或腾讯转写接口返回内容。";
+    }
+    await prisma.recording.updateMany({
+      where: { id: recordingId, deletedAt: null },
+      data,
     });
     return false;
   }
@@ -1617,42 +1613,63 @@ async function syncTencentMeetingRecordingAudio(recordingId, info = {}, jobVersi
     }
     await removeFileIfExists(tempPath);
     const { storedFile, durationMs } = await verifiedStoredRecording(storagePath, target.durationMs || info.durationMs || 0);
-    const synced = await updateDb((db) => {
-      if (isRecordingJobCancelled(recordingId, jobVersion)) return null;
-      const recording = findRecording(db, recordingId);
-      if (!recording || recording.deletedAt) return null;
-      const now = new Date().toISOString();
-      recording.name = target.name || recording.name;
-      recording.updatedAt = now;
-      recording.durationMs = durationMs;
-      if (target.ownerName) recording.ownerName = target.ownerName;
-      if (target.creatorUserid) recording.tencentMeetingCreatorUserid = target.creatorUserid;
-      if (target.meetingRecordId) recording.tencentMeetingMeetingRecordId = target.meetingRecordId;
-      recording.tencentMeetingSourceKind = info.sourceKind || recording.tencentMeetingSourceKind || "";
-      recording.mimeType = "audio/mpeg";
-      recording.size = storedFile.size;
-      recording.fileName = fileName;
-      recording.storagePath = storagePath;
-      recording.status = "uploaded";
-      recording.errorMessage = "";
-      recording.tag = tencentMeetingImportTag(info, findSegments(db, recordingId).length ? "已同步音频" : "等待腾讯转写");
-      recording.shared = true;
-      if (!recording.sharedAt) recording.sharedAt = now;
-      return recording;
+    if (isRecordingJobCancelled(recordingId, jobVersion)) {
+      await removeFileIfExists(storagePath);
+      return false;
+    }
+    const segmentCount = await prisma.transcriptSegment.count({ where: { recordingId } });
+    const now = new Date();
+    const data = {
+      name: target.name || recordingBeforeSync.name,
+      updatedAt: now,
+      durationMs: BigInt(Math.max(0, Math.round(Number(durationMs || 0)))),
+      tencentMeetingSourceKind: info.sourceKind || recordingBeforeSync.tencentMeetingSourceKind || "",
+      mimeType: "audio/mpeg",
+      fileSize: BigInt(Math.max(0, Math.round(Number(storedFile.size || 0)))),
+      fileName,
+      storageProvider: "local",
+      storageKey: storagePath,
+      audioUrl: tencentMeetingRecordingAudioUrl(recordingId),
+      status: "uploaded",
+      errorMessage: "",
+      tag: tencentMeetingImportTag(info, segmentCount ? "已同步音频" : "等待腾讯转写"),
+      shared: true,
+      sharedAt: recordingBeforeSync.sharedAt || now,
+    };
+    const currentOwnerName = String(recordingBeforeSync.ownerName || "").trim();
+    if (target.ownerName && (!currentOwnerName || currentOwnerName === tencentMeetingImportOwnerName())) {
+      data.ownerName = target.ownerName;
+    }
+    if (target.creatorUserid) data.tencentMeetingCreatorUserid = target.creatorUserid;
+    if (target.meetingRecordId) data.tencentMeetingMeetingRecordId = target.meetingRecordId;
+    if (target.record?.meeting_id || target.record?.meetingId) {
+      data.tencentMeetingMeetingId = target.record.meeting_id || target.record.meetingId;
+    }
+    if (target.record?.meeting_code || target.record?.meetingCode) {
+      data.tencentMeetingMeetingCode = target.record.meeting_code || target.record.meetingCode;
+    }
+    const synced = await prisma.recording.updateMany({
+      where: { id: recordingId, deletedAt: null },
+      data,
     });
-    return Boolean(synced);
+    if (!synced.count) {
+      await removeFileIfExists(storagePath);
+      return false;
+    }
+    return true;
   } catch (error) {
     await removeFileIfExists(tempPath);
     await removeFileIfExists(storagePath);
-    await updateDb((db) => {
-      if (isRecordingJobCancelled(recordingId, jobVersion)) return null;
-      const recording = findRecording(db, recordingId);
-      if (!recording || recording.deletedAt) return null;
-      recording.updatedAt = new Date().toISOString();
-      recording.tag = tencentMeetingImportTag(info, "等待重试");
-      recording.errorMessage = error instanceof Error ? error.message : String(error);
-      return recording;
-    });
+    if (!isRecordingJobCancelled(recordingId, jobVersion)) {
+      await prisma.recording.updateMany({
+        where: { id: recordingId, deletedAt: null },
+        data: {
+          updatedAt: new Date(),
+          tag: tencentMeetingImportTag(info, "等待重试"),
+          errorMessage: error instanceof Error ? error.message : String(error),
+        },
+      });
+    }
     throw error;
   }
 }
@@ -1759,6 +1776,7 @@ async function upsertTencentMeetingRecordingInfos(recordInfos = [], userAgent = 
       ownerName: (await resolveTencentMeetingOwnerName(info)) || info.ownerName || "",
     });
   }
+  logger.info("[call] upsertTencentMeetingRecordingInfos step 1: ", {message: `uniqueInfos`})
   if (!uniqueInfos.length) return [];
 
   const now = new Date();
@@ -1767,12 +1785,15 @@ async function upsertTencentMeetingRecordingInfos(recordInfos = [], userAgent = 
     let nextSeq = Number(latest?.seq || 0);
     const results = [];
     for (const eventInfo of uniqueInfos) {
+      logger.info("[call] upsertTencentMeetingRecordingInfos step 2: ", {message: `fileId: ${eventInfo.recordFileId}`})
       const source = tencentMeetingSourceKey(eventInfo.recordFileId);
       const existing = await tx.recording.findFirst({
         where: { source },
         include: { segments: { select: { id: true }, take: 1 } },
       });
+      logger.info("[call] upsertTencentMeetingRecordingInfos step 3: ", {message: ``})
       const meetingRecordId = String(eventInfo.meetingRecordId || "").trim();
+      logger.info("[call] upsertTencentMeetingRecordingInfos step 4: ", {message: `meetingRecordId && meetingRecordId !== eventInfo.recordFileId: ${JSON.stringify(meetingRecordId && meetingRecordId !== eventInfo.recordFileId)}`})
       if (meetingRecordId && meetingRecordId !== eventInfo.recordFileId) {
         const duplicate = await tx.recording.findFirst({
           where: { source: tencentMeetingSourceKey(meetingRecordId), deletedAt: null },
@@ -1791,10 +1812,17 @@ async function upsertTencentMeetingRecordingInfos(recordInfos = [], userAgent = 
       }
       if (existing) {
         const hasSegments = existing.segments.length > 0;
+        const existingOwnerName = String(existing.ownerName || "").trim();
+        const incomingOwnerName = String(eventInfo.ownerName || "").trim();
+        const ownerName =
+          existingOwnerName && existingOwnerName !== tencentMeetingImportOwnerName()
+            ? existingOwnerName
+            : incomingOwnerName || existingOwnerName || tencentMeetingImportOwnerName();
         const data = {
           shared: true,
           sharedAt: existing.sharedAt || now,
-          ownerName: eventInfo.ownerName || existing.ownerName || tencentMeetingImportOwnerName(),
+          ownerName,
+          audioUrl: tencentMeetingRecordingAudioUrl(existing.id),
           transcriptProvider: existing.transcriptSource === "tencent-meeting" || !hasSegments ? "tencent-meeting" : existing.transcriptProvider,
         };
         if (eventInfo.subject) data.name = tencentMeetingPlaceholderName(eventInfo);
@@ -1815,6 +1843,8 @@ async function upsertTencentMeetingRecordingInfos(recordInfos = [], userAgent = 
 
       nextSeq += 1;
       const recordingId = crypto.randomUUID();
+      logger.info("[call] upsertTencentMeetingRecordingInfos step 5: ", {message: `recordFileId: ${eventInfo.recordFileId}, id: ${recordingId}`})
+      
       await tx.recording.create({
         data: {
           id: recordingId,
@@ -1850,20 +1880,25 @@ async function upsertTencentMeetingRecordingInfos(recordInfos = [], userAgent = 
           tencentMeetingSourceKind: eventInfo.sourceKind || "",
           errorMessage: "",
           userAgent,
+          audioUrl: tencentMeetingRecordingAudioUrl(recordingId),
         },
       });
+      logger.info("[call] upsertTencentMeetingRecordingInfos step 6: ", {message: ``})
       results.push({ recordingId, recordFileId: eventInfo.recordFileId, created: true, info: eventInfo });
     }
     return results;
   });
 }
 
-async function importTencentMeetingWebhookPayload(payload) {
+async function importTencentMeetingWebhookPayload(
+  payload,
+  { syncAudio = false, syncTranscript = false, userAgent = "tencent-meeting-webhook" } = {},
+) {
   logger.debug("触发ststoken获取", {message: 'step2'})
   const events = await enrichTencentMeetingRecorderOwnerContexts(extractTencentMeetingRecordingEvents(payload));
   logger.debug("触发ststoken获取", {message: `step3 length: ${events.length}`})
   if (!events.length) return [];
-  const results = await upsertTencentMeetingRecordingInfos(events, "tencent-meeting-webhook");
+  const results = await upsertTencentMeetingRecordingInfos(events, userAgent);
   if (results.length) {
     console.info(
       "[Tencent Meeting] webhook imported:",
@@ -1873,19 +1908,40 @@ async function importTencentMeetingWebhookPayload(payload) {
     );
   }
 
-  const transcriptReady = isTencentMeetingTranscriptReadyEvent(payload);
   for (const result of results) {
-    if (transcriptReady) {
+    if (syncTranscript) {
       queueTencentMeetingTranscriptSync(result.recordingId, {
         ...result.info,
         event: payload.event,
       });
-    } else {
+    }
+    if (syncAudio) {
       queueTencentMeetingImportSync(result.recordingId, result.info);
     }
   }
 
   return results;
+}
+
+async function importTencentMeetingRecordingCompletedPayload(payload) {
+  return importTencentMeetingWebhookPayload(payload, {
+    syncAudio: true,
+    userAgent: "tencent-meeting-recording-completed",
+  });
+}
+
+async function importTencentMeetingAudioCompletedPayload(payload) {
+  return importTencentMeetingWebhookPayload(payload, {
+    syncAudio: true,
+    userAgent: "tencent-meeting-audio-completed",
+  });
+}
+
+async function importTencentMeetingTranscriptReadyPayload(payload) {
+  return importTencentMeetingWebhookPayload(payload, {
+    syncTranscript: true,
+    userAgent: "tencent-meeting-smart-transcripts",
+  });
 }
 
 async function replayMissingTencentMeetingRecordingWebhooks() {
@@ -1907,7 +1963,15 @@ async function replayMissingTencentMeetingRecordingWebhooks() {
   for (const payload of payloads) {
     const infos = extractTencentMeetingRecordingEvents(payload);
     if (infos.every((info) => existingSources.has(tencentMeetingSourceKey(info.recordFileId)))) continue;
-    const results = await importTencentMeetingWebhookPayload(payload);
+    const event = String(payload?.event || "").trim();
+    const results =
+      event === "recording.audio-completed"
+        ? await importTencentMeetingAudioCompletedPayload(payload)
+        : event === "recording.completed"
+          ? await importTencentMeetingRecordingCompletedPayload(payload)
+          : event === "smart.transcripts"
+            ? await importTencentMeetingTranscriptReadyPayload(payload)
+            : await importTencentMeetingWebhookPayload(payload);
     for (const result of results) existingSources.add(tencentMeetingSourceKey(result.recordFileId));
     replayed += results.filter((result) => result.created).length;
   }

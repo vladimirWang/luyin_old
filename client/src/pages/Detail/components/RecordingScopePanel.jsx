@@ -25,14 +25,16 @@ export function RecordingScopePanel({
           className={activeRecordingIds.length === 0 ? "scope-all active" : "scope-all"}
           type="button"
           onClick={onReset}
+          aria-pressed={activeRecordingIds.length === 0}
         >
           {uiText(language, "全部录音", "All")}
         </button>
         <button
-          className="scope-single"
+          className={expanded || activeRecordingIds.length > 0 ? "scope-single active" : "scope-single"}
           type="button"
           onClick={() => onExpandedChange(true)}
           disabled={loading || recordings.length === 0}
+          aria-pressed={expanded || activeRecordingIds.length > 0}
         >
           {loading ? uiText(language, "刷新中", "Refreshing") : uiText(language, "单选", "Single select")}
         </button>

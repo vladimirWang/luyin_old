@@ -38,5 +38,8 @@ export function useDetailRoute() {
     navigate(id ? `/detail?id=${encodeURIComponent(id)}` : "/detail");
   }
 
-  return { recording, language, selectRecording };
+  const activeRecording =
+    recordingId && String(recording?.id || "") === recordingId ? recording : null;
+
+  return { recording: activeRecording, language, selectRecording };
 }

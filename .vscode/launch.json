@@ -20,8 +20,21 @@
       "runtimeExecutable": "${workspaceFolder}/server/node_modules/.bin/nodemon",
       "program": "${workspaceFolder}/server/index.mjs",
       "cwd": "${workspaceFolder}/server",
-      "envFile": "${workspaceFolder}/.env.dev.local",
+      "envFile": "${workspaceFolder}/.env.dev",
       "console": "internalConsole",
+      "restart": true,
+      "skipFiles": ["<node_internals>/**"]
+    },
+    {
+      "type": "node",
+      "request": "launch",
+      "name": "Server: Windows (.env.local)",
+      "runtimeExecutable": "node.exe",
+      "runtimeArgs": ["--enable-source-maps"],
+      "program": "${workspaceFolder}/server/index.mjs",
+      "cwd": "${workspaceFolder}/server",
+      "envFile": "${workspaceFolder}/.env.local",
+      "console": "integratedTerminal",
       "restart": true,
       "skipFiles": ["<node_internals>/**"]
     },

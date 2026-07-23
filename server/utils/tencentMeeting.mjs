@@ -1032,7 +1032,7 @@ export function tencentMeetingCallbackUrl() {
     process.env.APP_BASE_URL,
   ];
   const baseUrl = candidates.map((item) => String(item || "").trim()).find(Boolean);
-  return baseUrl ? `${baseUrl.replace(/\/+$/, "")}/api/tencent-meeting/webhook` : "";
+  return baseUrl ? `${baseUrl.replace(/\/+$/, "")}/api/tencentMeeting/webhook` : "";
 }
 
 export function tencentMeetingStsOperatorId() {
@@ -1058,6 +1058,23 @@ export function tencentMeetingApiConfigured() {
 
 export function isTencentMeetingTranscriptReadyEvent(payload = {}) {
   return String(payload?.event || "").trim() === "smart.transcripts";
+}
+
+export function tencentMeetingWebhookEventAction(payload = {}) {
+  switch (String(payload?.event || "").trim()) {
+    case "common.sts-token":
+      return "sts-token";
+    case "recording.started":
+      return "recording-started";
+    case "recording.completed":
+      return "recording-completed";
+    case "recording.audio-completed":
+      return "audio-completed";
+    case "smart.transcripts":
+      return "transcript-ready";
+    default:
+      return "ignored";
+  }
 }
 
 export function tencentMeetingQuery(pathname, params = {}) {

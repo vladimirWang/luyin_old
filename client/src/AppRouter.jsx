@@ -9,7 +9,7 @@ import User from "./pages/User/User.jsx";
 import Verify from "./pages/Verify/Verify.jsx";
 import ProtectedRoute from "./routes/ProtectedRoute.jsx";
 import appConfig from "./config.js";
-
+console.log("appConfig: ", appConfig)
 export default function AppRouter() {
   return (
     <BrowserRouter>
@@ -21,7 +21,7 @@ export default function AppRouter() {
             {/* <Route path="/recorder" element={<Recorder />} /> */}
             <Route path="/records" element={<Records />} />
             <Route path="/detail" element={<Detail />} />
-            {appConfig.showDebug && (
+            {true && (
               <Route path="/verify" element={<Verify />} />
             )}
           </Route>

@@ -3,11 +3,17 @@ import logger from "../utils/log.js";
 import { parseJsonObject } from "../utils/common.mjs";
 import {
   importTencentMeetingStsTokenPayload,
-  isTencentMeetingTranscriptReadyEvent,
   requestTencentMeetingStsTokenIfNeeded,
+  tencentMeetingWebhookEventAction,
   tencentMeetingVerifiedPlaintext,
   tencentMeetingWebhookStatus,
 } from "../utils/tencentMeeting.mjs";
+import {
+  appendTencentMeetingWebhookEvent,
+  markTencentMeetingWebhookEventFailed,
+  markTencentMeetingWebhookEventProcessed,
+  markTencentMeetingWebhookEventProcessing,
+} from "../repositories/tencentMeetingWebhookEvents.mjs";
 
 const router = express.Router();
 
@@ -45,6 +51,7 @@ router.post("/cloud-recordings/sync", async (request, response, next) => {
 router.post("/sts-token/request", async (_request, response, next) => {
   try {
     const result = await requestTencentMeetingStsTokenIfNeeded();
+    console.log("/sts-token/request: ", result)
     if (!result.requested) {
       const missingOperator = result.reason === "missing_operator_id";
       const redisUnavailable = result.reason === "redis_unavailable";
@@ -83,62 +90,84 @@ router.get("/webhook", (request, response) => {
     response.status(200).type("text/plain").send(plaintext);
   } catch (error) {
     console.warn("[Tencent Meeting] webhook GET rejected:", error instanceof Error ? error.message : error);
-    response.status(error.statusCode || 400).type("text/plain").send("invalid callback");
+    response.status(error.statusCode || 400).type("text/plain").send("invalid callback 3");
   }
 });
 
 router.post("/webhook", async (request, response) => {
   const {
-    appendTencentMeetingWebhookEvent,
-    importTencentMeetingWebhookPayload,
-    queueTencentMeetingCloudDiscovery,
+    importTencentMeetingAudioCompletedPayload,
+    importTencentMeetingRecordingCompletedPayload,
+    importTencentMeetingTranscriptReadyPayload,
     queueTencentMeetingPendingImports,
   } = dependencies;
   try {
     const plaintext = tencentMeetingVerifiedPlaintext(request, request.body?.data);
-    logger.info("listen /webhook tencentmeeting webhook plaintext: ", {message: plaintext})
+    logger.info("logger.info listen /webhook tencentmeeting webhook plaintext: ", {message: plaintext})
+    console.log("console.log listen /webhook tencentmeeting webhook plaintext: ", {message: plaintext})
     const payload = parseJsonObject(plaintext);
-    logger.info("listen /webhook tencentmeeting webhook payload: ", {message: JSON.stringify(payload)})
+    logger.info("logger.info listen /webhook tencentmeeting webhook payload: ", {message: JSON.stringify(payload)})
+    console.log("console.log listen /webhook tencentmeeting webhook payload: ", {message: JSON.stringify(payload)})
     // 记录腾讯会议webhhook日志
-    await appendTencentMeetingWebhookEvent({
+    const persisted = await appendTencentMeetingWebhookEvent({
       receivedAt: new Date().toISOString(),
       event: payload?.event || "",
-      uniqueSequence: payload?.unique_sequence || payload?.uniqueSequence || "",
+      uniqueSequence: payload?.unique_sequence || "",
       payload: payload || plaintext,
     });
     response.status(200).type("text/plain").send("successfully received callback");
     logger.debug("listen /webhook 成功响应腾讯会议webhook: ", {message: '继续后续逻辑'})
     if (payload) {
+      const eventId = persisted.event.id;
+      const duplicateAlreadyHandled = persisted.duplicate && ["processing", "processed"].includes(persisted.event.status);
+      if (duplicateAlreadyHandled) {
+        logger.info("tencent_meeting.webhook.duplicate_skipped", {
+          message: `event: ${payload.event || ""}, eventId: ${eventId}`,
+          event: payload.event || "",
+          eventId,
+        });
+        return;
+      }
       void Promise.resolve()
         .then(async () => {
-          // recording.started 云录制开始
-          // recording.started 云录制停止
-          // recording.completed 云录制完成
-          // recording.audio-completed 录音笔上传完成
-          // common.sts-token token签发
-          if (payload.event === "common.sts-token") {
-            // 保存 STS Token；只有实际保存成功后才恢复此前挂起的同步任务。
-            const saved = await importTencentMeetingStsTokenPayload(payload);
-            logger.info("listen /webhook call importTencentMeetingStsTokenPayload success: ", {message: `saved: ${saved}`})
-            if (saved) await queueTencentMeetingPendingImports();
-          } else if (payload.event === 'recording.completed') {
-            // 处理录音相关 Webhook：从回调中提取录音文件和会议信息，
-            // 创建或更新本地录音记录，并按事件内容调度后续的音频、转写同步流程。
-            await importTencentMeetingWebhookPayload(payload);
-          } else if (payload.event === 'recording.audio-completed') {
-            await importTencentMeetingWebhookPayload(payload);
-          } else if (isTencentMeetingTranscriptReadyEvent(payload)) {
-            // 腾讯会议确认完整转写已经生成后，才读取转写详情。
-            await importTencentMeetingWebhookPayload(payload);
+          await markTencentMeetingWebhookEventProcessing(eventId);
+          const action = tencentMeetingWebhookEventAction(payload);
+          switch (action) {
+            case "sts-token": {
+              const saved = await importTencentMeetingStsTokenPayload(payload);
+              if (saved) await queueTencentMeetingPendingImports();
+              break;
+            }
+            case "recording-started":
+              // The persisted event is later used to resolve recorder ownership.
+              break;
+            case "recording-completed":
+              await importTencentMeetingRecordingCompletedPayload(payload);
+              break;
+            case "audio-completed":
+              await importTencentMeetingAudioCompletedPayload(payload);
+              break;
+            case "transcript-ready":
+              await importTencentMeetingTranscriptReadyPayload(payload);
+              break;
+            default:
+              logger.info("tencent_meeting.webhook.ignored", {
+                message: `event: ${payload.event || ""}`,
+                event: payload.event || "",
+              });
           }
-          logger.info("listen /webhook call importTencentMeetingWebhookPayload success: ", {message: ''})
-
-          // Webhook 只代表单次事件，可能缺少完整录制信息或存在漏推；
-          // 因此额外触发一次云录制发现，用腾讯会议 API 对近期录制列表进行补充和状态校准。
-          queueTencentMeetingCloudDiscovery();
+          await markTencentMeetingWebhookEventProcessed(eventId);
         })
-        .catch((error) => {
-          console.warn("[Tencent Meeting] webhook background import failed:", error instanceof Error ? error.message : error)
+        .catch(async (error) => {
+          try {
+            await markTencentMeetingWebhookEventFailed(eventId, error);
+          } catch (persistError) {
+            console.warn(
+              "[Tencent Meeting] webhook failure status persistence failed:",
+              persistError instanceof Error ? persistError.message : persistError,
+            );
+          }
+          console.warn("[Tencent Meeting] webhook background import failed:", error instanceof Error ? error.message : error);
         });
     } else {
       console.warn("[Tencent Meeting] webhook decrypted but did not contain JSON payload.");
@@ -146,7 +175,7 @@ router.post("/webhook", async (request, response) => {
   } catch (error) {
     logger.error("tencentmeeting webhook failed: ", {message: error.message})
     console.warn("[Tencent Meeting] webhook POST rejected:", error instanceof Error ? error.message : error);
-    response.status(error.statusCode || 400).type("text/plain").send("invalid callback");
+    response.status(error.statusCode || 400).type("text/plain").send("invalid callback 2");
   }
 });
 

@@ -4305,6 +4305,14 @@ button {
   opacity: 0.58;
 }
 
+.scope-single.active {
+  color: #ffffff;
+  background: #111216;
+  box-shadow:
+    0 10px 20px rgba(23, 28, 38, 0.08),
+    inset 0 0 0 1px rgba(17, 18, 22, 0.08);
+}
+
 .scope-all,
 .scope-toggle {
   display: inline-flex;
