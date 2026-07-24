@@ -3516,7 +3516,7 @@ function renderQaMessagePdf(message, recordingMap = new Map()) {
     };
 
     const addParagraph = (text, options = {}) => {
-      setFont(options.bold !== false);
+      setFont(Boolean(options.bold));
       doc.fillColor(options.color || "#000000").fontSize(options.size || 11).text(String(text || ""), {
         width: pageWidth,
         lineGap: options.lineGap ?? 4,
@@ -3601,7 +3601,7 @@ function renderDailyBriefPdf(brief) {
     };
     const pageWidth = doc.page.width - doc.page.margins.left - doc.page.margins.right;
     const addParagraph = (text, options = {}) => {
-      setFont(options.bold !== false)
+      setFont(Boolean(options.bold))
         .fillColor(options.color || "#000000")
         .fontSize(options.size || 11)
         .text(String(text || ""), { width: pageWidth, lineGap: options.lineGap ?? 4 });
@@ -3683,7 +3683,7 @@ function renderMeetingOutlinePdf(recording, outline = null) {
     const addParagraph = (text, options = {}) => {
       const value = String(text || "").trim();
       if (!value) return;
-      setFont(options.bold !== false);
+      setFont(Boolean(options.bold));
       doc.fillColor(options.color || "#000000").fontSize(options.size || 13).text(value, {
         width: pageWidth,
         lineGap: options.lineGap ?? 5,
@@ -3696,7 +3696,24 @@ function renderMeetingOutlinePdf(recording, outline = null) {
       setFont(true).fillColor("#000000").fontSize(17).text(String(title || ""), { width: pageWidth });
       doc.moveDown(0.3);
     };
-    const addBullet = (text) => addParagraph(`• ${text}`, { color: "#000000", size: 13, after: 0.25 });
+    const addBullet = (text) => {
+      const value = String(text || "").trim();
+      if (!value) return;
+      const startX = doc.page.margins.left;
+      const startY = doc.y;
+      const markerOffset = 14;
+
+      // Draw the marker instead of relying on a bullet glyph: several CJK fonts
+      // omit it even though they render the surrounding Chinese text correctly.
+      doc.save().fillColor("#000000").circle(startX + 3, startY + 8, 2).fill().restore();
+      setFont(false).fillColor("#000000").fontSize(13).text(value, startX + markerOffset, startY, {
+        width: pageWidth - markerOffset,
+        lineGap: 5,
+        align: "left",
+      });
+      doc.x = startX;
+      doc.moveDown(0.25);
+    };
 
     setFont(true).fillColor("#000000").fontSize(28).text("会议提纲", { width: pageWidth });
     doc.moveDown(0.3);
