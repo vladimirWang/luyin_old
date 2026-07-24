@@ -46,6 +46,7 @@ import transcriptionRouter, { configure as configureTranscriptionRouter } from "
 import authRouter, { configure as configureAuthRouter } from "./router/auth.js";
 import foldersRouter, { configure as configureFoldersRouter } from "./router/folders.js";
 import algoRouter from "./router/algo.js";
+import adminDataRouter, { configure as configureAdminDataRouter } from "./router/adminData.js";
 import { requestClientIdBetter, resolveRecordingAudioPath, resolveRecordingAudioPathBetter } from "./utils/recordings.js";
 import {
   expandTencentMeetingKeyCandidates,
@@ -701,6 +702,9 @@ configureRecordingsRouter(projectRoot, {
   releaseRecordingJobCancellation,
 });
 app.use("/api/recordings", recordingsRouter);
+
+configureAdminDataRouter(projectRoot);
+app.use("/api/internal-admin", adminDataRouter);
 
 configureRecordingUploadSessionsRouter(projectRoot, {
   queueTranscriptionJob,
