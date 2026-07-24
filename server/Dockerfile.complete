@@ -20,6 +20,7 @@ RUN pnpm --dir server install --prod --frozen-lockfile
 COPY . ./server
 
 RUN DATABASE_URL="mysql://prisma:prisma@localhost:3306/prisma" pnpm --dir server exec prisma generate \
+  && sed -i 's/\r$//' ./server/docker-entrypoint.sh \
   && chmod +x ./server/docker-entrypoint.sh \
   && mkdir -p /app/logs /app/server/storage \
   && chown -R node:node /app/logs /app/server/storage
