@@ -3440,6 +3440,8 @@ async function runQaJob(messageId) {
 }
 
 function resolvePdfFontPath() {
+  // Prefer fonts with complete CJK, Latin, number, and punctuation coverage. A
+  // CJK-only fallback can render Chinese while turning dates and bullets into tofu.
   const candidates = [
     [process.env.PDF_FONT_PATH, process.env.PDF_FONT_FAMILY || ""],
     ["C:\\Windows\\Fonts\\NotoSansSC-VF.ttf", ""],
@@ -3450,6 +3452,7 @@ function resolvePdfFontPath() {
     ["/usr/share/fonts/google-noto-cjk/NotoSerifCJK-Regular.ttc", "NotoSerifCJKsc-Regular"],
     ["/usr/share/fonts/opentype/noto/NotoSansCJK-Regular.ttc", "NotoSansCJKsc-Regular"],
     ["/usr/share/fonts/truetype/noto/NotoSansCJK-Regular.ttc", "NotoSansCJKsc-Regular"],
+    ["/usr/share/fonts/truetype/droid/DroidSansFallbackFull.ttf", ""],
     ["/usr/share/fonts/truetype/wqy/wqy-microhei.ttc", "WenQuanYi Micro Hei"],
   ].filter(Boolean);
   const found = candidates.find(([candidate]) => candidate && existsSync(candidate));
@@ -3712,6 +3715,8 @@ function renderMeetingOutlinePdf(recording, outline = null) {
         .replace(/\r/g, "")
         .split("\n");
 
+      // Render in one pass so filtering and Markdown block handling stay in the
+      // same order without allocating an intermediate array for every rule.
       for (const rawLine of reportLines) {
         const line = rawLine.trim();
         if (!line) continue;
