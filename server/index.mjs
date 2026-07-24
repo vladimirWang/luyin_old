@@ -1892,8 +1892,11 @@ async function upsertTencentMeetingRecordingInfos(recordInfos = [], userAgent = 
         const hasSegments = existing.segments.length > 0;
         const existingOwnerName = String(existing.ownerName || "").trim();
         const incomingOwnerName = String(eventInfo.ownerName || "").trim();
+        // Recorder completion owns its identity; an adjacent cloud event must not leak its owner snapshot here.
         const ownerName =
-          existingOwnerName && existingOwnerName !== tencentMeetingImportOwnerName()
+          eventInfo.sourceKind === "recorder" && incomingOwnerName
+            ? incomingOwnerName
+            : existingOwnerName && existingOwnerName !== tencentMeetingImportOwnerName()
             ? existingOwnerName
             : incomingOwnerName || existingOwnerName || tencentMeetingImportOwnerName();
         const data = {
