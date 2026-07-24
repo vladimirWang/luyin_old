@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import { useNavigate } from "react-router-dom";
+import { useLocation, useNavigate, useParams } from "react-router-dom";
 import {
   ArrowLeft,
   Camera,
@@ -241,6 +241,8 @@ function SettingsDrawer({ open, profile, wecomUser, setProfile, onLogout, onClos
 
 export default function Records() {
   const routerNavigate = useNavigate();
+  const location = useLocation();
+  const { recordingId = "" } = useParams();
   const wecomUser = useWecomAuthStore((state) => state.user);
   const clearWecomUser = useWecomAuthStore((state) => state.clearUser);
   const [recordings, setRecordings] = useState([]);
@@ -475,6 +477,15 @@ export default function Records() {
       });
 
   }, []);
+
+  useEffect(() => {
+    if (!recordingId) return;
+    refreshRecording(recordingId).catch((error) => {
+      console.error("load record preview failed:", error);
+      showToast(error instanceof Error ? error.message : "录音预览加载失败");
+      routerNavigate("/records", { replace: true });
+    });
+  }, [recordingId]);
 
   async function loadRecordings(params) {
     console.log("recordings request: ", params)
@@ -1043,8 +1054,24 @@ export default function Records() {
     saveLocalProfile(nextProfile);
   }
 
-  function openDetail(id) {
-    routerNavigate(`/detail?id=${encodeURIComponent(id)}`);
+  function openRecordPreview(id) {
+    if (!id || id === recordingId) return;
+    routerNavigate(`/records/${encodeURIComponent(id)}`, {
+      state: { recordPreviewOpenedFromList: true },
+    });
+  }
+
+  function closeRecordPreview() {
+    if (!recordingId) return;
+    if (location.state?.recordPreviewOpenedFromList) {
+      routerNavigate(-1);
+      return;
+    }
+    routerNavigate("/records", { replace: true });
+  }
+
+  function openDetail(id, options = {}) {
+    routerNavigate(`/detail?id=${encodeURIComponent(id)}`, options);
   }
 
   return (
@@ -1066,6 +1093,9 @@ export default function Records() {
         onRenameFolder={renameFolder}
         onDeleteFolder={deleteFolder}
         onSelectFolder={setSelectedFolderId}
+        previewRecordingId={recordingId}
+        onOpenPreview={openRecordPreview}
+        onClosePreview={closeRecordPreview}
         onOpenDetail={openDetail}
         onRename={renameRecording}
         onUpdateMeta={updateRecordingMeta}

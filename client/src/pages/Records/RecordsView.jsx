@@ -40,6 +40,9 @@ export function RecordsView({
   onRenameFolder,
   onDeleteFolder,
   onSelectFolder,
+  previewRecordingId,
+  onOpenPreview,
+  onClosePreview,
   onOpenDetail,
   onRename,
   onUpdateMeta,
@@ -62,7 +65,6 @@ export function RecordsView({
   const [titleDraft, setTitleDraft] = useState(recordsTitle || "我的录音");
   const [editingFolderId, setEditingFolderId] = useState("");
   const [folderDraft, setFolderDraft] = useState("");
-  const [expandedRecordingId, setExpandedRecordingId] = useState("");
   const [deleteModeRecordingId, setDeleteModeRecordingId] = useState("");
   const [bulkDeleteMode, setBulkDeleteMode] = useState(false);
   const [bulkDeleteSelectedIds, setBulkDeleteSelectedIds] = useState([]);
@@ -149,8 +151,8 @@ export function RecordsView({
   const visibleFolderItems = foldersExpanded && canExpandFolders ? folderItems : collapsedFolderItems;
 
   const previewRecording = useMemo(() => {
-    return recordings.find((item) => item.id === expandedRecordingId)
-  }, [recordings, expandedRecordingId])
+    return recordings.find((item) => item.id === previewRecordingId);
+  }, [recordings, previewRecordingId]);
   
   const recordColumns = cardScale < 0.62 ? 6 : cardScale < 0.86 ? 4 : 2;
   const compactCards = recordColumns >= 4;
@@ -165,7 +167,6 @@ export function RecordsView({
   }
 
   function toggleBulkDeleteMode() {
-    setExpandedRecordingId("");
     setDeleteModeRecordingId("");
     setBulkDeleteSelectedIds([]);
     setBulkDeleteMode((current) => !current);
@@ -466,13 +467,14 @@ export function RecordsView({
                   recording={recording}
                   folders={folders}
                   isTrashView={selectedFolderId === "trash"}
-                  isExpanded={expandedRecordingId === recording.id}
+                  isExpanded={previewRecordingId === recording.id}
                   bulkDeleteMode={bulkDeleteMode}
                   bulkDeleteSelected={bulkDeleteSelectedSet.has(recording.id)}
                   onBulkDeleteToggle={toggleBulkDeleteSelection}
                   onToggleExpand={() => {
                     console.log("recording toggle: ", recording.id)
-                    setExpandedRecordingId((current) => (current === recording.id ? "" : recording.id))
+                    if (previewRecordingId === recording.id) onClosePreview?.();
+                    else onOpenPreview?.(recording.id);
                   }}
                   onAsk={() => onOpenDetail(recording.id)}
                   onRename={(name) => onRename(recording.id, name)}
@@ -505,10 +507,9 @@ export function RecordsView({
       {previewRecording && selectedFolderId !== "trash" ? (
         <RecordPreviewOverlay
           recording={previewRecording}
-          onClose={() => setExpandedRecordingId("")}
+          onClose={onClosePreview}
           onAsk={() => {
-            setExpandedRecordingId("");
-            onOpenDetail(previewRecording.id);
+            onOpenDetail(previewRecording.id, { replace: true });
           }}
           onShare={(mode) => onShare(previewRecording, mode)}
           onRetranscribe={() => onRetranscribe(previewRecording)}

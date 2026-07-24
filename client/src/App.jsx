@@ -77,17 +77,18 @@ export default function App() {
   const navigate = useNavigate();
   const keyboardVisible = useKeyboardVisibility();
   const language = getLocalProfile().language;
+  const currentSection = location.pathname.split("/").filter(Boolean)[0] || "recorder";
 
   return (
     <main className={keyboardVisible ? "app-shell keyboard-visible" : "app-shell"}>
-      <div className={`h5-app view-${location.pathname.slice(1) || "recorder"}`}>
+      <div className={`h5-app view-${currentSection}`}>
         <div className="view-stack">
           <Outlet />
         </div>
 
         <nav className={keyboardVisible ? "bottom-nav hidden" : "bottom-nav"} aria-label={uiText(language, "底部导航", "Bottom navigation")} aria-hidden={keyboardVisible}>
           {NAV_ITEMS.map(({ path, labelZh, labelEn, icon: Icon, center }) => {
-            const active = location.pathname === path;
+            const active = location.pathname === path || location.pathname.startsWith(`${path}/`);
             return (
               <button
                 className={`${active ? "active" : ""}${center ? " center" : ""}`.trim()}

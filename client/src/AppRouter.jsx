@@ -19,7 +19,7 @@ export default function AppRouter() {
           <Route path="/" element={<Navigate to="/records" replace />} />
           <Route element={<App />}>
             {/* <Route path="/recorder" element={<Recorder />} /> */}
-            <Route path="/records" element={<Records />} />
+            <Route path="/records/:recordingId?" element={<Records />} />
             <Route path="/detail" element={<Detail />} />
             {true && (
               <Route path="/verify" element={<Verify />} />
