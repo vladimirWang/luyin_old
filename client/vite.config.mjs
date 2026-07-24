@@ -1,5 +1,6 @@
 import { defineConfig } from "vite";
 import react from "@vitejs/plugin-react";
+import tailwindcss from "@tailwindcss/vite";
 
 const host1 = "192.168.1.156"
 const host0 = "0.0.0.0"
@@ -88,7 +89,7 @@ export default defineConfig(({ command, mode }) => {
           },
         }
       : undefined,
-    plugins: [react()],
+    plugins: [react(), tailwindcss()],
     build: {
       sourcemap: isDebugBuild,
       minify: isDebugBuild ? false : undefined,
