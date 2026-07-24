@@ -5,12 +5,7 @@ import {
   ChevronDown,
   Pause,
   Play,
-  Share2,
   RefreshCw,
-  Keyboard,
-  Mic,
-  Plus,
-  Send,
 } from "lucide-react";
 import {
   uiText,
@@ -26,11 +21,8 @@ import {
   microphoneErrorMessage,
   cleanQaVisibleText,
   cleanAnswerForDisplay,
-  answerBlocksForDisplay,
-  structuredAnswerFromItem,
   pointLabelForIndex,
   thinkingStepsForMessage,
-  stripQaInternalIndexMarkers,
   dailyBriefMeetingCount,
   api,
   fetchWithClient,
@@ -46,9 +38,7 @@ import {
   DailyBriefListView,
   dailyBriefHasSummary,
 } from "./components/DailyBriefListView.jsx";
-import {QA_ACTIVE_MESSAGE_KEY, DAILY_BRIEF_ACTIVE_KEY} from '../../constant.js'
 import {todayDateKey} from '../../utils/date.js'
-import {mediaRequestUrl} from '../../utils/index.js'
 import { useDetailRoute } from './hooks/useDetailRoute.js'
 import { DetailHeader } from './components/DetailHeader.jsx'
 import { RecordingScopePanel } from './components/RecordingScopePanel.jsx'
@@ -56,25 +46,34 @@ import {
   AttachmentPreviewDialog,
   attachmentPreviewType,
 } from './components/AttachmentPreviewDialog.jsx'
+import { QuestionComposer } from "./components/QuestionComposer.jsx";
+import { QaMessage } from "./components/QaMessage.jsx";
 import {
-  CitationBarList,
-  QaMessageAttachments,
-  QaPendingState,
-} from './components/QaMessageParts.jsx'
+  clearActiveDailyBriefRef,
+  clearActiveQaMessageRef,
+  readActiveDailyBriefRef,
+  readActiveQaMessageRef,
+  saveActiveDailyBriefRef,
+  saveActiveQaMessageRef as persistActiveQaMessageRef,
+} from "./utils/activeConversationStorage.js";
 import {
-  ComposerAttachmentChips,
-  ComposerAttachmentMenu,
-} from './components/QuestionComposerParts.jsx'
+  isSameRecordingScope,
+  mergeQaMessages,
+  messageRecordingIds,
+  normalizeRecordingIds,
+  sortMessagesAscending,
+} from "./utils/qaMessageScope.js";
+import { useTtsPlayer } from "./hooks/useTtsPlayer.js";
+import { useCitationPlayer } from "./hooks/useCitationPlayer.js";
+import {
+  compactSpeechText,
+  speechSegmentsForAnswerItem,
+  structuredSpeechSegments,
+} from "./utils/speechSegments.js";
 
 export default function Detail() {
   const { recording, language, selectRecording } = useDetailRoute();
   const onToast = showToast;
-  const audioRef = useRef(null);
-  const audioSourceRef = useRef("");
-  const imageInputRef = useRef(null);
-  const cameraInputRef = useRef(null);
-  const audioQuestionInputRef = useRef(null);
-  const fileQuestionInputRef = useRef(null);
   const voiceRecorderRef = useRef(null);
   const voiceStreamRef = useRef(null);
   const voiceChunksRef = useRef([]);
@@ -103,54 +102,36 @@ export default function Detail() {
   const [listError, setListError] = useState("");
   const [listening, setListening] = useState(false);
   const [voiceBusy, setVoiceBusy] = useState(false);
-  const [activeCitationKey, setActiveCitationKey] = useState("");
-  const activeCitationRef = useRef({ key: "", startMs: 0, endMs: 0 });
-  const [citationPlayback, setCitationPlayback] = useState({ key: "", currentMs: 0, durationMs: 0 });
   const [expandedCitationGroups, setExpandedCitationGroups] = useState({});
   const [attachmentPreview, setAttachmentPreview] = useState(null);
   const qaPollingRef = useRef(new Map());
   const dailyBriefPollingRef = useRef(new Map());
   const qaConversationViewRef = useRef(Boolean(recording?.id));
   const activeScopeIdsRef = useRef([]);
-  const ttsAudioRef = useRef(null);
-  const ttsQueueRef = useRef({ itemId: "", segments: [], index: 0 });
-  const [ttsState, setTtsState] = useState({ key: "", itemId: "", index: -1, loading: false, playing: false });
+  const citationPlayer = useCitationPlayer({
+    recordings: availableRecordings,
+    fallbackRecording: recording,
+    getEndMs: citationEndMs,
+    onBeforePlay: () => stopTtsQueue(),
+  });
+  const {
+    state: ttsState,
+    stop: stopTtsQueue,
+    toggleQueue: toggleTtsQueue,
+    toggleSegment: toggleTtsSegment,
+  } = useTtsPlayer({
+    onBeforePlay: citationPlayer.pause,
+    onToast,
+  });
+  const activeCitationKey = citationPlayer.activeKey;
+  const citationPlayback = citationPlayer.playback;
   const lockedRecordingId = recording?.id || "";
   const activeScopeIds = lockedRecordingId ? [lockedRecordingId] : scopeIds;
   const scopeKey = activeScopeIds.join("|");
   activeScopeIdsRef.current = activeScopeIds;
 
-  function readActiveQaMessageRef() {
-    try {
-      const raw = window.localStorage?.getItem(QA_ACTIVE_MESSAGE_KEY);
-      if (!raw) return null;
-      const parsed = JSON.parse(raw);
-      return parsed?.id ? parsed : null;
-    } catch {
-      return null;
-    }
-  }
-
   function saveActiveQaMessageRef(message) {
-    if (!message?.id) return;
-    try {
-      window.localStorage?.setItem(
-        QA_ACTIVE_MESSAGE_KEY,
-        JSON.stringify({
-          id: message.id,
-          recordingIds: messageRecordingIds(message),
-          createdAt: message.createdAt || new Date().toISOString(),
-          pending: Boolean(message.pending),
-        }),
-      );
-    } catch {}
-  }
-
-  function clearActiveQaMessageRef(id) {
-    try {
-      const current = readActiveQaMessageRef();
-      if (!id || current?.id === id) window.localStorage?.removeItem(QA_ACTIVE_MESSAGE_KEY);
-    } catch {}
+    persistActiveQaMessageRef(message, messageRecordingIds(message));
   }
 
   function enterQaConversationView() {
@@ -165,131 +146,6 @@ export default function Detail() {
   function isDailyBriefViewActive() {
     return !qaConversationViewRef.current;
   }
-
-  function readActiveDailyBriefRef() {
-    try {
-      const raw = window.localStorage?.getItem(DAILY_BRIEF_ACTIVE_KEY);
-      if (!raw) return null;
-      const parsed = JSON.parse(raw);
-      return parsed?.date ? parsed : null;
-    } catch {
-      return null;
-    }
-  }
-
-  function saveActiveDailyBriefRef(brief) {
-    if (!brief?.date) return;
-    try {
-      window.localStorage?.setItem(
-        DAILY_BRIEF_ACTIVE_KEY,
-        JSON.stringify({
-          date: brief.date,
-          updatedAt: brief.updatedAt || new Date().toISOString(),
-          status: brief.status || "",
-        }),
-      );
-    } catch {}
-  }
-
-  function clearActiveDailyBriefRef(date) {
-    try {
-      const current = readActiveDailyBriefRef();
-      if (!date || current?.date === date) window.localStorage?.removeItem(DAILY_BRIEF_ACTIVE_KEY);
-    } catch {}
-  }
-
-  function stopTtsQueue() {
-    const audio = ttsAudioRef.current;
-    ttsQueueRef.current = { itemId: "", segments: [], index: 0 };
-    if (audio) {
-      audio.pause();
-      audio.removeAttribute("src");
-      audio.load();
-    }
-    setTtsState({ key: "", itemId: "", index: -1, loading: false, playing: false });
-  }
-
-  useEffect(() => {
-    const audio = new Audio();
-    audio.preload = "auto";
-    audio.playsInline = true;
-    audio.setAttribute("playsinline", "");
-    audio.setAttribute("webkit-playsinline", "");
-    audioRef.current = audio;
-
-    const handleLoadedMetadata = () => {
-      setCitationPlayback((current) => ({ ...current, durationMs: Math.round((audio.duration || 0) * 1000) }));
-    };
-    const handleTimeUpdate = () => {
-      const currentMs = Math.round((audio.currentTime || 0) * 1000);
-      setCitationPlayback((current) => ({ ...current, currentMs }));
-      const active = activeCitationRef.current;
-      if (active.key && active.endMs && currentMs >= active.endMs) {
-        audio.pause();
-        setActiveCitationKey("");
-        activeCitationRef.current = { key: "", startMs: 0, endMs: 0 };
-      }
-    };
-    const handleEnded = () => {
-      setActiveCitationKey("");
-      activeCitationRef.current = { key: "", startMs: 0, endMs: 0 };
-    };
-    const handlePause = () => {
-      if (!activeCitationRef.current.key) setActiveCitationKey("");
-    };
-
-    audio.addEventListener("loadedmetadata", handleLoadedMetadata);
-    audio.addEventListener("timeupdate", handleTimeUpdate);
-    audio.addEventListener("ended", handleEnded);
-    audio.addEventListener("pause", handlePause);
-
-    return () => {
-      audio.pause();
-      audio.removeEventListener("loadedmetadata", handleLoadedMetadata);
-      audio.removeEventListener("timeupdate", handleTimeUpdate);
-      audio.removeEventListener("ended", handleEnded);
-      audio.removeEventListener("pause", handlePause);
-      audio.removeAttribute("src");
-      audio.load();
-      audioRef.current = null;
-      audioSourceRef.current = "";
-    };
-  }, []);
-
-  useEffect(() => {
-    const audio = new Audio();
-    audio.preload = "auto";
-    audio.playsInline = true;
-    audio.setAttribute("playsinline", "");
-    audio.setAttribute("webkit-playsinline", "");
-    ttsAudioRef.current = audio;
-
-    const handlePlay = () => setTtsState((current) => ({ ...current, playing: true, loading: false }));
-    const handlePause = () => setTtsState((current) => ({ ...current, playing: false, loading: false }));
-    const handleEnded = () => {
-      const queue = ttsQueueRef.current;
-      if (queue.itemId && queue.segments.length > queue.index + 1) {
-        playTtsSegment(queue.itemId, queue.segments, queue.index + 1, true);
-        return;
-      }
-      ttsQueueRef.current = { itemId: "", segments: [], index: 0 };
-      setTtsState({ key: "", itemId: "", index: -1, loading: false, playing: false });
-    };
-
-    audio.addEventListener("play", handlePlay);
-    audio.addEventListener("pause", handlePause);
-    audio.addEventListener("ended", handleEnded);
-
-    return () => {
-      audio.pause();
-      audio.removeEventListener("play", handlePlay);
-      audio.removeEventListener("pause", handlePause);
-      audio.removeEventListener("ended", handleEnded);
-      audio.removeAttribute("src");
-      audio.load();
-      ttsAudioRef.current = null;
-    };
-  }, []);
 
   useEffect(() => {
     stopTtsQueue();
@@ -446,8 +302,6 @@ export default function Detail() {
       .filter((brief) => brief?.date && (brief.status !== "empty" || dailyBriefMeetingCount(brief, 0) > 0))
       .sort((a, b) => String(b.date || "").localeCompare(String(a.date || "")));
   }, [activeRecordings, dailyBrief, dailyBriefHistory]);
-  const sortMessagesAscending = (messages = []) =>
-    [...messages].sort((a, b) => new Date(a.createdAt || 0) - new Date(b.createdAt || 0));
   const scopeRecording = activeScopeIds.length === 1 ? activeRecordings.find((item) => item.id === activeScopeIds[0]) || null : null;
   const scopeLabel = activeScopeIds.length === 0 ? uiText(language, "全部录音", "All recordings") : scopeRecording ? scopeRecording.name : uiText(language, "已选择录音", "Selected recording");
   const selectedScopeRecordings = activeScopeIds.map((id) => activeRecordings.find((item) => item.id === id)).filter(Boolean);
@@ -511,14 +365,6 @@ export default function Detail() {
     });
   }, [answers]);
 
-  function normalizeRecordingIds(ids = []) {
-    return [...new Set((ids || []).filter(Boolean))].sort();
-  }
-
-  function messageRecordingIds(message) {
-    return normalizeRecordingIds(Array.isArray(message.recordingIds) ? message.recordingIds : message.recordingId ? [message.recordingId] : []);
-  }
-
   function messageScopeFromKnown(message, fallbackIds = [], knownMessages = []) {
     const direct = messageRecordingIds(message);
     if (direct.length > 0) return direct;
@@ -538,26 +384,6 @@ export default function Detail() {
     if (!message?.id) return message;
     const scope = messageScopeFromKnown(message, fallbackIds, knownMessages);
     return scope.length > 0 ? { ...message, recordingIds: scope } : message;
-  }
-
-  function isSameRecordingScope(left = [], right = []) {
-    const normalizedLeft = normalizeRecordingIds(left);
-    const normalizedRight = normalizeRecordingIds(right);
-    return normalizedLeft.length === normalizedRight.length && normalizedLeft.every((id, index) => id === normalizedRight[index]);
-  }
-
-  function mergeQaMessages(...groups) {
-    const merged = new Map();
-    const flatted = groups.flat()
-    if (!Array.isArray(flatted)) return []
-    flatted.forEach((message) => {
-      if (!message?.id || message.deletedAt) return;
-      const previous = merged.get(message.id);
-      const scope = messageRecordingIds(message).length > 0 ? messageRecordingIds(message) : messageRecordingIds(previous || {});
-      const next = { ...(previous || {}), ...message };
-      merged.set(message.id, scope.length > 0 ? { ...next, recordingIds: scope } : next);
-    });
-    return sortMessagesAscending([...merged.values()]);
   }
 
   function shouldKeepQaMessageForScope(message, scopeIdsForView, knownMessages = []) {
@@ -1098,50 +924,8 @@ export default function Detail() {
     setExpandedCitationGroups((current) => ({ ...current, [key]: !current[key] }));
   }
 
-  function playCitation(citation, key, nextMs = citation.startMs || 0) {
-    const target = activeRecordings.find((item) => item.id === citation.recordingId) || scopeRecording;
-    const audio = audioRef.current;
-    if (!target || !audio) return;
-    stopTtsQueue();
-
-    if (activeCitationKey === key) {
-      if (audio.paused) audio.play().catch(() => setActiveCitationKey(""));
-      else {
-        audio.pause();
-        setActiveCitationKey("");
-        activeCitationRef.current = { key: "", startMs: 0, endMs: 0 };
-      }
-      return;
-    }
-
-    seekCitation(citation, key, nextMs);
-  }
-
-  function seekCitation(citation, key, nextMs) {
-    const target = activeRecordings.find((item) => item.id === citation.recordingId) || scopeRecording;
-    const audio = audioRef.current;
-    if (!target || !audio) return;
-
-    const startMs = citationStartMs(citation);
-    const endMs = citationEndMs(citation);
-    const targetMs = Math.min(endMs, Math.max(startMs, nextMs));
-    setActiveCitationKey(key);
-    activeCitationRef.current = { key, startMs, endMs };
-    setCitationPlayback({ key, currentMs: targetMs, durationMs: citationSegmentDurationMs(citation) });
-    const nextSrc = new URL(mediaRequestUrl(target.audioUrl, target.updatedAt || target.createdAt || ""), window.location.href).href;
-    const jump = () => {
-      audio.currentTime = Math.max(0, targetMs / 1000);
-      audio.play().catch(() => setActiveCitationKey(""));
-    };
-    if (audioSourceRef.current !== nextSrc) {
-      audio.src = nextSrc;
-      audioSourceRef.current = nextSrc;
-      audio.addEventListener("loadedmetadata", jump, { once: true });
-      audio.load();
-    } else {
-      jump();
-    }
-  }
+  const playCitation = citationPlayer.play;
+  const seekCitation = citationPlayer.seek;
 
   function openHistoryItem(item) {
     enterQaConversationView();
@@ -1605,7 +1389,7 @@ export default function Detail() {
     }
   }
 
-  function compactSpeechText(value) {
+  function legacyCompactSpeechText(value) {
     return stripQaInternalIndexMarkers(
       String(value || "")
         .replace(/\s+/g, " ")
@@ -1613,7 +1397,7 @@ export default function Detail() {
     );
   }
 
-  function speechSegmentsFromText(value, idPrefix = "content", label = "朗读内容", maxLength = 480) {
+  function legacySpeechSegmentsFromText(value, idPrefix = "content", label = "朗读内容", maxLength = 480) {
     const chunks = [];
     const appendChunk = (rawText) => {
       const cleaned = compactSpeechText(rawText);
@@ -1659,7 +1443,7 @@ export default function Detail() {
     }));
   }
 
-  function structuredSpeechSegments(structured) {
+  function legacyStructuredSpeechSegments(structured) {
     const segments = [];
     const add = (id, label, text) => {
       const cleaned = compactSpeechText(text);
@@ -1681,7 +1465,7 @@ export default function Detail() {
     return segments;
   }
 
-  function speechSegmentsForAnswerItem(item, structured) {
+  function legacySpeechSegmentsForAnswerItem(item, structured) {
     if (structured) {
       const cleanStructuredText = (value, fallback = "") => cleanQaVisibleText(value, fallback);
       const cleanedStructured = {
@@ -1713,73 +1497,6 @@ export default function Detail() {
 
     const text = cleanAnswerForDisplay(item?.answer || item?.content || "");
     return speechSegmentsFromText(text, "answer", "朗读结论");
-  }
-
-  async function playTtsSegment(itemId, segments, index = 0, auto = false) {
-    const segment = segments[index];
-    const audio = ttsAudioRef.current;
-    if (!segment || !audio) return;
-
-    const key = `${itemId}:${segment.id}`;
-    ttsQueueRef.current = { itemId, segments, index };
-    setTtsState({ key, itemId, index, loading: true, playing: false });
-
-    try {
-      audioRef.current?.pause();
-      setActiveCitationKey("");
-      const payload = await api("/api/tts", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ text: segment.text }),
-      });
-
-      if (ttsQueueRef.current.itemId !== itemId || ttsQueueRef.current.index !== index) return;
-      audio.src = mediaRequestUrl(payload.url, payload.id || Date.now());
-      audio.load();
-      await audio.play();
-      setTtsState({ key, itemId, index, loading: false, playing: true });
-    } catch (error) {
-      if (!auto) onToast?.(error instanceof Error ? error.message : "朗读生成失败");
-      ttsQueueRef.current = { itemId: "", segments: [], index: 0 };
-      setTtsState({ key: "", itemId: "", index: -1, loading: false, playing: false });
-    }
-  }
-
-  function startTtsQueue(itemId, segments, index = 0) {
-    if (!segments.length) {
-      onToast?.("没有可朗读的内容");
-      return;
-    }
-    playTtsSegment(itemId, segments, index);
-  }
-
-  function toggleTtsSegment(itemId, segments, index = 0) {
-    const segment = segments[index];
-    if (!segment) return;
-    const key = `${itemId}:${segment.id}`;
-    if (ttsState.key === key && (ttsState.playing || ttsState.loading)) {
-      stopTtsQueue();
-      return;
-    }
-    startTtsQueue(itemId, segments, index);
-  }
-
-  function toggleTtsQueue(itemId, segments) {
-    const audio = ttsAudioRef.current;
-    if (!audio) return;
-    if (ttsState.itemId === itemId && ttsState.loading) {
-      stopTtsQueue();
-      return;
-    }
-    if (ttsState.itemId === itemId && ttsState.key && !ttsState.loading) {
-      if (ttsState.playing) {
-        stopTtsQueue();
-      } else {
-        audio.play().catch(() => startTtsQueue(itemId, segments, Math.max(0, ttsState.index)));
-      }
-      return;
-    }
-    startTtsQueue(itemId, segments, 0);
   }
 
   function citationForEvidence(evidence, citations = [], index = 0) {
@@ -2077,8 +1794,7 @@ export default function Detail() {
             />
           ) : answers.length > 0 ? (
             answers.map((item) => {
-            if (item.type === "daily-brief") {
-              return (
+              return item.type === "daily-brief" ? (
                 <DailyMeetingBriefMessage
                   key={item.id}
                   message={item}
@@ -2086,85 +1802,29 @@ export default function Detail() {
                   onSpeakLine={speakDailyBriefLine}
                   onShare={shareDailyBriefPdf}
                 />
-              );
-            }
-            const blocks = answerBlocksForDisplay(item.answer);
-            const displayBlocks = blocks.length > 0 ? blocks : [cleanAnswerForDisplay(item.answer) || "暂无可展示的回答内容，请重新生成。"];
-            const citations = Array.isArray(item.citations) ? item.citations : [];
-            const structuredAnswer = structuredAnswerFromItem(item);
-            const answerSpeakSegments = item.pending ? [] : speechSegmentsForAnswerItem(item, structuredAnswer);
-            const answerTtsActive = ttsState.itemId === item.id;
-            const answerTtsRunning = answerTtsActive && (ttsState.playing || ttsState.loading);
-            const messageAttachments = Array.isArray(item.attachments) ? item.attachments : [];
-            return (
-              <article className="chat-message" key={item.id}>
-                <div className="chat-question">{item.question}</div>
-                <time className="chat-message-time">{formatDate(item.createdAt)}</time>
-                <QaMessageAttachments
-                  messageId={item.id}
-                  attachments={messageAttachments}
-                  onOpen={openAttachmentPreview}
+              ) : (
+                <QaMessage
+                  key={item.id}
+                  item={item}
+                  activeCitationKey={activeCitationKey}
+                  expandedCitationGroups={expandedCitationGroups}
+                  ttsState={ttsState}
+                  citationKey={citationKey}
+                  citationSegmentDurationMs={citationSegmentDurationMs}
+                  citationProgressOffsetMs={citationProgressOffsetMs}
+                  citationStartMs={citationStartMs}
+                  citationTimeLabel={citationTimeLabel}
+                  citationsForBlock={citationsForBlock}
+                  onOpenAttachment={openAttachmentPreview}
+                  onPlayCitation={playCitation}
+                  onSeekCitation={seekCitation}
+                  onShare={shareHistoryMessage}
+                  onToggleCitationGroup={toggleCitationGroup}
+                  onToggleTts={toggleTtsQueue}
+                  renderStructuredAnswer={renderStructuredAnswer}
+                  speechSegmentsForAnswer={speechSegmentsForAnswerItem}
                 />
-                {item.pending ? (
-                  <QaPendingState item={item} />
-                ) : structuredAnswer ? (
-                  renderStructuredAnswer(item, structuredAnswer, citations)
-                ) : (
-                  <div className="chat-answer">
-                    {displayBlocks.map((block, index) => {
-                      const blockCitations = citationsForBlock(block, index, displayBlocks, citations);
-                      const groupKey = `${item.id}-point-${index}`;
-                      const expanded = Boolean(expandedCitationGroups[groupKey]);
-                      return (
-                        <section className="chat-answer-point" key={groupKey}>
-                          <p>{block}</p>
-                          <CitationBarList
-                            blockIndex={index}
-                            citations={blockCitations}
-                            expanded={expanded}
-                            activeKey={activeCitationKey}
-                            getKey={citationKey}
-                            getDuration={citationSegmentDurationMs}
-                            getProgress={citationProgressOffsetMs}
-                            getStart={citationStartMs}
-                            getTimeLabel={citationTimeLabel}
-                            onToggle={() => toggleCitationGroup(groupKey)}
-                            onPlay={playCitation}
-                            onSeek={seekCitation}
-                          />
-                        </section>
-                      );
-                    })}
-                  </div>
-                )}
-                {!item.pending ? (
-                  <div className="chat-message-actions" aria-label="问答操作">
-                    {answerSpeakSegments.length > 0 ? (
-                      <button
-                        className={answerTtsRunning ? "playing" : ""}
-                        type="button"
-                        onClick={(event) => {
-                          event.preventDefault();
-                          event.stopPropagation();
-                          toggleTtsQueue(item.id, answerSpeakSegments);
-                        }}
-                      >
-                        {answerTtsRunning ? (
-                          <Pause size={14} fill="currentColor" />
-                        ) : (
-                          <Play size={14} fill="currentColor" />
-                        )}
-                        <span>{answerTtsRunning ? "朗读停止" : "朗读播放"}</span>
-                      </button>
-                    ) : null}
-                    <button type="button" onClick={(event) => shareHistoryMessage(item, event)}>
-                      <Share2 size={14} />
-                      <span>分享 PDF</span>
-                    </button>
-                  </div>
-                ) : null}
-              </article>
-            );
+              );
             })
           ) : shouldShowDailyBriefCard ? null : (
             <div className="chat-empty">
@@ -2174,85 +1834,30 @@ export default function Detail() {
         <div ref={chatEndRef} className="chat-thread-end" aria-hidden="true" />
       </div>
 
-      <form className={attachmentsOpen ? "chat-dock attachments-open" : "chat-dock"} onSubmit={askRecordings}>
-        <ComposerAttachmentChips
-          images={images}
-          attachments={attachments}
-          onOpen={openAttachmentPreview}
-          onRemoveImage={(id) => setImages((current) => current.filter((image) => image.id !== id))}
-          onRemoveAttachment={(id) => setAttachments((current) => current.filter((attachment) => attachment.id !== id))}
-        />
-        <div className="chat-input-row">
-          <button
-            type="button"
-            className="chat-mode-button"
-            aria-label={composerMode === "voice" ? "切换文字输入" : "切换语音输入"}
-            onClick={() => setComposerMode((current) => (current === "voice" ? "text" : "voice"))}
-          >
-            {composerMode === "voice" ? <Keyboard size={20} /> : <Mic size={20} />}
-          </button>
-
-          {composerMode === "voice" ? (
-            <button
-              className={listening ? "hold-talk-button recording" : "hold-talk-button"}
-              type="button"
-              disabled={voiceBusy}
-              onPointerDown={startVoiceInput}
-              onPointerUp={stopVoiceInput}
-              onPointerCancel={stopVoiceInput}
-              onPointerLeave={stopVoiceInput}
-              onContextMenu={(event) => event.preventDefault()}
-            >
-              {listening ? (
-                <span className="voice-input-wave" aria-hidden="true">
-                  {Array.from({ length: 9 }).map((_, index) => (
-                    <i key={index} style={{ "--i": index }} />
-                  ))}
-                </span>
-              ) : null}
-              <span>{voiceBusy ? "正在转文字..." : listening ? "松开转文字" : "按住说话"}</span>
-            </button>
-          ) : (
-            <textarea
-              value={question}
-              rows={composerRows}
-              onChange={(event) => setQuestion(event.target.value)}
-              placeholder=""
-              aria-label="输入问题"
-            />
-          )}
-
-          <button
-            type="button"
-            className={attachmentsOpen ? "chat-plus-button active" : "chat-plus-button"}
-            aria-label={attachmentsOpen ? "收起上传菜单" : "添加内容"}
-            onClick={() => setAttachmentsOpen((current) => !current)}
-          >
-            <Plus size={22} />
-          </button>
-
-          {composerMode === "text" ? (
-            <button className="chat-send-button" type="submit" aria-label="发送问题" disabled={!question.trim() && images.length === 0 && attachments.length === 0}>
-              <Send size={19} />
-            </button>
-          ) : null}
-        </div>
-
-        {attachmentsOpen ? (
-          <ComposerAttachmentMenu
-            onPickImages={() => imageInputRef.current?.click()}
-            onTakePhoto={() => cameraInputRef.current?.click()}
-            onPickAudio={() => audioQuestionInputRef.current?.click()}
-            onPickFile={() => fileQuestionInputRef.current?.click()}
-            onAddLocation={addLocationAttachment}
-          />
-        ) : null}
-
-        <input ref={imageInputRef} className="upload-input" type="file" accept="image/*" multiple onChange={addImages} />
-        <input ref={cameraInputRef} className="upload-input" type="file" accept="image/*" capture="environment" onChange={addCameraImage} />
-        <input ref={audioQuestionInputRef} className="upload-input" type="file" accept="audio/*,.mp3,.m4a,.wav,.webm,.aac" onChange={addQuestionAudio} />
-        <input ref={fileQuestionInputRef} className="upload-input" type="file" accept=".txt,.md,.csv,.json,.log,text/*,application/pdf,.doc,.docx,.xls,.xlsx" onChange={addQuestionFile} />
-      </form>
+      <QuestionComposer
+        attachments={attachments}
+        attachmentsOpen={attachmentsOpen}
+        composerMode={composerMode}
+        images={images}
+        listening={listening}
+        question={question}
+        rows={composerRows}
+        voiceBusy={voiceBusy}
+        onAddLocation={addLocationAttachment}
+        onAttachmentsOpenChange={setAttachmentsOpen}
+        onCameraImage={addCameraImage}
+        onComposerModeChange={setComposerMode}
+        onOpenAttachment={openAttachmentPreview}
+        onPickAudio={addQuestionAudio}
+        onPickFile={addQuestionFile}
+        onPickImages={addImages}
+        onQuestionChange={setQuestion}
+        onRemoveAttachment={(id) => setAttachments((current) => current.filter((item) => item.id !== id))}
+        onRemoveImage={(id) => setImages((current) => current.filter((item) => item.id !== id))}
+        onStartVoice={startVoiceInput}
+        onStopVoice={stopVoiceInput}
+        onSubmit={askRecordings}
+      />
 
       <AttachmentPreviewDialog attachment={attachmentPreview} onClose={closeAttachmentPreview} />
 
