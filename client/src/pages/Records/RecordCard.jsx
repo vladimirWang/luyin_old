@@ -294,9 +294,9 @@ export function RecordCard({
           }}
           onClick={(event) => event.stopPropagation()}
         />
-        <div style={{color: 'red', fontSize: 12}}>{recording.id.slice(0,5)}</div>
+        {/* <div style={{color: 'red', fontSize: 12}}>{recording.id.slice(0,5)}</div> */}
         <div className="record-meta">
-          <span>{dayjs(recording.createdAt).format("YYYY-MM-DD")}</span>
+          <span>{dayjs(recording.createdAt).format("HH:mm:ss")}</span>
         </div>
 
         <div className="card-mark-row" onClick={(event) => event.stopPropagation()}>

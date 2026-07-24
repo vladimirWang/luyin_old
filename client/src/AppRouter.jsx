@@ -21,7 +21,7 @@ export default function AppRouter() {
             {/* <Route path="/recorder" element={<Recorder />} /> */}
             <Route path="/records" element={<Records />} />
             <Route path="/detail" element={<Detail />} />
-            {true && (
+            {appConfig.showDebug && (
               <Route path="/verify" element={<Verify />} />
             )}
           </Route>
