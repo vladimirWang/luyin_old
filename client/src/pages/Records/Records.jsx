@@ -106,6 +106,7 @@ import { useWecomAuthStore } from '../../stores/useWecomAuthStore.js'
 import {QA_ACTIVE_MESSAGE_KEY, DAILY_BRIEF_ACTIVE_KEY, PROFILE_STORAGE_KEY} from '../../constant.js'
 import {appendUrlParam} from '../../utils/index.js'
 import {getRecordings} from '../../api/recordings.js'
+import {fetchPdfFile} from '../../utils/pdf.js'
 
 const cardColors = ["coral", "indigo", "violet", "teal", "clay", "ink"];
 
@@ -678,10 +679,10 @@ export default function Records() {
 
     async function getOutlineFile() {
       if (outlineFile) return outlineFile;
-      const outlineResponse = await fetchWithClient(outlineUrl, { cache: "no-store" });
-      if (!outlineResponse.ok) throw new Error("会议提纲 PDF 生成失败");
-      const outlineBlob = await outlineResponse.blob();
-      outlineFile = new File([outlineBlob], `${safeFileName(recording.name)}-会议提纲.pdf`, { type: "application/pdf" });
+      outlineFile = await fetchPdfFile(
+        outlineUrl,
+        `${safeFileName(recording.name)}-会议提纲.pdf`,
+      );
       return outlineFile;
     }
 

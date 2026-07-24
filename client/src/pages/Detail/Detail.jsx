@@ -20,7 +20,6 @@ import {
   formatTimecode,
   isToday,
   safeFileName,
-  downloadBlob,
   audioExtensionFromMimeType,
   canRequestMicrophone,
   getSupportedMimeType,
@@ -40,6 +39,7 @@ import {
 import { dateKeyFromRecording, todayDisplayDateFallback, displayDateFromDateKey } from '../../utils/date.js'
 import { DailyMeetingBriefCard } from './components/DailyMeetingBriefCard.jsx'
 import { requestMicrophoneStream, getAudioFileDuration } from '../../utils/audio.js'
+import { sharePdf } from '../../utils/pdf.js'
 import {DailyMeetingBriefMessage} from './components/DailyMeetingBriefMessage.jsx'
 import { ChatHistoryPanel } from "./components/ChatHistoryPanel.jsx";
 import {
@@ -1491,22 +1491,16 @@ export default function Detail() {
     event?.stopPropagation?.();
     const date = item?.briefDate || item?.date;
     if (!date) return;
-    const fileName = `${safeFileName(item?.question || item?.title || "今日会议简报")}-${date}.pdf`;
+    const title = item?.question || item?.title || "今日会议简报";
+    const fileName = `${safeFileName(title)}-${date}.pdf`;
     try {
-      const response = await fetchWithClient(`/api/meeting-briefs/${encodeURIComponent(date)}/share.pdf`);
-      if (!response.ok) throw new Error("PDF 生成失败");
-      const blob = await response.blob();
-      const file = new File([blob], fileName, { type: "application/pdf" });
-      if (navigator.canShare?.({ files: [file] })) {
-        await navigator.share({
-          title: item?.question || item?.title || "今日会议简报",
-          text: "今日会议简报 PDF",
-          files: [file],
-        });
-        return;
-      }
-      downloadBlob(blob, fileName);
-      onToast?.("PDF 已生成，可在下载文件中分享");
+      await sharePdf({
+        url: `/api/meeting-briefs/${encodeURIComponent(date)}/share.pdf`,
+        fileName,
+        title,
+        text: "今日会议简报 PDF",
+        onDownloaded: () => onToast?.("PDF 已生成，可在下载文件中分享"),
+      });
     } catch (error) {
       onToast?.(error instanceof Error ? error.message : "分享失败");
     }
@@ -1599,22 +1593,13 @@ export default function Detail() {
     const fileName = `${safeFileName(item.question || "问答记录")}.pdf`;
 
     try {
-      const response = await fetchWithClient(url);
-      if (!response.ok) throw new Error("PDF 生成失败");
-      const blob = await response.blob();
-      const file = new File([blob], fileName, { type: "application/pdf" });
-
-      if (navigator.canShare?.({ files: [file] })) {
-        await navigator.share({
-          title: item.question || "录音问答",
-          text: "录音问答 PDF",
-          files: [file],
-        });
-        return;
-      }
-
-      downloadBlob(blob, fileName);
-      onToast?.("PDF 已生成，可在下载文件中分享");
+      await sharePdf({
+        url,
+        fileName,
+        title: item.question || "录音问答",
+        text: "录音问答 PDF",
+        onDownloaded: () => onToast?.("PDF 已生成，可在下载文件中分享"),
+      });
     } catch (error) {
       onToast?.(error instanceof Error ? error.message : "分享失败");
     }
