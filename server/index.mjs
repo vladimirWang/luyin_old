@@ -115,10 +115,15 @@ import {TENCENT_MEETING_SOURCE_PREFIX} from './constant.js'
 import {
   listActiveRecordingsCreatedBetweenWithPrisma,
   listActiveRecordingsWithPrisma,
+  listTranscriptSegmentsByRecordingIdsWithPrisma,
   recordingFromPrisma,
   transcriptSegmentFromPrisma,
 } from "./repositories/recordings.mjs";
-import { listDailyMeetingBriefsByDateWithPrisma } from "./repositories/dailyMeetingBriefs.mjs";
+import {
+  findDailyMeetingBriefWithPrisma,
+  listDailyMeetingBriefsByDateWithPrisma,
+  upsertDailyMeetingBriefWithPrisma,
+} from "./repositories/dailyMeetingBriefs.mjs";
 import { listTencentMeetingWebhookPayloadHistory } from "./repositories/tencentMeetingWebhookEvents.mjs";
 import {connectRedis} from './plugins/redis.js'
 import { startTencentMeetingStsTokenCron } from "./cron/tencentMeeting.js";
@@ -2514,6 +2519,13 @@ function recordingsForBriefDate(db, dateKey, clientId = "", clientName = "", win
     );
 }
 
+async function recordingsForBriefDateWithPrisma(dateKey, clientId = "", clientName = "", window = null) {
+  const startAt = window?.startAt || new Date(`${dateKey}T00:00:00+08:00`);
+  const endAt = window?.endAt || new Date(startAt.getTime() + 24 * 60 * 60 * 1000);
+  const recordings = await listActiveRecordingsCreatedBetweenWithPrisma(startAt, endAt);
+  return recordingsForBriefDate({ recordings }, dateKey, clientId, clientName, window);
+}
+
 function dailyBriefDateKeysForRecordings(db, clientId = "", clientName = "") {
   return [
     ...new Set(
@@ -2739,35 +2751,46 @@ async function generateAndStoreDailyBrief(dateKey = dailyBriefDateParts().date, 
   const job = (async () => {
     const parts = dailyBriefPartsFromDateKey(dateKey);
     const startedAt = new Date().toISOString();
-    let recordings = [];
+    const ownerKey = dailyBriefOwnerKey(clientId);
+    const [recordings, storedBrief] = await Promise.all([
+      recordingsForBriefDateWithPrisma(dateKey, clientId, clientName, window),
+      findDailyMeetingBriefWithPrisma(dateKey, ownerKey),
+    ]);
+    const current = storedBrief || emptyDailyBrief(parts, recordings, clientId);
 
-    await updateDb((nextDb) => {
-      recordings = recordingsForBriefDate(nextDb, dateKey, clientId, clientName, window);
-      const current = findDailyBrief(nextDb, dateKey, clientId) || emptyDailyBrief(parts, recordings, clientId);
-      upsertDailyBriefInDb(nextDb, {
-        ...current,
-        clientId: dailyBriefOwnerKey(clientId),
-        meetingCount: window
-          ? mergeDailyBriefRecordingIds(current.recordingIds || [], dailyBriefRecordingIds(recordings)).length
-          : recordings.length,
-        recordingIds: window
-          ? mergeDailyBriefRecordingIds(current.recordingIds || [], dailyBriefRecordingIds(recordings))
-          : dailyBriefRecordingIds(recordings),
-        status: recordings.length ? "generating" : "empty",
-        dirty: recordings.length > 0,
-        updatedAt: startedAt,
-      });
+    await upsertDailyMeetingBriefWithPrisma({
+      ...current,
+      clientId: ownerKey,
+      meetingCount: window
+        ? mergeDailyBriefRecordingIds(current.recordingIds || [], dailyBriefRecordingIds(recordings)).length
+        : recordings.length,
+      recordingIds: window
+        ? mergeDailyBriefRecordingIds(current.recordingIds || [], dailyBriefRecordingIds(recordings))
+        : dailyBriefRecordingIds(recordings),
+      status: recordings.length ? "generating" : "empty",
+      dirty: recordings.length > 0,
+      updatedAt: startedAt,
     });
 
     if (!recordings.length) {
       const empty = emptyDailyBrief(parts, recordings, clientId);
-      await updateDb((nextDb) => upsertDailyBriefInDb(nextDb, empty));
-      return empty;
+      return upsertDailyMeetingBriefWithPrisma(empty);
     }
 
-    const db = await loadDb();
-    const freshRecordings = recordingsForBriefDate(db, dateKey, clientId, clientName, window);
-    const items = freshRecordings.map((recording) => ({ recording, segments: findSegments(db, recording.id) }));
+    const freshRecordings = await recordingsForBriefDateWithPrisma(dateKey, clientId, clientName, window);
+    const transcriptSegments = await listTranscriptSegmentsByRecordingIdsWithPrisma(
+      freshRecordings.map((recording) => recording.id),
+    );
+    const segmentsByRecordingId = new Map();
+    transcriptSegments.forEach((segment) => {
+      const segments = segmentsByRecordingId.get(segment.recordingId) || [];
+      segments.push(segment);
+      segmentsByRecordingId.set(segment.recordingId, segments);
+    });
+    const items = freshRecordings.map((recording) => ({
+      recording,
+      segments: segmentsByRecordingId.get(recording.id) || [],
+    }));
 
     try {
       const result = await generateDailyMeetingBrief(items, {
@@ -2775,8 +2798,7 @@ async function generateAndStoreDailyBrief(dateKey = dailyBriefDateParts().date, 
         displayDate: parts.displayDate,
         timezone: parts.timezone,
       });
-      const latestDb = await loadDb();
-      const previous = findDailyBrief(latestDb, parts.date, clientId);
+      const previous = await findDailyMeetingBriefWithPrisma(parts.date, ownerKey);
       const windowHeading = window?.slotHour === 0
         ? "## 前日 19:00–今日 00:00"
         : window
@@ -2806,8 +2828,7 @@ async function generateAndStoreDailyBrief(dateKey = dailyBriefDateParts().date, 
         updatedAt: new Date().toISOString(),
         dirty: false,
       };
-      await updateDb((nextDb) => upsertDailyBriefInDb(nextDb, ready));
-      return ready;
+      return upsertDailyMeetingBriefWithPrisma(ready);
     } catch (error) {
       console.warn("[Daily brief] generation failed:", error instanceof Error ? error.message : error);
       const failed = {
@@ -2825,8 +2846,7 @@ async function generateAndStoreDailyBrief(dateKey = dailyBriefDateParts().date, 
         updatedAt: new Date().toISOString(),
         dirty: true,
       };
-      await updateDb((nextDb) => upsertDailyBriefInDb(nextDb, failed));
-      return failed;
+      return upsertDailyMeetingBriefWithPrisma(failed);
     }
   })().finally(() => dailyBriefJobs.delete(jobKey));
 

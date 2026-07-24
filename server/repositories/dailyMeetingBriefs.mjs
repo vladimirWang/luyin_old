@@ -15,6 +15,12 @@ function iso(value) {
   return Number.isNaN(date.getTime()) ? "" : date.toISOString();
 }
 
+function nullableDate(value) {
+  if (!value) return null;
+  const date = new Date(value);
+  return Number.isNaN(date.getTime()) ? null : date;
+}
+
 export function dailyMeetingBriefFromPrisma(row = {}) {
   return {
     id: row.id,
@@ -43,4 +49,35 @@ export async function findDailyMeetingBriefWithPrisma(dateKey, clientId) {
     where: { dateKey, clientId },
   });
   return row ? dailyMeetingBriefFromPrisma(row) : null;
+}
+
+export async function upsertDailyMeetingBriefWithPrisma(brief) {
+  const data = {
+    displayDate: brief.displayDate || "",
+    timezone: brief.timezone || "Asia/Shanghai",
+    meetingCount: Number(brief.meetingCount || 0),
+    recordingIdsJson: JSON.stringify(brief.recordingIds || []),
+    title: brief.title || "",
+    summaryMarkdown: brief.summaryMarkdown || "",
+    status: brief.status || "empty",
+    generatedAt: nullableDate(brief.generatedAt),
+    updatedAt: nullableDate(brief.updatedAt) || new Date(),
+    dirty: Boolean(brief.dirty),
+  };
+  const row = await prisma.dailyMeetingBrief.upsert({
+    where: {
+      dateKey_clientId: {
+        dateKey: brief.date,
+        clientId: brief.clientId,
+      },
+    },
+    create: {
+      id: brief.id,
+      dateKey: brief.date,
+      clientId: brief.clientId,
+      ...data,
+    },
+    update: data,
+  });
+  return dailyMeetingBriefFromPrisma(row);
 }
