@@ -92,8 +92,25 @@ export async function listRecordingsWithPrisma() {
   return rows.map(recordingFromPrisma);
 }
 
+export async function listActiveRecordingsWithPrisma() {
+  const rows = await prisma.recording.findMany({
+    where: { deletedAt: null },
+    orderBy: { seq: "asc" },
+  });
+  return rows.map(recordingFromPrisma);
+}
+
 export async function listTranscriptSegmentsWithPrisma() {
   const rows = await prisma.transcriptSegment.findMany({ orderBy: [{ recordingId: "asc" }, { startMs: "asc" }] });
+  return rows.map(transcriptSegmentFromPrisma);
+}
+
+export async function listTranscriptSegmentsByRecordingIdsWithPrisma(recordingIds = []) {
+  if (!recordingIds.length) return [];
+  const rows = await prisma.transcriptSegment.findMany({
+    where: { recordingId: { in: recordingIds } },
+    orderBy: [{ recordingId: "asc" }, { startMs: "asc" }],
+  });
   return rows.map(transcriptSegmentFromPrisma);
 }
 

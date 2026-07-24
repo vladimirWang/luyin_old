@@ -24,11 +24,23 @@ import {
   pointLabelForIndex,
   thinkingStepsForMessage,
   dailyBriefMeetingCount,
-  api,
-  fetchWithClient,
   showToast
 } from "../../utils/index.js";
-import { dateKeyFromRecording, todayDisplayDateFallback, displayDateFromDateKey } from '../../utils/date.js'
+import {
+  createQuestion,
+  deleteQaMessage,
+  generateMeetingBrief,
+  generateTodayMeetingBrief,
+  getDetailRecordings,
+  getMeetingBrief,
+  getMeetingBriefs,
+  getQaMessage,
+  getQaMessages,
+  getTodayMeetingBrief,
+  transcribeVoiceInput,
+  updateQaMessage,
+} from "../../api/detail.js";
+import { todayDisplayDateFallback, displayDateFromDateKey } from '../../utils/date.js'
 import { DailyMeetingBriefCard } from './components/DailyMeetingBriefCard.jsx'
 import { requestMicrophoneStream, getAudioFileDuration } from '../../utils/audio.js'
 import { sharePdf } from '../../utils/pdf.js'
@@ -177,7 +189,7 @@ export default function Detail() {
     console.log("fetching recordings list");
     let ignored = false;
     setListLoading(true);
-    api("/api/recordings?folderId=all&q=")
+    getDetailRecordings()
       .then((payload) => {
         console.log("recordings payload", payload);
         if (!ignored) {
@@ -215,7 +227,7 @@ export default function Detail() {
 
   useEffect(() => {
     let ignored = false;
-    api("/api/qa-messages?limit=60")
+    getQaMessages(60)
       .then((payload) => {
         if (!ignored) {
           const messages = payload.messages || [];
@@ -229,35 +241,40 @@ export default function Detail() {
     };
   }, []);
 
-  // useEffect(() => {
-  //   if (recording?.id) return undefined;
-  //   let ignored = false;
-  //   setDailyBriefLoading(true);
-  //   fetchDailyBriefHistory().catch(() => {});
-  //   api("/api/meeting-briefs/today")
-  //     .then((payload) => {
-  //       if (!ignored) {
-  //         mergeDailyBriefState(payload);
-  //         if (payload?.status === "generating") {
-  //           saveActiveDailyBriefRef(payload);
-  //           pollDailyBrief(payload.date);
-  //         } else if (payload?.summaryMarkdown) {
-  //           clearActiveDailyBriefRef(payload.date);
-  //         } else if (readActiveDailyBriefRef()?.date === payload?.date) {
-  //           pollDailyBrief(payload.date);
-  //         }
-  //       }
-  //     })
-  //     .catch(() => {
-  //       if (!ignored) setDailyBrief(null);
-  //     })
-  //     .finally(() => {
-  //       if (!ignored) setDailyBriefLoading(false);
-  //     });
-  //   return () => {
-  //     ignored = true;
-  //   };
-  // }, [recording?.id, availableRecordings.length]);
+  useEffect(() => {
+    if (recording?.id) return undefined;
+    let ignored = false;
+    setDailyBriefLoading(true);
+    setDailyBriefExpanded(true);
+
+    Promise.allSettled([
+      fetchDailyBriefHistory(),
+      getTodayMeetingBrief(),
+    ])
+      .then(([, todayResult]) => {
+        if (ignored || todayResult.status !== "fulfilled") return;
+        const payload = todayResult.value;
+        mergeDailyBriefState(payload);
+        if (payload?.status === "generating") {
+          saveActiveDailyBriefRef(payload);
+          pollDailyBrief(payload.date);
+        } else if (payload?.summaryMarkdown) {
+          clearActiveDailyBriefRef(payload.date);
+        } else if (readActiveDailyBriefRef()?.date === payload?.date) {
+          pollDailyBrief(payload.date);
+        }
+      })
+      .catch(() => {
+        if (!ignored) setDailyBrief(null);
+      })
+      .finally(() => {
+        if (!ignored) setDailyBriefLoading(false);
+      });
+
+    return () => {
+      ignored = true;
+    };
+  }, [recording?.id]);
 
   const activeRecordings = useMemo(() => {
     return [...availableRecordings].sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt));
@@ -275,31 +292,8 @@ export default function Detail() {
     }
     putBrief(dailyBrief);
 
-    const recordingsByDate = new Map();
-    Array.isArray(activeRecordings) && activeRecordings.forEach((item) => {
-      const date = dateKeyFromRecording(item);
-      recordingsByDate.set(date, [...(recordingsByDate.get(date) || []), item]);
-    });
-
-    Array.isArray(recordingsByDate) && recordingsByDate.forEach((items, date) => {
-      const existing = byDate.get(date) || {};
-      byDate.set(date, {
-        id: existing.id || `daily-brief-${date}`,
-        date,
-        displayDate: existing.displayDate || displayDateFromDateKey(date),
-        title: existing.title || "会议简报",
-        meetingCount: Number.isFinite(Number(existing.meetingCount)) ? Number(existing.meetingCount) : items.length,
-        recordingIds: Array.isArray(existing.recordingIds) && existing.recordingIds.length ? existing.recordingIds : items.map((item) => item.id).filter(Boolean),
-        summaryMarkdown: existing.summaryMarkdown || "",
-        status: existing.status || (items.length ? "idle" : "empty"),
-        generatedAt: existing.generatedAt || "",
-        updatedAt: existing.updatedAt || items[0]?.createdAt || date,
-        dirty: Boolean(existing.dirty || (!existing.summaryMarkdown && items.length > 0)),
-      });
-    });
-
     return [...byDate.values()]
-      .filter((brief) => brief?.date && (brief.status !== "empty" || dailyBriefMeetingCount(brief, 0) > 0))
+      .filter((brief) => brief?.date && brief.status !== "empty")
       .sort((a, b) => String(b.date || "").localeCompare(String(a.date || "")));
   }, [activeRecordings, dailyBrief, dailyBriefHistory]);
   const scopeRecording = activeScopeIds.length === 1 ? activeRecordings.find((item) => item.id === activeScopeIds[0]) || null : null;
@@ -643,10 +637,7 @@ export default function Detail() {
     const ext = audioExtensionFromMimeType(blob.type);
     formData.append("audio", blob, `question-${Date.now()}.${ext}`);
     formData.append("durationMs", String(durationMs));
-    const payload = await api("/api/voice-input", {
-      method: "POST",
-      body: formData,
-    });
+    const payload = await transcribeVoiceInput(formData);
     const text = String(payload.text || "").trim();
     if (text) setQuestion((current) => `${current} ${text}`.trim());
     else onToast?.("没有识别到语音内容");
@@ -756,22 +747,18 @@ export default function Detail() {
     setAttachments([]);
     setAttachmentsOpen(false);
     try {
-      const payload = await api("/api/ask", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          question: outgoingQuestion,
-          recordingIds: targetScopeIds,
-          images: outgoingImages.map((item) => ({ name: item.name, type: item.type, dataUrl: item.dataUrl })),
-          attachments: outgoingAttachments.map((item) => ({
-            kind: item.kind,
-            name: item.name,
-            type: item.type,
-            text: item.text,
-            url: item.url,
-            dataUrl: item.dataUrl,
-          })),
-        }),
+      const payload = await createQuestion({
+        question: outgoingQuestion,
+        recordingIds: targetScopeIds,
+        images: outgoingImages.map((item) => ({ name: item.name, type: item.type, dataUrl: item.dataUrl })),
+        attachments: outgoingAttachments.map((item) => ({
+          kind: item.kind,
+          name: item.name,
+          type: item.type,
+          text: item.text,
+          url: item.url,
+          dataUrl: item.dataUrl,
+        })),
       });
       if (!payload.message?.id) throw new Error("问答创建失败");
       const fallbackScope = lockedRecordingId ? [lockedRecordingId] : targetScopeIds;
@@ -979,7 +966,7 @@ export default function Detail() {
     const timer = window.setTimeout(async () => {
       qaPollingRef.current.delete(id);
       try {
-        const payload = await api(`/api/qa-messages/${encodeURIComponent(id)}`);
+        const payload = await getQaMessage(id);
         if (payload.message) {
           upsertQaMessage(payload.message, pollScopeIds);
           if (payload.message.pending && attempt < 180) pollQaMessage(id, attempt + 1, pollScopeIds);
@@ -1050,7 +1037,7 @@ export default function Detail() {
   }
 
   async function fetchDailyBriefHistory() {
-    const payload = await api("/api/meeting-briefs?limit=30");
+    const payload = await getMeetingBriefs(30);
     const briefs = payload.briefs || [];
     setDailyBriefHistory(briefs);
     return briefs;
@@ -1113,7 +1100,7 @@ export default function Detail() {
     const timer = window.setTimeout(async () => {
       dailyBriefPollingRef.current.delete(date);
       try {
-        const payload = await api(`/api/meeting-briefs/${encodeURIComponent(date)}`);
+        const payload = await getMeetingBrief(date);
         mergeDailyBriefState(payload);
         if (payload?.date === date && isDailyBriefViewActive()) {
           updateDailyBriefAnswerMessage(payload, { loading: payload.status === "generating" && !dailyBriefHasSummary(payload) });
@@ -1135,7 +1122,7 @@ export default function Detail() {
             return;
           }
           if ((payload.status === "ready" || payload.status === "failed") && recoveryAttempt < 1 && attempt < 180) {
-            const queued = await api(`/api/meeting-briefs/${encodeURIComponent(date)}`, { method: "POST" });
+            const queued = await generateMeetingBrief(date);
             mergeDailyBriefState(queued);
             saveActiveDailyBriefRef(queued);
             pollDailyBrief(date, attempt + 1, recoveryAttempt + 1);
@@ -1181,7 +1168,7 @@ export default function Detail() {
     saveActiveDailyBriefRef(pendingBrief);
 
     try {
-      const payload = await api(`/api/meeting-briefs/${encodeURIComponent(date)}`, { method: "POST" });
+      const payload = await generateMeetingBrief(date);
       mergeDailyBriefState(payload);
       fetchDailyBriefHistory().catch(() => {});
       if (payload.status === "generating") {
@@ -1314,7 +1301,7 @@ export default function Detail() {
     try {
       const active = pendingBrief;
       saveActiveDailyBriefRef(active);
-      const payload = await api("/api/meeting-briefs/today", { method: "POST" });
+      const payload = await generateTodayMeetingBrief();
       setDailyBrief(payload);
       const hasSummary = Boolean(String(payload?.summaryMarkdown || "").trim());
       if (payload.status === "generating") {
@@ -1345,11 +1332,7 @@ export default function Detail() {
   async function toggleHistoryFavorite(item, event) {
     event.stopPropagation();
     try {
-      const payload = await api(`/api/qa-messages/${item.id}`, {
-        method: "PATCH",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ favorite: !item.favorite }),
-      });
+      const payload = await updateQaMessage(item.id, { favorite: !item.favorite });
       updateHistoryMessage(payload.message);
       onToast?.(payload.message.favorite ? "已收藏到收藏夹" : "已取消收藏");
     } catch (error) {
@@ -1361,7 +1344,7 @@ export default function Detail() {
     event.stopPropagation();
     if (!window.confirm("删除这条问答记录？")) return;
     try {
-      await api(`/api/qa-messages/${item.id}`, { method: "DELETE" });
+      await deleteQaMessage(item.id);
       clearActiveQaMessageRef(item.id);
       setQaHistory((current) => current.filter((message) => message.id !== item.id));
       setAnswers((current) => current.filter((message) => message.id !== item.id));

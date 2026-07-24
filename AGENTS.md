@@ -26,6 +26,8 @@ Recording persistence decisions: Prisma is the only data-access implementation f
 
 Database access decisions: prefer Prisma for all new or reworked database reads and writes. Do not introduce new raw SQL when Prisma can express the operation; when touching legacy raw-SQL persistence, migrate the in-scope operation to Prisma where practical.
 
+Prisma migration review decisions: all newly written server-side database queries and mutations must use Prisma. Whenever an existing server persistence path is changed, migrate the in-scope legacy database access to Prisma as part of that change instead of extending aggregate helpers or raw SQL. After any existing logic has been migrated to Prisma, explicitly call out the migrated operations and files in the user-facing handoff and remind the user to review the persistence behavior; never leave an in-scope Prisma migration unmentioned.
+
 Test deployment decisions: `py_server` is intentionally disabled because the current application flow does not use it. `start_test.sh` must not build, start, wait for, or report `py_server`, and must not remove or otherwise manage stale Compose orphan containers.
 
 Records menu decisions: the avatar dropdown uses a compact, content-driven width with mobile viewport bounds instead of a fixed width, and its icon-only action buttons center their icons.
@@ -33,6 +35,12 @@ Records menu decisions: the avatar dropdown uses a compact, content-driven width
 Detail component decisions: `client/src/pages/Detail/Detail.jsx` is the route-level owner and page orchestrator; do not reintroduce a broad `DetailView` wrapper. Split cohesive visual regions and message/composer parts into `client/src/pages/Detail/components`, and keep route loading in focused hooks under `client/src/pages/Detail/hooks`. Keep the chat-history panel as a controlled component: its owner controls visibility through `open` and `onClose`, while panel-only state such as the history/favorites tab remains inside the panel.
 
 Client styling decisions: Tailwind CSS is the primary styling approach for new or substantially refactored client components. Prefer utility classes for layout, spacing, typography, color, borders, responsive behavior, and interaction states; retain shared semantic CSS only for behavior or complex reusable presentation that is materially clearer than repeated utilities. Do not expand the global stylesheet for component-local styling when Tailwind can express it cleanly.
+
+Client date-time decisions: use `dayjs` for frontend date parsing, validation, comparison, and display formatting in new or substantially refactored code. Do not add new ad-hoc `Date` formatting helpers or locale-string formatting when `dayjs` can express the same behavior consistently.
+
+Client request decisions: all new or substantially refactored client HTTP requests must use `client/src/utils/request.js` as the transport implementation. Define endpoint-specific functions under `client/src/api` and call those functions from pages, hooks, stores, and components; do not add direct `fetch`, Axios, or legacy `utils/index.js` `api()` calls in feature code. Keep URL construction, HTTP methods, parameters, and request payload mapping inside the API module rather than the consuming UI.
+
+Daily brief scheduling decisions: schedule the daily meeting brief with `node-cron` at `0 19 * * *` in the `Asia/Shanghai` timezone; do not reintroduce minute-based `setInterval` polling for this job. Keep the startup compensation check so a service restart after 19:00 can recover a missed run, and coalesce overlapping executions before generating per-owner briefs.
 
 Server router dependency decisions: functions needed by server routes should be imported directly from focused utility modules whenever practical. Do not pass importable utility functions through router `configure()` dependency objects; reserve configuration injection for behavior that genuinely belongs to the application composition root or would otherwise create circular dependencies.
 

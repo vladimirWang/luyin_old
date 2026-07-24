@@ -1,4 +1,5 @@
 import { ChevronDown, ChevronUp, LoaderCircle, Pause, Play, RefreshCw, Share2 } from "lucide-react";
+import dayjs from "dayjs";
 import { dailyBriefDisplayDate, dailyBriefMeetingCount } from "../../../utils/index.js";
 import {
   dailyBriefHasSummary,
@@ -26,6 +27,9 @@ export function DailyBriefListItem({
   const speechId = `daily-brief-${date}`;
   const speaking = ttsState.itemId === speechId && ttsState.playing;
   const speechLoading = ttsState.itemId === speechId && ttsState.loading;
+  const generatedAt = brief.generatedAt && dayjs(brief.generatedAt).isValid()
+    ? dayjs(brief.generatedAt).format("MM月DD日 HH:mm")
+    : "";
 
   return (
     <article
@@ -49,6 +53,7 @@ export function DailyBriefListItem({
             <strong className="truncate text-[15px] font-black">{brief.title || "会议简报"}</strong>
             <em className="truncate text-[11px] font-extrabold not-italic text-slate-400">
               {meetingCount ? `${meetingCount} 场会议` : "暂无录音"}
+              {generatedAt ? ` · 生成于 ${generatedAt}` : ""}
             </em>
           </span>
           <span className={`whitespace-nowrap rounded-full px-2 py-1 text-[10px] font-black ${generating ? "bg-rose-100/70 text-rose-500" : "bg-indigo-100/60 text-indigo-600"}`}>

@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from "react";
-import { api, mediaRequestUrl } from "../../../utils/index.js";
+import { mediaRequestUrl } from "../../../utils/index.js";
+import { createTtsAudio } from "../../../api/detail.js";
 
 const IDLE_STATE = { key: "", itemId: "", index: -1, loading: false, playing: false };
 
@@ -32,11 +33,7 @@ export function useTtsPlayer({ onBeforePlay, onToast } = {}) {
 
     try {
       callbacksRef.current.onBeforePlay?.();
-      const payload = await api("/api/tts", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ text: segment.text }),
-      });
+      const payload = await createTtsAudio(segment.text);
       if (queueRef.current.itemId !== itemId || queueRef.current.index !== index) return;
       audio.src = mediaRequestUrl(payload.url, payload.id || Date.now());
       audio.load();

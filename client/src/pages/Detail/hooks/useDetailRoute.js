@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { useLocation, useNavigate } from "react-router-dom";
-import { api, getLocalProfile, showToast } from "../../../utils/index.js";
+import { getLocalProfile, showToast } from "../../../utils/index.js";
+import { getRecording } from "../../../api/detail.js";
 
 export function useDetailRoute() {
   const location = useLocation();
@@ -18,7 +19,7 @@ export function useDetailRoute() {
       };
     }
 
-    api(`/api/recordings/${encodeURIComponent(recordingId)}`)
+    getRecording(recordingId)
       .then((payload) => {
         if (!cancelled) setRecording(payload.recording || null);
       })

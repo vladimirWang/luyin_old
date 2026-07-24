@@ -112,10 +112,12 @@ import {removeFileIfExists} from './utils/file.js'
 import {getWecomUserByUserId} from './utils/wecom.js'
 import {projectRoot} from './config.js'
 import {TENCENT_MEETING_SOURCE_PREFIX} from './constant.js'
-import { recordingFromPrisma, transcriptSegmentFromPrisma } from "./repositories/recordings.mjs";
+import { listActiveRecordingsWithPrisma, recordingFromPrisma, transcriptSegmentFromPrisma } from "./repositories/recordings.mjs";
+import { listDailyMeetingBriefsByDateWithPrisma } from "./repositories/dailyMeetingBriefs.mjs";
 import { listTencentMeetingWebhookPayloadHistory } from "./repositories/tencentMeetingWebhookEvents.mjs";
 import {connectRedis} from './plugins/redis.js'
 import { startTencentMeetingStsTokenCron } from "./cron/tencentMeeting.js";
+import { startDailyBriefCron } from "./cron/dailyBrief.js";
 const prisma = await import('./plugins/prisma.cjs').then(m => m.default || m);
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -133,7 +135,6 @@ const recordingJobVersions = new Map();
 let transcriptionJobChain = Promise.resolve();
 const DAILY_BRIEF_TIMEZONE = "Asia/Shanghai";
 const DAILY_BRIEF_TITLE = "今日会议简报";
-const dailyBriefScheduleState = { lastDate: "" };
 const ACCOUNT_TOKEN_TTL_MS = 1000 * 60 * 60 * 24 * 45;
 const MIN_VALID_RECORDING_DURATION_MS = 1000;
 
@@ -2804,20 +2805,34 @@ async function generateAndStoreDailyBrief(dateKey = dailyBriefDateParts().date, 
   return job;
 }
 
-function scheduleDailyBriefGeneration() {
-  const run = () => {
-    const parts = dailyBriefDateParts();
-    if (parts.hour < 19 || dailyBriefScheduleState.lastDate === parts.date) return;
+async function runScheduledDailyBriefGeneration() {
+  const parts = dailyBriefDateParts();
+  if (parts.hour < 19) return [];
 
-    dailyBriefScheduleState.lastDate = parts.date;
-    generateAndStoreDailyBrief(parts.date).catch((error) =>
-      console.warn("[Daily brief] scheduled generation failed:", error instanceof Error ? error.message : error),
-    );
-  };
+  const [recordings, existingBriefs] = await Promise.all([
+    listActiveRecordingsWithPrisma(),
+    listDailyMeetingBriefsByDateWithPrisma(parts.date),
+  ]);
+  const db = { recordings };
+  const existingByOwner = new Map(
+    existingBriefs.map((brief) => [dailyBriefOwnerKey(brief.clientId), brief]),
+  );
+  const ownerClientIds = [
+    ...new Set(
+      recordings
+        .filter((recording) => recordingDateKey(recording) === parts.date)
+        .map((recording) => recording.ownerClientId || ""),
+    ),
+  ];
 
-  run();
-  const timer = setInterval(run, 60 * 1000);
-  timer.unref?.();
+  return Promise.all(
+    ownerClientIds.map(async (clientId) => {
+      const ownerRecordings = recordingsForBriefDate(db, parts.date, clientId);
+      const existing = existingByOwner.get(dailyBriefOwnerKey(clientId));
+      if (!shouldGenerateDailyBrief(parts, existing, ownerRecordings)) return existing;
+      return generateAndStoreDailyBrief(parts.date, clientId);
+    }),
+  );
 }
 
 function qaMessageRecordingIds(message) {
@@ -4272,7 +4287,7 @@ app.listen(port, host, () => {
 //   }
 // }
 
-scheduleDailyBriefGeneration();
+startDailyBriefCron({ run: runScheduledDailyBriefGeneration });
 startTencentMeetingStsTokenCron();
 
 replayMissingTencentMeetingRecordingWebhooks()

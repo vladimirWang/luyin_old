@@ -1,5 +1,10 @@
 import express from "express";
 import { requestClientIdBetter, requestClientNameAndDecode } from "../utils/recordings.js";
+import {
+  listActiveRecordingsWithPrisma,
+  listTranscriptSegmentsByRecordingIdsWithPrisma,
+} from "../repositories/recordings.mjs";
+import { findDailyMeetingBriefWithPrisma } from "../repositories/dailyMeetingBriefs.mjs";
 
 const router = express.Router();
 
@@ -12,54 +17,29 @@ export function configure(deps) {
 router.get("/today", async (request, response, next) => {
   const {
     dailyBriefDateParts,
-    loadDb,
     recordingsForBriefDate,
-    findDailyBrief,
+    dailyBriefOwnerKey,
     emptyDailyBrief,
-    updateDb,
-    upsertDailyBriefInDb,
     publicDailyBrief,
-    isOrphanDailyBriefGenerating,
-    queueDailyBriefGeneration,
-    shouldGenerateDailyBrief,
   } = dependencies;
   try {
     const parts = dailyBriefDateParts();
     const clientId = requestClientIdBetter(request);
     const clientName = requestClientNameAndDecode(request);
-    const db = await loadDb();
-    const recordings = recordingsForBriefDate(db, parts.date, clientId, clientName);
-    const existing = findDailyBrief(db, parts.date, clientId);
+    const allRecordings = await listActiveRecordingsWithPrisma();
+    const recordings = recordingsForBriefDate({ recordings: allRecordings }, parts.date, clientId, clientName);
+    const [existing, transcriptSegments] = await Promise.all([
+      findDailyMeetingBriefWithPrisma(parts.date, dailyBriefOwnerKey(clientId)),
+      listTranscriptSegmentsByRecordingIdsWithPrisma(recordings.map((recording) => recording.id)),
+    ]);
+    const db = { recordings, transcriptSegments };
 
-    if (!recordings.length) {
-      const empty = emptyDailyBrief(parts, recordings, clientId);
-      if (!existing || existing.status !== "empty") {
-        await updateDb((nextDb) => upsertDailyBriefInDb(nextDb, empty));
-      }
-      response.json(publicDailyBrief(empty, parts, recordings, clientId, db));
-      return;
-    }
-
-    if (isOrphanDailyBriefGenerating(existing, parts.date, clientId)) {
-      const queued = await queueDailyBriefGeneration(parts.date, clientId, clientName);
-      response.json(publicDailyBrief(queued, parts, recordings, clientId, db));
-      return;
-    }
-
-    const needsGeneration = shouldGenerateDailyBrief(parts, existing, recordings);
-    if (needsGeneration && (!existing || existing.status !== "ready")) {
-      const queued = await queueDailyBriefGeneration(parts.date, clientId, clientName);
-      response.json(publicDailyBrief(queued, parts, recordings, clientId, db));
-      return;
-    }
-
-    if (needsGeneration) {
-      queueDailyBriefGeneration(parts.date, clientId, clientName).catch((error) =>
-        console.warn("[Daily brief] background refresh failed:", error instanceof Error ? error.message : error),
-      );
-    }
-
-    response.json(publicDailyBrief(existing, parts, recordings, clientId, db));
+    const empty = {
+      ...emptyDailyBrief(parts, recordings, clientId),
+      status: "empty",
+      dirty: false,
+    };
+    response.json(publicDailyBrief(existing || empty, parts, recordings, clientId, db));
   } catch (error) {
     next(error);
   }
@@ -91,36 +71,27 @@ router.post("/today", async (request, response, next) => {
 router.get("/", async (request, response, next) => {
   const {
     loadDb,
-    dailyBriefDateKeysForRecordings,
     dailyBriefOwnerKey,
     dailyBriefPartsFromDateKey,
     recordingsForBriefDate,
-    findDailyBrief,
     publicDailyBrief,
-    dailyBriefPlaceholder,
   } = dependencies;
   try {
     const clientId = requestClientIdBetter(request);
     const clientName = requestClientNameAndDecode(request);
     const limit = Math.min(60, Math.max(1, Number(request.query.limit || 30)));
     const db = await loadDb();
-    const dateKeys = new Set(dailyBriefDateKeysForRecordings(db, clientId, clientName));
-    (db.dailyMeetingBriefs || [])
+    const briefs = (db.dailyMeetingBriefs || [])
       .filter((brief) => dailyBriefOwnerKey(brief.clientId) === dailyBriefOwnerKey(clientId))
-      .forEach((brief) => {
-        if (brief?.date) dateKeys.add(brief.date);
-      });
-
-    const briefs = [...dateKeys]
-      .sort((a, b) => String(b || "").localeCompare(String(a || "")))
+      .filter((brief) => brief?.date && brief.status !== "empty")
+      .sort((a, b) => String(b.date || "").localeCompare(String(a.date || "")))
       .slice(0, limit)
-      .map((dateKey) => {
-        const parts = dailyBriefPartsFromDateKey(dateKey);
-        const recordings = recordingsForBriefDate(db, dateKey, clientId, clientName);
-        const existing = findDailyBrief(db, dateKey, clientId);
-        return publicDailyBrief(existing || dailyBriefPlaceholder(parts, recordings, clientId), parts, recordings, clientId, db);
+      .map((brief) => {
+        const parts = dailyBriefPartsFromDateKey(brief.date);
+        const recordings = recordingsForBriefDate(db, brief.date, clientId, clientName);
+        return publicDailyBrief(brief, parts, recordings, clientId, db);
       })
-      .filter((brief) => brief.status !== "empty" || brief.meetingCount > 0);
+      .filter((brief) => brief.status !== "empty");
     response.json({ briefs });
   } catch (error) {
     next(error);
