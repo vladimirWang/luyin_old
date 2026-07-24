@@ -1,8 +1,9 @@
 import cron from "node-cron";
 import logger from "../utils/log.js";
-
-const DAILY_BRIEF_CRON_EXPRESSION = "0 19 * * *";
-const DAILY_BRIEF_TIMEZONE = "Asia/Shanghai";
+import {
+  dailyBriefCronExpression,
+  dailyBriefTimezone,
+} from "../config.js";
 
 let scheduledTask = null;
 let runInFlight = null;
@@ -27,20 +28,20 @@ export function startDailyBriefCron(options = {}) {
   if (scheduledTask) return scheduledTask;
 
   const run = options.run;
-  const expression = options.expression || DAILY_BRIEF_CRON_EXPRESSION;
-  const timezone = options.timezone || DAILY_BRIEF_TIMEZONE;
+  const expression = options.expression || dailyBriefCronExpression;
+  const timezone = options.timezone || dailyBriefTimezone;
   const schedule = options.schedule || cron.schedule;
 
   if (typeof run !== "function") throw new TypeError("Daily brief cron requires a run function.");
 
-  scheduledTask = schedule(expression, () => void runDailyBriefCron(run), {
+  scheduledTask = schedule(expression, () => void runDailyBriefCron(() => run(new Date())), {
     timezone,
     noOverlap: true,
     name: "daily-meeting-brief",
   });
 
-  // A startup check compensates for a service that was unavailable at 19:00.
-  if (options.runOnStart !== false) void runDailyBriefCron(run);
+  // The startup check uses the latest completed time slot to compensate for downtime.
+  if (options.runOnStart !== false) void runDailyBriefCron(() => run(new Date()));
   return scheduledTask;
 }
 

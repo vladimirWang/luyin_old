@@ -6,7 +6,7 @@ import {
   stopDailyBriefCron,
 } from "./dailyBrief.js";
 
-test("daily brief cron schedules 19:00 in Asia/Shanghai", async () => {
+test("daily brief cron schedules 00:00, 14:00 and 19:00 in Asia/Shanghai", async () => {
   let captured = null;
   let runs = 0;
   const task = { stop() {} };
@@ -23,7 +23,7 @@ test("daily brief cron schedules 19:00 in Asia/Shanghai", async () => {
   });
 
   assert.equal(returned, task);
-  assert.equal(captured.expression, "0 19 * * *");
+  assert.equal(captured.expression, "0 0,14,19 * * *");
   assert.equal(captured.options.timezone, "Asia/Shanghai");
   assert.equal(captured.options.noOverlap, true);
 

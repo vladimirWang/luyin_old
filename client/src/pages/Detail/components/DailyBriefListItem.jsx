@@ -28,7 +28,7 @@ export function DailyBriefListItem({
   const speaking = ttsState.itemId === speechId && ttsState.playing;
   const speechLoading = ttsState.itemId === speechId && ttsState.loading;
   const generatedAt = brief.generatedAt && dayjs(brief.generatedAt).isValid()
-    ? dayjs(brief.generatedAt).format("MM月DD日 HH:mm")
+    ? dayjs(brief.generatedAt).format("HH:mm")
     : "";
 
   return (
@@ -50,7 +50,7 @@ export function DailyBriefListItem({
             {dailyBriefDisplayDate(brief)}
           </span>
           <span className="grid min-w-0 gap-0.5">
-            <strong className="truncate text-[15px] font-black">{brief.title || "会议简报"}</strong>
+            <strong className="truncate text-[15px] font-black">会议简报</strong>
             <em className="truncate text-[11px] font-extrabold not-italic text-slate-400">
               {meetingCount ? `${meetingCount} 场会议` : "暂无录音"}
               {generatedAt ? ` · 生成于 ${generatedAt}` : ""}

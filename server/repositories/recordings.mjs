@@ -100,6 +100,20 @@ export async function listActiveRecordingsWithPrisma() {
   return rows.map(recordingFromPrisma);
 }
 
+export async function listActiveRecordingsCreatedBetweenWithPrisma(startAt, endAt) {
+  const rows = await prisma.recording.findMany({
+    where: {
+      deletedAt: null,
+      createdAt: {
+        gte: startAt,
+        lt: endAt,
+      },
+    },
+    orderBy: [{ createdAt: "asc" }, { seq: "asc" }],
+  });
+  return rows.map(recordingFromPrisma);
+}
+
 export async function listTranscriptSegmentsWithPrisma() {
   const rows = await prisma.transcriptSegment.findMany({ orderBy: [{ recordingId: "asc" }, { startMs: "asc" }] });
   return rows.map(transcriptSegmentFromPrisma);

@@ -110,9 +110,14 @@ import {
 // import prisma from './plugins/prisma.js';
 import {removeFileIfExists} from './utils/file.js'
 import {getWecomUserByUserId} from './utils/wecom.js'
-import {projectRoot} from './config.js'
+import {dailyBriefScheduleHours, projectRoot} from './config.js'
 import {TENCENT_MEETING_SOURCE_PREFIX} from './constant.js'
-import { listActiveRecordingsWithPrisma, recordingFromPrisma, transcriptSegmentFromPrisma } from "./repositories/recordings.mjs";
+import {
+  listActiveRecordingsCreatedBetweenWithPrisma,
+  listActiveRecordingsWithPrisma,
+  recordingFromPrisma,
+  transcriptSegmentFromPrisma,
+} from "./repositories/recordings.mjs";
 import { listDailyMeetingBriefsByDateWithPrisma } from "./repositories/dailyMeetingBriefs.mjs";
 import { listTencentMeetingWebhookPayloadHistory } from "./repositories/tencentMeetingWebhookEvents.mjs";
 import {connectRedis} from './plugins/redis.js'
@@ -2460,14 +2465,7 @@ function isOwnRecording(recording, clientId = "") {
 }
 
 function recordingReferenceDate(recording, clientId = "") {
-  const sharedAt = !isOwnRecording(recording, clientId) ? recording?.sharedAt : "";
-  return (
-    validDateFromSource(sharedAt) ||
-    validDateFromSource(recording?.uploadedAt) ||
-    validDateFromSource(recording?.createdAt) ||
-    validDateFromSource(recording?.updatedAt) ||
-    new Date()
-  );
+  return validDateFromSource(recording?.createdAt);
 }
 
 /**
@@ -2479,11 +2477,12 @@ function recordingReferenceDate(recording, clientId = "") {
  */
 function recordingDateKey(recording, timeZone = DAILY_BRIEF_TIMEZONE, clientId = "") {
   const referenceDate = recordingReferenceDate(recording, clientId);
+  if (!referenceDate) return "";
   return dailyBriefDateParts(referenceDate, timeZone).date;
 }
 
 function recordingBriefSortTime(recording, clientId = "") {
-  return recordingReferenceDate(recording, clientId).getTime();
+  return recordingReferenceDate(recording, clientId)?.getTime() || 0;
 }
 
 async function transcriptStoragePaths(recordingId, recording = {}) {
@@ -2498,9 +2497,15 @@ async function transcriptStoragePaths(recordingId, recording = {}) {
   };
 }
 
-function recordingsForBriefDate(db, dateKey, clientId = "", clientName = "") {
+function recordingsForBriefDate(db, dateKey, clientId = "", clientName = "", window = null) {
   return (db.recordings || [])
-    .filter((recording) => !recording.deletedAt && recordingDateKey(recording, DAILY_BRIEF_TIMEZONE, clientId) === dateKey)
+    .filter((recording) => {
+      if (recording.deletedAt) return false;
+      const createdAt = recordingReferenceDate(recording);
+      if (!createdAt) return false;
+      if (window) return createdAt >= window.startAt && createdAt < window.endAt;
+      return recordingDateKey(recording, DAILY_BRIEF_TIMEZONE, clientId) === dateKey;
+    })
     .filter((recording) => !clientId || canReadRecording(recording, clientId, clientName))
     .sort(
       (a, b) =>
@@ -2523,6 +2528,10 @@ function dailyBriefDateKeysForRecordings(db, clientId = "", clientName = "") {
 
 function dailyBriefRecordingIds(recordings = []) {
   return recordings.map((recording) => recording.id).filter(Boolean).sort();
+}
+
+function mergeDailyBriefRecordingIds(...recordingIdGroups) {
+  return [...new Set(recordingIdGroups.flat().filter(Boolean))].sort();
 }
 
 function publicDailyBriefRecordingState(recording, db) {
@@ -2723,7 +2732,7 @@ async function queueDailyBriefGeneration(dateKey, clientId = "", clientName = ""
   return queued;
 }
 
-async function generateAndStoreDailyBrief(dateKey = dailyBriefDateParts().date, clientId = "", clientName = "") {
+async function generateAndStoreDailyBrief(dateKey = dailyBriefDateParts().date, clientId = "", clientName = "", window = null) {
   const jobKey = dailyBriefJobKey(dateKey, clientId);
   if (dailyBriefJobs.has(jobKey)) return dailyBriefJobs.get(jobKey);
 
@@ -2733,13 +2742,17 @@ async function generateAndStoreDailyBrief(dateKey = dailyBriefDateParts().date, 
     let recordings = [];
 
     await updateDb((nextDb) => {
-      recordings = recordingsForBriefDate(nextDb, dateKey, clientId, clientName);
+      recordings = recordingsForBriefDate(nextDb, dateKey, clientId, clientName, window);
       const current = findDailyBrief(nextDb, dateKey, clientId) || emptyDailyBrief(parts, recordings, clientId);
       upsertDailyBriefInDb(nextDb, {
         ...current,
         clientId: dailyBriefOwnerKey(clientId),
-        meetingCount: recordings.length,
-        recordingIds: dailyBriefRecordingIds(recordings),
+        meetingCount: window
+          ? mergeDailyBriefRecordingIds(current.recordingIds || [], dailyBriefRecordingIds(recordings)).length
+          : recordings.length,
+        recordingIds: window
+          ? mergeDailyBriefRecordingIds(current.recordingIds || [], dailyBriefRecordingIds(recordings))
+          : dailyBriefRecordingIds(recordings),
         status: recordings.length ? "generating" : "empty",
         dirty: recordings.length > 0,
         updatedAt: startedAt,
@@ -2753,7 +2766,7 @@ async function generateAndStoreDailyBrief(dateKey = dailyBriefDateParts().date, 
     }
 
     const db = await loadDb();
-    const freshRecordings = recordingsForBriefDate(db, dateKey, clientId, clientName);
+    const freshRecordings = recordingsForBriefDate(db, dateKey, clientId, clientName, window);
     const items = freshRecordings.map((recording) => ({ recording, segments: findSegments(db, recording.id) }));
 
     try {
@@ -2762,16 +2775,32 @@ async function generateAndStoreDailyBrief(dateKey = dailyBriefDateParts().date, 
         displayDate: parts.displayDate,
         timezone: parts.timezone,
       });
+      const latestDb = await loadDb();
+      const previous = findDailyBrief(latestDb, parts.date, clientId);
+      const windowHeading = window?.slotHour === 0
+        ? "## 前日 19:00–今日 00:00"
+        : window
+          ? `## 今日 ${window.slotHour === 14 ? "00:00–14:00" : "14:00–19:00"}`
+          : "";
+      const generatedSummary = result.summaryMarkdown || "";
+      const summaryMarkdown = window
+        ? [previous?.summaryMarkdown, [windowHeading, generatedSummary].filter(Boolean).join("\n\n")]
+            .filter(Boolean)
+            .join("\n\n---\n\n")
+        : generatedSummary;
+      const recordingIds = window
+        ? mergeDailyBriefRecordingIds(previous?.recordingIds || [], dailyBriefRecordingIds(freshRecordings))
+        : dailyBriefRecordingIds(freshRecordings);
       const ready = {
         id: dailyBriefId(parts.date, clientId),
         date: parts.date,
         clientId: dailyBriefOwnerKey(clientId),
         displayDate: parts.displayDate,
         timezone: parts.timezone,
-        meetingCount: freshRecordings.length,
-        recordingIds: dailyBriefRecordingIds(freshRecordings),
+        meetingCount: recordingIds.length,
+        recordingIds,
         title: DAILY_BRIEF_TITLE,
-        summaryMarkdown: result.summaryMarkdown || "",
+        summaryMarkdown,
         status: "ready",
         generatedAt: result.generatedAt || new Date().toISOString(),
         updatedAt: new Date().toISOString(),
@@ -2805,12 +2834,41 @@ async function generateAndStoreDailyBrief(dateKey = dailyBriefDateParts().date, 
   return job;
 }
 
-async function runScheduledDailyBriefGeneration() {
-  const parts = dailyBriefDateParts();
-  if (parts.hour < 19) return [];
+function previousDailyBriefDateKey(dateKey) {
+  const date = new Date(`${dateKey}T12:00:00+08:00`);
+  date.setUTCDate(date.getUTCDate() - 1);
+  return dailyBriefDateParts(date).date;
+}
+
+function scheduledDailyBriefWindow(referenceDate = new Date()) {
+  const parts = dailyBriefDateParts(referenceDate);
+  const hour = parts.hour % 24;
+  const scheduledHour = [...dailyBriefScheduleHours].reverse().find((value) => hour >= value) ?? 0;
+  const offset = "+08:00";
+  if (scheduledHour === 0) {
+    const previousDate = previousDailyBriefDateKey(parts.date);
+    return {
+      ...parts,
+      slotHour: 0,
+      startAt: new Date(`${previousDate}T19:00:00${offset}`),
+      endAt: new Date(`${parts.date}T00:00:00${offset}`),
+    };
+  }
+  const startHour = scheduledHour === 14 ? 0 : 14;
+  return {
+    ...parts,
+    slotHour: scheduledHour,
+    startAt: new Date(`${parts.date}T${String(startHour).padStart(2, "0")}:00:00${offset}`),
+    endAt: new Date(`${parts.date}T${String(scheduledHour).padStart(2, "0")}:00:00${offset}`),
+  };
+}
+
+async function runScheduledDailyBriefGeneration(referenceDate = new Date()) {
+  const window = scheduledDailyBriefWindow(referenceDate);
+  const parts = dailyBriefPartsFromDateKey(window.date);
 
   const [recordings, existingBriefs] = await Promise.all([
-    listActiveRecordingsWithPrisma(),
+    listActiveRecordingsCreatedBetweenWithPrisma(window.startAt, window.endAt),
     listDailyMeetingBriefsByDateWithPrisma(parts.date),
   ]);
   const db = { recordings };
@@ -2829,8 +2887,10 @@ async function runScheduledDailyBriefGeneration() {
     ownerClientIds.map(async (clientId) => {
       const ownerRecordings = recordingsForBriefDate(db, parts.date, clientId);
       const existing = existingByOwner.get(dailyBriefOwnerKey(clientId));
+      const generatedAt = validDateFromSource(existing?.generatedAt);
+      if (generatedAt && generatedAt >= window.endAt) return existing;
       if (!shouldGenerateDailyBrief(parts, existing, ownerRecordings)) return existing;
-      return generateAndStoreDailyBrief(parts.date, clientId);
+      return generateAndStoreDailyBrief(parts.date, clientId, "", window);
     }),
   );
 }
