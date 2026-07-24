@@ -2,13 +2,16 @@ import { useEffect, useRef, useState } from "react";
 import { Outlet, useLocation, useNavigate } from "react-router-dom";
 import { Home, ListMusic, Mic } from "lucide-react";
 import { getLocalProfile, uiText } from "./utils/index.js";
+import appConfig from "./config.js";
 
 const NAV_ITEMS = [
   { path: "/records", labelZh: "记录", labelEn: "Records", icon: Home },
-  { path: "/verify", labelZh: "验证", labelEn: "Records", icon: Home },
   // { path: "/recorder", labelZh: "录音", labelEn: "Record", icon: Mic, center: true },
   { path: "/detail", labelZh: "问答", labelEn: "QA", icon: ListMusic },
 ];
+if (appConfig.showDebug) {
+  NAV_ITEMS.push({ path: "/verify", labelZh: "验证", labelEn: "Records", icon: Home })
+}
 
 function useKeyboardVisibility() {
   const [visible, setVisible] = useState(false);
