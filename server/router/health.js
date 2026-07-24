@@ -1,28 +1,14 @@
 import express from "express";
-import { tencentMeetingWebhookStatus } from "../utils/tencentMeeting.mjs";
+import { createHealthController } from "../controllers/healthController.js";
+import { createHealthService } from "../services/healthService.js";
 
 const router = express.Router();
-
-let dependencies = {};
+let controller;
 
 export function configure(deps) {
-  dependencies = deps;
+  controller = createHealthController(createHealthService(deps));
 }
 
-router.get("/", async (request, response) => {
-  const { getTranscriptionDiagnostics, ttsDiagnostics } = dependencies;
-  const diagnostics = getTranscriptionDiagnostics();
-  response.json({
-    ok: true,
-    info: request.app.info,
-    storage: process.env.DATABASE_URL || process.env.MYSQL_HOST ? "mysql" : "filesystem-json",
-    transcribeMode: diagnostics.mode,
-    transcribeConfigured: diagnostics.configured,
-    transcribeMessage: diagnostics.message,
-    tencentMeetingWebhook: tencentMeetingWebhookStatus(),
-    tts: ttsDiagnostics(),
-    qaMode: process.env.LLM_PROVIDER || process.env.LLM_API_URL || process.env.LLM_API_KEY ? "llm" : "local-transcript",
-  });
-});
+router.get("/", (request, response) => controller.getHealth(request, response));
 
 export default router;
