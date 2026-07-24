@@ -3445,11 +3445,12 @@ function resolvePdfFontPath() {
     ["C:\\Windows\\Fonts\\NotoSansSC-VF.ttf", ""],
     ["C:\\Windows\\Fonts\\simhei.ttf", ""],
     ["C:\\Windows\\Fonts\\msyh.ttc", ""],
+    ["/usr/share/fonts/truetype/droid/DroidSansFallbackFull.ttf", ""],
     ["/usr/share/fonts/google-noto-cjk/NotoSansCJK-Regular.ttc", "NotoSansCJKsc-Regular"],
     ["/usr/share/fonts/google-noto-cjk/NotoSerifCJK-Regular.ttc", "NotoSerifCJKsc-Regular"],
     ["/usr/share/fonts/opentype/noto/NotoSansCJK-Regular.ttc", "NotoSansCJKsc-Regular"],
     ["/usr/share/fonts/truetype/noto/NotoSansCJK-Regular.ttc", "NotoSansCJKsc-Regular"],
-    ["/usr/share/fonts/truetype/wqy/wqy-microhei.ttc", ""],
+    ["/usr/share/fonts/truetype/wqy/wqy-microhei.ttc", "WenQuanYi Micro Hei"],
   ].filter(Boolean);
   const found = candidates.find(([candidate]) => candidate && existsSync(candidate));
   return found ? { path: found[0], family: found[1] || "" } : null;
@@ -3707,25 +3708,27 @@ function renderMeetingOutlinePdf(recording, outline = null) {
     }
 
     if (outline.reportMarkdown) {
-      String(outline.reportMarkdown)
+      const reportLines = String(outline.reportMarkdown)
         .replace(/\r/g, "")
-        .split("\n")
-        .map((line) => line.trim())
-        .filter(Boolean)
-        .filter((line) => !/^#{1,2}\s*会议报告生成提纲/.test(line))
-        .filter((line) => !/^>\s*如会议中包含更多议题/.test(line))
-        .filter((line) => !/^\|\s*[-:]+\s*(\|\s*[-:]+\s*)+\|?$/.test(line))
-        .forEach((line) => {
-          if (/^#{1,4}\s+/.test(line)) {
-            addSectionTitle(line.replace(/^#{1,4}\s+/, ""));
-            return;
-          }
-          if (/^[-*]\s+/.test(line)) {
-            addBullet(line.replace(/^[-*]\s+/, ""));
-            return;
-          }
-          addParagraph(line.replace(/^\|/, "").replace(/\|$/, "").replace(/\|/g, "  "));
-        });
+        .split("\n");
+
+      for (const rawLine of reportLines) {
+        const line = rawLine.trim();
+        if (!line) continue;
+        if (/^#{1,2}\s*会议报告生成提纲/.test(line)) continue;
+        if (/^>\s*如会议中包含更多议题/.test(line)) continue;
+        if (/^\|\s*[-:]+\s*(\|\s*[-:]+\s*)+\|?$/.test(line)) continue;
+
+        if (/^#{1,4}\s+/.test(line)) {
+          addSectionTitle(line.replace(/^#{1,4}\s+/, ""));
+          continue;
+        }
+        if (/^[-*]\s+/.test(line)) {
+          addBullet(line.replace(/^[-*]\s+/, ""));
+          continue;
+        }
+        addParagraph(line.replace(/^\|/, "").replace(/\|$/, "").replace(/\|/g, "  "));
+      }
     } else {
       addSectionTitle(outline.title || "会议概览");
       addParagraph(outline.summary || "AI 已完成会议内容整理。");
