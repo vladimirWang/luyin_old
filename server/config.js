@@ -9,3 +9,6 @@ export const tencentMeetingWebhookDir = path.join(projectRoot, "storage", "tence
 export const dailyBriefCronExpression = "0 0,14,19 * * *";
 export const dailyBriefTimezone = "Asia/Shanghai";
 export const dailyBriefScheduleHours = Object.freeze([0, 14, 19]);
+
+export const transcriptionRecoveryCronExpression = "* * * * *";
+export const transcriptionRecoveryBatchSize = 10;

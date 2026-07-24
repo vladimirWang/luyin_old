@@ -110,7 +110,7 @@ import {
 // import prisma from './plugins/prisma.js';
 import {removeFileIfExists} from './utils/file.js'
 import {getWecomUserByUserId} from './utils/wecom.js'
-import {dailyBriefScheduleHours, projectRoot} from './config.js'
+import {dailyBriefScheduleHours, projectRoot, transcriptionRecoveryBatchSize} from './config.js'
 import {TENCENT_MEETING_SOURCE_PREFIX} from './constant.js'
 import {
   listActiveRecordingsCreatedBetweenWithPrisma,
@@ -128,6 +128,7 @@ import { listTencentMeetingWebhookPayloadHistory } from "./repositories/tencentM
 import {connectRedis} from './plugins/redis.js'
 import { startTencentMeetingStsTokenCron } from "./cron/tencentMeeting.js";
 import { startDailyBriefCron } from "./cron/dailyBrief.js";
+import { startTranscriptionRecoveryCron } from "./cron/transcriptionRecovery.js";
 const prisma = await import('./plugins/prisma.cjs').then(m => m.default || m);
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -615,8 +616,6 @@ const tencentMeetingTranscriptJobs = new Set();
 const tencentMeetingCreatorNameCache = new Map();
 let tencentMeetingCloudDiscoveryJob = null;
 
-const LOCAL_TRANSCRIPTION_SWEEP_INTERVAL_MS = 30 * 1000;
-const LOCAL_TRANSCRIPTION_SWEEP_LIMIT = 8;
 const configuredMeetingOutlineStaleMs = Number(process.env.MEETING_OUTLINE_STALE_MS);
 const configuredMeetingOutlineSweepIntervalMs = Number(process.env.MEETING_OUTLINE_SWEEP_INTERVAL_MS);
 const configuredMeetingOutlineSweepLimit = Number(process.env.MEETING_OUTLINE_SWEEP_LIMIT);
@@ -629,8 +628,6 @@ const MEETING_OUTLINE_SWEEP_INTERVAL_MS = Number.isFinite(configuredMeetingOutli
 const MEETING_OUTLINE_SWEEP_LIMIT = Number.isFinite(configuredMeetingOutlineSweepLimit)
   ? Math.max(1, Math.round(configuredMeetingOutlineSweepLimit))
   : 4;
-let pendingLocalTranscriptionSweepAt = 0;
-
 app.use(cors());
 app.use(express.json({ limit: "12mb" }));
 
@@ -692,7 +689,6 @@ configureRecordingsRouter(projectRoot, {
   queueTencentMeetingImportSync,
   queueTencentMeetingTranscriptSync,
   isLocalApiTranscriptionRecording,
-  schedulePendingLocalTranscriptionSweep,
   findReusableQaMessage,
   publicQaMessage,
   persistQaAttachments,
@@ -4211,11 +4207,12 @@ async function queuePendingLocalTranscriptionJobs(reason = "sweep") {
       status: { in: ["uploaded", "uploading", "queued", "pending", "processing", "transcribing"] },
     },
     orderBy: { updatedAt: "asc" },
+    take: transcriptionRecoveryBatchSize * 5,
   });
   const candidates = rows
     .map(recordingFromPrisma)
     .filter((recording) => !transcriptionJobs.has(recording.id) && Boolean(resolveRecordingAudioPath(recording, projectRoot)))
-    .slice(0, LOCAL_TRANSCRIPTION_SWEEP_LIMIT);
+    .slice(0, transcriptionRecoveryBatchSize);
 
   let queued = 0;
   for (const recording of candidates) {
@@ -4249,14 +4246,6 @@ async function queuePendingMeetingOutlineJobs(reason = "sweep", options = {}) {
   return jobs.length;
 }
 
-function schedulePendingLocalTranscriptionSweep(reason = "sweep", options = {}) {
-  const nowMs = Date.now();
-  if (!options.force && nowMs - pendingLocalTranscriptionSweepAt < LOCAL_TRANSCRIPTION_SWEEP_INTERVAL_MS) return;
-  pendingLocalTranscriptionSweepAt = nowMs;
-  queuePendingLocalTranscriptionJobs(reason).catch((error) => {
-    console.warn("[Transcription] pending local upload sweep failed:", error instanceof Error ? error.message : error);
-  });
-}
 /**
  *  1. 转写文件迁移
     遍历所有录音记录
@@ -4369,6 +4358,7 @@ app.listen(port, host, () => {
 
 startDailyBriefCron({ run: runScheduledDailyBriefGeneration });
 startTencentMeetingStsTokenCron();
+startTranscriptionRecoveryCron({ run: queuePendingLocalTranscriptionJobs });
 
 replayMissingTencentMeetingRecordingWebhooks()
   .then(async (replayed) => {
@@ -4396,15 +4386,10 @@ replayMissingTencentMeetingRecordingWebhooks()
 
 // queueTencentMeetingCloudDiscovery();
 setTimeout(() => {
-  schedulePendingLocalTranscriptionSweep("startup", { force: true });
   queuePendingMeetingOutlineJobs("startup", { force: true }).catch((error) => {
     console.warn("[Meeting outline] startup recovery failed:", error instanceof Error ? error.message : error);
   });
 }, 2000).unref?.();
-
-setInterval(() => {
-  schedulePendingLocalTranscriptionSweep("interval");
-}, LOCAL_TRANSCRIPTION_SWEEP_INTERVAL_MS).unref?.();
 
 setInterval(() => {
   queuePendingMeetingOutlineJobs("interval").catch((error) => {
