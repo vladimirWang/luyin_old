@@ -109,14 +109,6 @@ router.post("/webhook", async (request, response) => {
     logger.info("logger.info listen /webhook tencentmeeting webhook payload: ", {message: JSON.stringify(payload)})
     console.log("console.log listen /webhook tencentmeeting webhook payload: ", {message: JSON.stringify(payload)})
     const action = tencentMeetingWebhookEventAction(payload);
-    logger.info("tencent_meeting.webhook.received", {
-      event: String(payload?.event || ""),
-      action,
-      uniqueSequence: String(payload?.unique_sequence || ""),
-      recordFileIds: Array.isArray(payload?.item?.record_files)
-        ? payload.item.record_files.map((file) => String(file?.record_file_id || "")).filter(Boolean)
-        : [String(payload?.item?.record_file_id || "")].filter(Boolean),
-    });
     // 记录腾讯会议webhhook日志
     const persisted = await appendTencentMeetingWebhookEvent({
       receivedAt: new Date().toISOString(),
@@ -140,7 +132,6 @@ router.post("/webhook", async (request, response) => {
       void Promise.resolve()
         .then(async () => {
           await markTencentMeetingWebhookEventProcessing(eventId);
-          logger.info("tencent_meeting.webhook.processing", { eventId, event: String(payload?.event || ""), action });
           switch (action) {
             case "sts-token": {
               const saved = await importTencentMeetingStsTokenPayload(payload);
@@ -167,7 +158,6 @@ router.post("/webhook", async (request, response) => {
               });
           }
           await markTencentMeetingWebhookEventProcessed(eventId);
-          logger.info("tencent_meeting.webhook.processed", { eventId, event: String(payload?.event || ""), action });
         })
         .catch(async (error) => {
           try {
@@ -179,12 +169,6 @@ router.post("/webhook", async (request, response) => {
             );
           }
           console.warn("[Tencent Meeting] webhook background import failed:", error instanceof Error ? error.message : error);
-          logger.error("tencent_meeting.webhook.processing_failed", {
-            eventId,
-            event: String(payload?.event || ""),
-            action,
-            error,
-          });
         });
     } else {
       console.warn("[Tencent Meeting] webhook decrypted but did not contain JSON payload.");

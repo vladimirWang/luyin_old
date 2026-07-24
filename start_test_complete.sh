@@ -7,8 +7,6 @@ cd "${SCRIPT_DIR}"
 
 COMPOSE=(docker compose --env-file .env.test -f docker-compose.test_complete.yml)
 
-# After reproducing the issue, run ./collect_test_complete_logs.sh and share the generated log file.
-
 if [[ ! -r .env.test ]]; then
   echo "部署失败：缺少或无法读取 .env.test。" >&2
   exit 1

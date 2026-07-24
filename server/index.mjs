@@ -1516,46 +1516,19 @@ async function syncTencentMeetingBuiltInTranscript(recordingId, info = {}, jobVe
 }
 
 async function downloadTencentMeetingFile(url, targetPath) {
-  const startedAt = Date.now();
-  const safeDownloadUrl = (() => {
-    try {
-      const parsed = new URL(url);
-      return `${parsed.origin}${parsed.pathname}`;
-    } catch {
-      return "invalid-url";
-    }
-  })();
-  logger.info("tencent_meeting.audio_download.started", { targetPath, downloadUrl: safeDownloadUrl });
   const response = await fetch(url, {
     signal: AbortSignal.timeout(Math.max(30000, Number(process.env.TENCENT_MEETING_DOWNLOAD_TIMEOUT_MS || 20 * 60 * 1000))),
   });
   if (!response.ok || !response.body) {
-    logger.error("tencent_meeting.audio_download.http_failed", {
-      downloadUrl: safeDownloadUrl,
-      status: response.status,
-      statusText: response.statusText,
-      contentType: response.headers.get("content-type") || "",
-      contentLength: response.headers.get("content-length") || "",
-      durationMs: Date.now() - startedAt,
-    });
     throw new Error(`Tencent Meeting recording download failed: ${response.status}`);
   }
   await mkdir(path.dirname(targetPath), { recursive: true });
   await pipeline(Readable.fromWeb(response.body), createWriteStream(targetPath));
-  const result = {
+  return {
     ...(await fileInfo(targetPath)),
     contentType: response.headers.get("content-type") || "",
     finalUrl: response.url || url,
   };
-  logger.info("tencent_meeting.audio_download.completed", {
-    targetPath,
-    downloadUrl: safeDownloadUrl,
-    status: response.status,
-    contentType: result.contentType,
-    size: result.size,
-    durationMs: Date.now() - startedAt,
-  });
-  return result;
 }
 
 function tencentMeetingRecordingAudioUrl(recordingId) {
@@ -1588,38 +1561,15 @@ async function inspectTencentMeetingDownloadedFile(targetPath, downloadInfo = {}
 }
 
 async function syncTencentMeetingRecordingAudio(recordingId, info = {}, jobVersion = recordingJobVersion(recordingId)) {
-  const syncStartedAt = Date.now();
-  const diagnosticContext = {
-    recordingId,
-    recordFileId: String(info.recordFileId || ""),
-    event: String(info.event || ""),
-    sourceKind: String(info.sourceKind || ""),
-    jobVersion,
-  };
-  logger.info("tencent_meeting.audio_sync.started", diagnosticContext);
   if (isRecordingJobCancelled(recordingId, jobVersion)) return false;
   const recordingBeforeSync = await prisma.recording.findFirst({
     where: { id: recordingId, deletedAt: null },
   });
-  if (!recordingBeforeSync) {
-    logger.warn("tencent_meeting.audio_sync.recording_missing", diagnosticContext);
-    return false;
-  }
-  const existingAudioPath = resolveRecordingAudioPathBetter(recordingBeforeSync, projectRoot);
-  if (existingAudioPath) {
-    logger.info("tencent_meeting.audio_sync.already_stored", { ...diagnosticContext, storagePath: existingAudioPath });
-    return true;
-  }
+  if (!recordingBeforeSync) return false;
+  if (resolveRecordingAudioPathBetter(recordingBeforeSync, projectRoot)) return true;
 
   console.info(`[CALL] syncTencentMeetingRecordingAudio: recordingId: ${recordingId}`);
   const target = await findTencentMeetingDownloadTarget(info);
-  logger.info("tencent_meeting.audio_sync.target_resolved", {
-    ...diagnosticContext,
-    hasDownloadUrl: Boolean(target?.downloadUrl),
-    hasIdentity: Boolean(tencentMeetingCandidateDownloadIdentityParams(info).length),
-    targetRecordFileId: String(target?.recordFileId || ""),
-    targetDurationMs: Number(target?.durationMs || 0),
-  });
   console.info(`[CALL] syncTencentMeetingRecordingAudio`);
   if (!target?.downloadUrl) {
     const needsIdentity = !tencentMeetingCandidateDownloadIdentityParams(info).length;
@@ -1669,14 +1619,6 @@ async function syncTencentMeetingRecordingAudio(recordingId, info = {}, jobVersi
       where: { id: recordingId, deletedAt: null },
       data,
     });
-    logger.warn("tencent_meeting.audio_sync.waiting_for_download_target", {
-      ...diagnosticContext,
-      needsIdentity,
-      hasStsToken,
-      canRequestStsToken,
-      errorMessage: data.errorMessage,
-      durationMs: Date.now() - syncStartedAt,
-    });
     return false;
   }
 
@@ -1688,13 +1630,6 @@ async function syncTencentMeetingRecordingAudio(recordingId, info = {}, jobVersi
     const inspection = await inspectTencentMeetingDownloadedFile(tempPath, downloadInfo);
     const conversionInput =
       inspection.useRemoteInput || isTencentMeetingStreamingMedia(target.downloadUrl, downloadInfo) ? target.downloadUrl : tempPath;
-    logger.info("tencent_meeting.audio_sync.conversion_started", {
-      ...diagnosticContext,
-      inputKind: conversionInput === tempPath ? "downloaded-file" : "remote-stream",
-      downloadedSize: Number(downloadInfo.size || 0),
-      contentType: downloadInfo.contentType,
-      storagePath,
-    });
     await convertAudioFileToMp3(conversionInput, storagePath);
     if (isRecordingJobCancelled(recordingId, jobVersion)) {
       await removeFileIfExists(tempPath);
@@ -1746,25 +1681,8 @@ async function syncTencentMeetingRecordingAudio(recordingId, info = {}, jobVersi
       await removeFileIfExists(storagePath);
       return false;
     }
-    logger.info("tencent_meeting.audio_sync.completed", {
-      ...diagnosticContext,
-      storagePath,
-      fileSize: Number(storedFile.size || 0),
-      audioDurationMs: Number(durationMs || 0),
-      elapsedMs: Date.now() - syncStartedAt,
-    });
     return true;
   } catch (error) {
-    logger.error("tencent_meeting.audio_sync.failed", {
-      ...diagnosticContext,
-      tempPath,
-      storagePath,
-      elapsedMs: Date.now() - syncStartedAt,
-      error,
-      errorCode: error?.code || "",
-      errno: error?.errno || "",
-      syscall: error?.syscall || "",
-    });
     await removeFileIfExists(tempPath);
     await removeFileIfExists(storagePath);
     if (!isRecordingJobCancelled(recordingId, jobVersion)) {
@@ -1782,21 +1700,10 @@ async function syncTencentMeetingRecordingAudio(recordingId, info = {}, jobVersi
 }
 
 function queueTencentMeetingImportSync(recordingId, info = {}) {
-  const context = { recordingId, recordFileId: String(info.recordFileId || ""), event: String(info.event || ""), sourceKind: String(info.sourceKind || "") };
-  if (!tencentMeetingAudioSyncEnabled()) {
-    logger.warn("tencent_meeting.audio_sync.queue_skipped", { ...context, reason: "disabled" });
-    return false;
-  }
-  if (!recordingId || isRecordingJobCancelled(recordingId) || tencentMeetingImportJobs.has(recordingId)) {
-    logger.warn("tencent_meeting.audio_sync.queue_skipped", {
-      ...context,
-      reason: !recordingId ? "missing_recording_id" : isRecordingJobCancelled(recordingId) ? "cancelled" : "already_queued",
-    });
-    return false;
-  }
+  if (!tencentMeetingAudioSyncEnabled()) return false;
+  if (!recordingId || isRecordingJobCancelled(recordingId) || tencentMeetingImportJobs.has(recordingId)) return false;
   const jobVersion = recordingJobVersion(recordingId);
   tencentMeetingImportJobs.add(recordingId);
-  logger.info("tencent_meeting.audio_sync.queued", { ...context, jobVersion });
   setTimeout(() => {
     syncTencentMeetingRecordingAudio(recordingId, info, jobVersion)
       .catch((error) => console.warn("[Tencent Meeting] import sync failed:", error instanceof Error ? error.message : error))
