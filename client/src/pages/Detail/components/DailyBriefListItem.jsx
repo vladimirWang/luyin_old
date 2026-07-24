@@ -77,12 +77,12 @@ export function DailyBriefListItem({
             })}
           </div>
           <div className="flex flex-wrap justify-end gap-2">
-            {meetingCount > 0 ? (
+            {/* {meetingCount > 0 ? (
               <button className={actionClass} type="button" onClick={(event) => onGenerate(brief, event)} disabled={generating}>
                 {generating ? <LoaderCircle className="spin-icon" size={14} /> : <RefreshCw size={14} />}
                 <span>{hasSummary ? "重新生成" : "生成简报"}</span>
               </button>
-            ) : null}
+            ) : null} */}
             <button className={actionClass} type="button" onClick={(event) => onSpeak(brief, event)} disabled={!content.trim()}>
               {speechLoading ? <LoaderCircle className="spin-icon" size={14} /> : speaking ? <Pause size={14} /> : <Play size={14} />}
               <span>{speaking ? "停止朗读" : "朗读内容"}</span>
