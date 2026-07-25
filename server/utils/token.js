@@ -56,15 +56,33 @@ function parseStoredToken(value) {
 }
 
 export async function getTMToken(options = {}) {
-  if (!redisClient.isReady) return null;
+  const minimumValidityMs = Math.max(0, Number(options.minimumValidityMs || 0));
+  if (!redisClient.isReady) {
+    logger.warn("[call] getTMToken step 0", {
+      message: "STS token lookup skipped because Redis is not ready",
+      minimumValidityMs,
+      redisReady: false,
+    });
+    return null;
+  }
   try {
     const token = parseStoredToken(await redisClient.get(TM_TOKEN_KEY));
-    const minimumValidityMs = Math.max(0, Number(options.minimumValidityMs || 0));
-    if (!token || token.expiresAt <= Date.now() + minimumValidityMs) return null;
+    const expiresInMs = token ? token.expiresAt - Date.now() : 0;
+    const usable = Boolean(token && expiresInMs > minimumValidityMs);
+    logger.info("[call] getTMToken step 1", {
+      message: "STS token lookup completed",
+      tokenPresent: Boolean(token),
+      usable,
+      expiresInMs,
+      minimumValidityMs,
+    });
+    if (!usable) return null;
     return token;
   } catch (error) {
-    logger.warn("[Tencent Meeting] failed to read STS token from Redis", {
-      message: error instanceof Error ? error.message : String(error),
+    logger.warn("[call] getTMToken step 2", {
+      message: "STS token lookup failed",
+      minimumValidityMs,
+      errorMessage: error instanceof Error ? error.message : String(error),
     });
     return null;
   }
@@ -132,10 +150,23 @@ async function releaseOwnedRequestLock(owner) {
  * `common.sts-token` webhook, which must call {@link setTMToken}.
  */
 export async function requestTMToken() {
-  if (requestInFlight) return requestInFlight;
+  if (requestInFlight) {
+    logger.info("[call] requestTMToken step 0", {
+      message: "STS token request coalesced with an in-flight check",
+    });
+    return requestInFlight;
+  }
 
   requestInFlight = (async () => {
+    logger.info("[call] requestTMToken step 1", {
+      message: "STS token validity check started",
+      redisReady: redisClient.isReady,
+    });
     if (!redisClient.isReady) {
+      logger.warn("[call] requestTMToken step 2", {
+        message: "STS token request skipped because Redis is not ready",
+        reason: "redis_unavailable",
+      });
       return { token: "", expiresAt: 0, requested: false, reason: "redis_unavailable" };
     }
 
@@ -143,8 +174,19 @@ export async function requestTMToken() {
     const current = await getTMToken();
     const tokenUsable = Boolean(current?.value && current.expiresAt > now);
     const refreshDue = !tokenUsable || current.expiresAt <= now + refreshWindowMs();
+    logger.info("[call] requestTMToken step 3", {
+      message: "STS token state evaluated",
+      tokenPresent: Boolean(current?.value),
+      tokenUsable,
+      expiresInMs: current?.expiresAt ? current.expiresAt - now : 0,
+      refreshDue,
+    });
 
     if (!refreshDue) {
+      logger.info("[call] requestTMToken step 4", {
+        message: "STS token refresh skipped because the current token is fresh",
+        reason: "token_fresh",
+      });
       return {
         token: current.value,
         expiresAt: current.expiresAt,
@@ -155,6 +197,11 @@ export async function requestTMToken() {
 
     const tmOperatorId = operatorId();
     if (!tmOperatorId) {
+      logger.warn("[call] requestTMToken step 5", {
+        message: "STS token request skipped because operator ID is not configured",
+        reason: "missing_operator_id",
+        tokenUsable,
+      });
       return {
         token: tokenUsable ? current.value : "",
         expiresAt: tokenUsable ? current.expiresAt : 0,
@@ -168,7 +215,17 @@ export async function requestTMToken() {
     let lockAcquired = false;
     try {
       lockAcquired = await acquireRequestLock(lockOwner, cooldownMs);
+      logger.info("[call] requestTMToken step 6", {
+        message: "STS token distributed request lock checked",
+        lockAcquired,
+        cooldownMs,
+      });
       if (!lockAcquired) {
+        logger.info("[call] requestTMToken step 7", {
+          message: "STS token request skipped because another instance already requested one",
+          reason: "request_pending",
+          tokenUsable,
+        });
         return {
           token: tokenUsable ? current.value : "",
           expiresAt: tokenUsable ? current.expiresAt : 0,
@@ -178,12 +235,21 @@ export async function requestTMToken() {
       }
 
       const { tencentMeetingApiRequest } = await import("./tencentMeeting.mjs");
+      logger.info("[call] requestTMToken step 8", {
+        message: "STS token API request started",
+        tokenUsable,
+      });
       await tencentMeetingApiRequest("POST", "/v1/app/sts-token", {
         operator_id: tmOperatorId,
         operator_id_type: 1,
         valid_time: 24,
       }, { skipStsToken: true });
 
+      logger.info("[call] requestTMToken step 9", {
+        message: "STS token API request accepted; waiting for callback",
+        reason: "requested",
+        tokenUsable,
+      });
       return {
         token: tokenUsable ? current.value : "",
         expiresAt: tokenUsable ? current.expiresAt : 0,
@@ -194,8 +260,14 @@ export async function requestTMToken() {
       if (lockAcquired) {
         await releaseOwnedRequestLock(lockOwner).catch(() => {});
       }
-      logger.warn("[Tencent Meeting] STS token request failed", {
-        message: error instanceof Error ? error.message : String(error),
+      logger.warn("[call] requestTMToken step 10", {
+        message: "STS token API request failed",
+        reason: "request_failed",
+        tokenUsable,
+        lockAcquired,
+        apiErrorCode: String(error?.tencentMeetingApiErrorCode || ""),
+        httpStatus: Number(error?.httpStatus || 0),
+        errorMessage: error instanceof Error ? error.message : String(error),
       });
       return {
         token: tokenUsable ? current.value : "",
@@ -205,6 +277,9 @@ export async function requestTMToken() {
       };
     }
   })().finally(() => {
+    logger.info("[call] requestTMToken step 11", {
+      message: "STS token validity check finished",
+    });
     requestInFlight = null;
   });
 
@@ -220,8 +295,28 @@ export async function setTMToken(tokenInfo = {}) {
   const expiresAt = expirationMs(tokenInfo.expire_ts);
   const reqId = String(tokenInfo.req_id || "").trim();
 
-  if (!value) throw new TypeError("Tencent Meeting token_info.sts_token is required.");
+  logger.info("[call] setTMToken step 0", {
+    message: "STS token callback persistence started",
+    tokenPresent: Boolean(value),
+    expiresAtPresent: Boolean(expiresAt),
+    expiresInMs: expiresAt ? expiresAt - Date.now() : 0,
+    requestIdPresent: Boolean(reqId),
+    redisReady: redisClient.isReady,
+  });
+
+  if (!value) {
+    logger.warn("[call] setTMToken step 1", {
+      message: "STS token callback rejected because sts_token is missing",
+      reason: "missing_sts_token",
+    });
+    throw new TypeError("Tencent Meeting token_info.sts_token is required.");
+  }
   if (!expiresAt || expiresAt <= Date.now()) {
+    logger.warn("[call] setTMToken step 2", {
+      message: "STS token callback rejected because expire_ts is invalid",
+      reason: "invalid_expire_ts",
+      expiresAtPresent: Boolean(expiresAt),
+    });
     throw new TypeError("Tencent Meeting token_info.expire_ts must be a future timestamp.");
   }
 
@@ -234,11 +329,21 @@ export async function setTMToken(tokenInfo = {}) {
   const ttlMs = Math.max(1, expiresAt - Date.now());
 
   if (!redisClient.isReady) {
+    logger.error("[call] setTMToken step 3", {
+      message: "STS token callback could not be persisted because Redis is not ready",
+      reason: "redis_unavailable",
+      ttlMs,
+    });
     throw new Error("Redis is not ready; Tencent Meeting STS token was not stored.");
   }
 
   await redisClient.set(TM_TOKEN_KEY, JSON.stringify(record), { PX: ttlMs });
   await redisClient.del(TM_TOKEN_REQUEST_LOCK_KEY);
+  logger.info("[call] setTMToken step 4", {
+    message: "STS token callback persisted",
+    ttlMs,
+    requestIdPresent: Boolean(reqId),
+  });
 
   return {
     set: true,

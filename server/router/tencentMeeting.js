@@ -101,14 +101,19 @@ router.post("/webhook", async (request, response) => {
     importTencentMeetingTranscriptReadyPayload,
     queueTencentMeetingPendingImports,
   } = dependencies;
+  let event = "";
+  let traceId = "";
+  let action = "ignored";
   try {
     const plaintext = tencentMeetingVerifiedPlaintext(request, request.body?.data);
     const payload = parseJsonObject(plaintext);
-    const action = tencentMeetingWebhookEventAction(payload);
+    event = String(payload?.event || "");
+    traceId = String(payload?.trace_id || "");
+    action = tencentMeetingWebhookEventAction(payload);
     logger.info("[call] tencentMeetingWebhookPost step 0", {
       message: "verified webhook received",
-      event: String(payload?.event || ""),
-      traceId: String(payload?.trace_id || ""),
+      event,
+      traceId,
       action,
     });
     // 记录腾讯会议webhhook日志
@@ -206,8 +211,15 @@ router.post("/webhook", async (request, response) => {
       console.warn("[Tencent Meeting] webhook decrypted but did not contain JSON payload.");
     }
   } catch (error) {
-    logger.error("tencentmeeting webhook failed: ", {message: error.message})
-    console.warn("[Tencent Meeting] webhook POST rejected:", error instanceof Error ? error.message : error);
+    logger.error("[call] tencentMeetingWebhookPost step 5", {
+      message: "webhook rejected before acknowledgement",
+      event,
+      traceId,
+      action,
+      errorCode: String(error?.code || ""),
+      statusCode: Number(error?.statusCode || 400),
+      errorMessage: error instanceof Error ? error.message : String(error),
+    });
     response.status(error.statusCode || 400).type("text/plain").send("invalid callback 2");
   }
 });

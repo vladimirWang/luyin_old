@@ -68,16 +68,53 @@ export async function tencentMeetingApiRequest(method, uri, body = null, options
   const config = tencentMeetingApiConfig();
   const bodyText = body ? JSON.stringify(body) : "";
   const headers = await tencentMeetingApiHeaders(method, uri, bodyText, options);
-  const response = await fetch(`${config.baseUrl.replace(/\/+$/, "")}${uri}`, {
-    method,
-    headers,
-    body: bodyText || undefined,
-    signal: AbortSignal.timeout(Math.max(5000, Number(process.env.TENCENT_MEETING_API_TIMEOUT_MS || 30000))),
+  const startedAt = Date.now();
+  const requestUrl = new URL(uri, config.baseUrl);
+  const logContext = {
+    method: String(method || "GET").toUpperCase(),
+    pathname: requestUrl.pathname,
+    queryKeys: [...new Set(requestUrl.searchParams.keys())].sort(),
+    bodyKeys: body && typeof body === "object" && !Array.isArray(body) ? Object.keys(body).sort() : [],
+    skipStsToken: Boolean(options.skipStsToken),
+    stsTokenAttached: Boolean(headers["STS-Token"]),
+  };
+  logger.info("[call] tencentMeetingApiRequest step 0", {
+    message: "Tencent Meeting API request started",
+    ...logContext,
   });
+
+  let response;
+  try {
+    response = await fetch(`${config.baseUrl.replace(/\/+$/, "")}${uri}`, {
+      method,
+      headers,
+      body: bodyText || undefined,
+      signal: AbortSignal.timeout(Math.max(5000, Number(process.env.TENCENT_MEETING_API_TIMEOUT_MS || 30000))),
+    });
+  } catch (error) {
+    logger.error("[call] tencentMeetingApiRequest step 1", {
+      message: "Tencent Meeting API transport failed",
+      ...logContext,
+      durationMs: Date.now() - startedAt,
+      errorName: error instanceof Error ? error.name : "",
+      errorMessage: error instanceof Error ? error.message : String(error),
+    });
+    throw error;
+  }
+
   const text = await response.text();
   const payload = parseJsonObject(text) || { raw: text };
   const apiError = payload?.error_info || payload?.errorInfo || payload?.error;
   const apiErrorCode = apiError?.new_error_code || apiError?.error_code || apiError?.code || payload?.code;
+  logger.info("[call] tencentMeetingApiRequest step 2", {
+    message: "Tencent Meeting API response received",
+    ...logContext,
+    durationMs: Date.now() - startedAt,
+    httpStatus: response.status,
+    responseBytes: Buffer.byteLength(text),
+    payloadKeys: payload && typeof payload === "object" && !Array.isArray(payload) ? Object.keys(payload).sort() : [],
+    apiErrorCode: String(apiErrorCode || ""),
+  });
   if (!response.ok || apiErrorCode) {
     const message = apiError?.message || apiError?.msg || payload?.message || text || response.statusText;
     const error = new Error(
@@ -91,8 +128,9 @@ export async function tencentMeetingApiRequest(method, uri, body = null, options
       error.stsTokenInvalidated = await invalidateTMToken(rejectedToken);
       const refresh = await requestTMToken();
       error.stsRefreshReason = refresh.reason;
-      logger.warn("[call] tencentMeetingApiRequest step 0", {
+      logger.warn("[call] tencentMeetingApiRequest step 3", {
         message: "Tencent Meeting rejected STS token; replacement requested",
+        ...logContext,
         apiErrorCode: String(apiErrorCode),
         httpStatus: response.status,
         tokenInvalidated: error.stsTokenInvalidated,
@@ -101,8 +139,22 @@ export async function tencentMeetingApiRequest(method, uri, body = null, options
       });
     }
 
+    logger.warn("[call] tencentMeetingApiRequest step 4", {
+      message: "Tencent Meeting API request rejected",
+      ...logContext,
+      durationMs: Date.now() - startedAt,
+      httpStatus: response.status,
+      apiErrorCode: String(apiErrorCode || ""),
+      apiErrorMessage: String(message).slice(0, 300),
+    });
     throw error;
   }
+  logger.info("[call] tencentMeetingApiRequest step 5", {
+    message: "Tencent Meeting API request completed",
+    ...logContext,
+    durationMs: Date.now() - startedAt,
+    httpStatus: response.status,
+  });
   return payload;
 }
 

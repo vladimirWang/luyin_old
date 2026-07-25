@@ -1426,21 +1426,61 @@ async function findTencentMeetingDownloadTarget(info) {
 // 从腾讯会议 API 获取录音的内置转写内容
 async function fetchTencentMeetingBuiltInTranscript(info = {}, durationMs = 0) {
   const recordFileId = String(info.recordFileId || info.record_file_id || "").trim();
-  if (!recordFileId || !tencentMeetingApiConfigured()) return null;
+  const event = String(info.event || "").trim();
+  const sourceKind = String(info.sourceKind || "").trim();
+  const apiConfigured = tencentMeetingApiConfigured();
+  logger.info("[call] fetchTencentMeetingBuiltInTranscript step 0", {
+    message: "built-in transcript lookup requested",
+    recordFileId,
+    event,
+    sourceKind,
+    durationMs: Number(durationMs || 0),
+    apiConfigured,
+  });
+  if (!recordFileId || !apiConfigured) {
+    logger.warn("[call] fetchTencentMeetingBuiltInTranscript step 1", {
+      message: "built-in transcript lookup skipped",
+      recordFileId,
+      event,
+      sourceKind,
+      reason: !recordFileId ? "missing_record_file_id" : "api_not_configured",
+    });
+    return null;
+  }
 
   // 获取 STS Token（确保 API 调用权限）
-  await requestTencentMeetingStsTokenIfNeeded();
-  logger.info("[CALL] fetchTencentMeetingBuiltInTranscript", {message: `获取到 STS Token`});
+  const stsResult = await requestTencentMeetingStsTokenIfNeeded();
+  const stsToken = await loadTencentMeetingStsToken();
+  logger.info("[call] fetchTencentMeetingBuiltInTranscript step 2", {
+    message: "STS token readiness checked before transcript lookup",
+    recordFileId,
+    event,
+    sourceKind,
+    tokenAvailable: Boolean(stsToken),
+    refreshRequested: Boolean(stsResult?.requested),
+    refreshReason: String(stsResult?.reason || ""),
+  });
   const failureKinds = [];
 
   const operatorParamsList = tencentMeetingCandidateTranscriptOperatorParams(info);
-  logger.info("[call] fetchTencentMeetingBuiltInTranscript step 0", {
+  logger.info("[call] fetchTencentMeetingBuiltInTranscript step 3", {
     message: "transcript lookup identities prepared",
     recordFileId,
+    event,
+    sourceKind,
     identityCount: operatorParamsList.length,
     identityKinds: [...new Set(operatorParamsList.map(tencentMeetingLookupIdentityKind))],
   });
-  for (const operatorParams of operatorParamsList) {
+  if (!operatorParamsList.length) {
+    logger.warn("[call] fetchTencentMeetingBuiltInTranscript step 4", {
+      message: "transcript detail lookup has no usable identity",
+      recordFileId,
+      event,
+      sourceKind,
+      reason: "missing_operator_identity",
+    });
+  }
+  for (const [identityIndex, operatorParams] of operatorParamsList.entries()) {
     // 方式a 标准转写详情接口
     const uri = tencentMeetingQuery("/v1/records/transcripts/details", {
       record_file_id: recordFileId,
@@ -1448,15 +1488,37 @@ async function fetchTencentMeetingBuiltInTranscript(info = {}, durationMs = 0) {
       transcripts_type: Number(process.env.TENCENT_MEETING_TRANSCRIPTS_TYPE || 1),
       ...operatorParams,
     });
-    logger.info("[call] fetchTencentMeetingBuiltInTranscript step 1", {
+    logger.info("[call] fetchTencentMeetingBuiltInTranscript step 5", {
       message: "transcript detail lookup started",
       recordFileId,
+      event,
+      sourceKind,
+      identityIndex,
       identityKind: tencentMeetingLookupIdentityKind(operatorParams),
     });
     try {
       const payload = await tencentMeetingApiRequest("GET", uri);
       const result = tencentMeetingTranscriptSegmentsFromPayload(payload, durationMs);
+      logger.info("[call] fetchTencentMeetingBuiltInTranscript step 6", {
+        message: "transcript detail response parsed",
+        recordFileId,
+        event,
+        sourceKind,
+        identityIndex,
+        identityKind: tencentMeetingLookupIdentityKind(operatorParams),
+        payloadKeys: tencentMeetingLookupPayloadKeys(payload),
+        segmentCount: result.segments.length,
+        rawTextLength: String(result.rawText || "").length,
+      });
       if (result.segments.length > 0) {
+        logger.info("[call] fetchTencentMeetingBuiltInTranscript step 7", {
+          message: "built-in transcript lookup completed with content",
+          recordFileId,
+          event,
+          sourceKind,
+          identityIndex,
+          segmentCount: result.segments.length,
+        });
         return {
           ...result,
           provider: "tencent-meeting",
@@ -1465,11 +1527,26 @@ async function fetchTencentMeetingBuiltInTranscript(info = {}, durationMs = 0) {
         };
       }
     } catch (error) {
-      failureKinds.push(tencentMeetingTranscriptErrorKind(error));
+      const failureKind = tencentMeetingTranscriptErrorKind(error);
+      failureKinds.push(failureKind);
+      logger.warn("[call] fetchTencentMeetingBuiltInTranscript step 8", {
+        message: "transcript detail lookup failed",
+        recordFileId,
+        event,
+        sourceKind,
+        identityIndex,
+        identityKind: tencentMeetingLookupIdentityKind(operatorParams),
+        failureKind,
+        apiErrorCode: String(error?.tencentMeetingApiErrorCode || ""),
+        httpStatus: Number(error?.httpStatus || 0),
+        errorMessage: tencentMeetingLookupErrorMessage(error),
+      });
       if (String(error?.tencentMeetingApiErrorCode || "") === "500227") {
-        logger.warn("[call] fetchTencentMeetingBuiltInTranscript step 2", {
+        logger.warn("[call] fetchTencentMeetingBuiltInTranscript step 9", {
           message: "transcript lookup deferred until replacement STS token callback",
           recordFileId,
+          event,
+          sourceKind,
           apiErrorCode: String(error.tencentMeetingApiErrorCode),
           stsRefreshReason: String(error.stsRefreshReason || ""),
         });
@@ -1480,20 +1557,39 @@ async function fetchTencentMeetingBuiltInTranscript(info = {}, durationMs = 0) {
           recordFileId,
         };
       }
-      if (!isTencentMeetingTranscriptUnavailableError(error)) {
-        console.warn("[Tencent Meeting] built-in transcript lookup skipped:", error instanceof Error ? error.message : error);
-      }
     }
 
   }
 
-  const recorderSummaryFallback = String(info.event || "").trim() === "recording.audio-completed";
+  const recorderSummaryFallback = event === "recording.audio-completed";
   if (recorderSummaryFallback || tencentMeetingSummaryFallbackEnabled(info)) {
+    logger.info("[call] fetchTencentMeetingBuiltInTranscript step 10", {
+      message: "transcript text-file fallback started",
+      recordFileId,
+      event,
+      sourceKind,
+      recorderSummaryFallback,
+    });
     const summaryResult = await fetchTencentMeetingSummaryTranscript(info, durationMs, failureKinds);
+    logger.info("[call] fetchTencentMeetingBuiltInTranscript step 11", {
+      message: "transcript text-file fallback completed",
+      recordFileId,
+      event,
+      sourceKind,
+      segmentCount: Number(summaryResult?.segments?.length || 0),
+    });
     if (summaryResult?.segments?.length > 0) return summaryResult;
   }
-  logger.info("[CALL] fetchTencentMeetingBuiltInTranscript", {message: `未获取到转写内容`});
   const failureKind = dominantTencentMeetingTranscriptFailure(failureKinds);
+  logger.warn("[call] fetchTencentMeetingBuiltInTranscript step 12", {
+    message: "built-in transcript lookup completed without content",
+    recordFileId,
+    event,
+    sourceKind,
+    identityCount: operatorParamsList.length,
+    failureKinds,
+    failureKind,
+  });
   return {
     segments: [],
     unavailable: true,
@@ -1607,32 +1703,105 @@ async function storeTencentMeetingBuiltInTranscript(recordingId, transcriptResul
 
 async function syncTencentMeetingBuiltInTranscript(recordingId, info = {}, jobVersion = recordingJobVersion(recordingId)) {
   const recordFileId = String(info.recordFileId || info.record_file_id || "").trim();
-  logger.info("[CALL] syncTencentMeetingBuiltInTranscript", {
-    message: `recordingId: ${recordingId}, recordFileId: ${recordFileId}, event: ${info.event || ""}, sourceKind: ${info.sourceKind || ""}`,
+  const event = String(info.event || "").trim();
+  const sourceKind = String(info.sourceKind || "").trim();
+  logger.info("[call] syncTencentMeetingBuiltInTranscript step 0", {
+    message: "transcript synchronization started",
+    recordingId,
+    recordFileId,
+    event,
+    sourceKind,
+    jobVersion,
   });
   if (isRecordingJobCancelled(recordingId, jobVersion)) {
+    logger.info("[call] syncTencentMeetingBuiltInTranscript step 1", {
+      message: "transcript synchronization skipped because the job was cancelled",
+      recordingId,
+      recordFileId,
+      event,
+      sourceKind,
+      jobVersion,
+      reason: "job_cancelled",
+    });
     return false;
   }
-  if (!isTencentMeetingTranscriptSyncEvent({ event: info.event })) {
-    logger.info("[Tencent Meeting] transcript sync skipped", { message: "event does not support transcript synchronization" });
+  if (!isTencentMeetingTranscriptSyncEvent({ event })) {
+    logger.info("[call] syncTencentMeetingBuiltInTranscript step 2", {
+      message: "transcript synchronization skipped because the event is unsupported",
+      recordingId,
+      recordFileId,
+      event,
+      sourceKind,
+      reason: "unsupported_event",
+    });
     return false;
   }
   const recordingRow = await prisma.recording.findFirst({
     where: { id: recordingId, deletedAt: null },
   });
   if (!recordingRow) {
+    logger.warn("[call] syncTencentMeetingBuiltInTranscript step 3", {
+      message: "transcript synchronization skipped because the recording was not found",
+      recordingId,
+      recordFileId,
+      event,
+      sourceKind,
+      reason: "recording_not_found",
+    });
     return false;
   }
   const recording = recordingFromPrisma(recordingRow);
   const existingSegmentCount = await prisma.transcriptSegment.count({ where: { recordingId } });
-  logger.info("[CALL] syncTencentMeetingBuiltInTranscript", {message: `transcriptSource: ${recording.transcriptSource}, existingSegments.length: ${existingSegmentCount}`});
+  logger.info("[call] syncTencentMeetingBuiltInTranscript step 4", {
+    message: "recording transcript state loaded",
+    recordingId,
+    recordFileId,
+    event,
+    sourceKind,
+    recordingStatus: String(recording.status || ""),
+    transcriptSource: String(recording.transcriptSource || ""),
+    existingSegmentCount,
+  });
   if (existingSegmentCount > 0 && recording.transcriptSource === "tencent-meeting") {
-    logger.info("[CALL] syncTencentMeetingBuiltInTranscript", {message: `已有撰写片段，且转写来源是腾讯会议，无需同步转写`});
+    logger.info("[call] syncTencentMeetingBuiltInTranscript step 5", {
+      message: "transcript synchronization skipped because Tencent Meeting content is already stored",
+      recordingId,
+      recordFileId,
+      event,
+      sourceKind,
+      existingSegmentCount,
+      reason: "already_synchronized",
+    });
     return true;
   }
-  logger.info("[CALL] syncTencentMeetingBuiltInTranscript", {message: `开始同步转写`});
+  logger.info("[call] syncTencentMeetingBuiltInTranscript step 6", {
+    message: "built-in transcript lookup started",
+    recordingId,
+    recordFileId,
+    event,
+    sourceKind,
+  });
   const transcriptResult = await fetchTencentMeetingBuiltInTranscript(info, recording.durationMs || info.durationMs || 0);
+  logger.info("[call] syncTencentMeetingBuiltInTranscript step 7", {
+    message: "built-in transcript lookup completed",
+    recordingId,
+    recordFileId,
+    event,
+    sourceKind,
+    segmentCount: Number(transcriptResult?.segments?.length || 0),
+    failureKind: String(transcriptResult?.failureKind || ""),
+    unavailable: Boolean(transcriptResult?.unavailable),
+  });
   if (isRecordingJobCancelled(recordingId, jobVersion)) {
+    logger.info("[call] syncTencentMeetingBuiltInTranscript step 8", {
+      message: "transcript synchronization stopped after lookup because the job was cancelled",
+      recordingId,
+      recordFileId,
+      event,
+      sourceKind,
+      jobVersion,
+      reason: "job_cancelled_after_lookup",
+    });
     return false;
   }
   if (!transcriptResult?.segments?.length) {
@@ -1659,9 +1828,30 @@ async function syncTencentMeetingBuiltInTranscript(recordingId, info = {}, jobVe
         },
       });
     }
+    logger.warn("[call] syncTencentMeetingBuiltInTranscript step 9", {
+      message: "transcript synchronization completed without content",
+      recordingId,
+      recordFileId,
+      event,
+      sourceKind,
+      failureKind,
+      final: finalStatus.final,
+      statusText: finalStatus.statusText,
+      transcriptSource: finalStatus.transcriptSource,
+    });
     return false;
   }
-  return storeTencentMeetingBuiltInTranscript(recordingId, transcriptResult, jobVersion);
+  const stored = await storeTencentMeetingBuiltInTranscript(recordingId, transcriptResult, jobVersion);
+  logger.info("[call] syncTencentMeetingBuiltInTranscript step 10", {
+    message: "transcript persistence completed",
+    recordingId,
+    recordFileId,
+    event,
+    sourceKind,
+    segmentCount: transcriptResult.segments.length,
+    stored,
+  });
+  return stored;
 }
 
 async function downloadTencentMeetingFile(url, targetPath) {
@@ -2048,10 +2238,47 @@ function waitForTencentMeetingTranscriptRetry(recordingId, delayMs) {
 
 async function runTencentMeetingTranscriptSyncAttempts(recordingId, info, jobVersion) {
   const maxAttempts = tencentMeetingTranscriptSyncMaxAttempts(info);
+  const logContext = {
+    recordingId,
+    recordFileId: String(info?.recordFileId || ""),
+    event: String(info?.event || ""),
+    sourceKind: String(info?.sourceKind || ""),
+    jobVersion,
+    maxAttempts,
+  };
+  logger.info("[call] runTencentMeetingTranscriptSyncAttempts step 0", {
+    message: "transcript synchronization attempts started",
+    ...logContext,
+  });
   for (let attempt = 1; attempt <= maxAttempts; attempt += 1) {
+    logger.info("[call] runTencentMeetingTranscriptSyncAttempts step 1", {
+      message: "transcript synchronization attempt started",
+      ...logContext,
+      attempt,
+    });
     const stored = await syncTencentMeetingBuiltInTranscript(recordingId, info, jobVersion);
-    if (stored) return { stored: true, outcome: "completed", attempt, maxAttempts };
+    logger.info("[call] runTencentMeetingTranscriptSyncAttempts step 2", {
+      message: "transcript synchronization attempt completed",
+      ...logContext,
+      attempt,
+      stored,
+    });
+    if (stored) {
+      logger.info("[call] runTencentMeetingTranscriptSyncAttempts step 3", {
+        message: "transcript synchronization attempts finished",
+        ...logContext,
+        attempt,
+        outcome: "completed",
+      });
+      return { stored: true, outcome: "completed", attempt, maxAttempts };
+    }
     if (isRecordingJobCancelled(recordingId, jobVersion)) {
+      logger.info("[call] runTencentMeetingTranscriptSyncAttempts step 3", {
+        message: "transcript synchronization attempts finished",
+        ...logContext,
+        attempt,
+        outcome: "cancelled",
+      });
       return { stored: false, outcome: "cancelled", attempt, maxAttempts };
     }
 
@@ -2063,11 +2290,31 @@ async function runTencentMeetingTranscriptSyncAttempts(recordingId, info, jobVer
         transcriptSource: true,
       },
     });
-    if (!recording) return { stored: false, outcome: "recording_missing", attempt, maxAttempts };
+    if (!recording) {
+      logger.warn("[call] runTencentMeetingTranscriptSyncAttempts step 3", {
+        message: "transcript synchronization attempts finished",
+        ...logContext,
+        attempt,
+        outcome: "recording_missing",
+      });
+      return { stored: false, outcome: "recording_missing", attempt, maxAttempts };
+    }
     if (recording.transcriptSource === "tencent-meeting-unavailable") {
+      logger.warn("[call] runTencentMeetingTranscriptSyncAttempts step 3", {
+        message: "transcript synchronization attempts finished",
+        ...logContext,
+        attempt,
+        outcome: "unavailable",
+      });
       return { stored: false, outcome: "unavailable", attempt, maxAttempts };
     }
     if (attempt >= maxAttempts) {
+      logger.warn("[call] runTencentMeetingTranscriptSyncAttempts step 3", {
+        message: "transcript synchronization attempts exhausted",
+        ...logContext,
+        attempt,
+        outcome: "not_stored",
+      });
       return { stored: false, outcome: "not_stored", attempt, maxAttempts };
     }
 
@@ -2075,50 +2322,118 @@ async function runTencentMeetingTranscriptSyncAttempts(recordingId, info, jobVer
       createdAt: recording.createdAt?.toISOString?.() || recording.createdAt,
       updatedAt: recording.updatedAt?.toISOString?.() || recording.updatedAt,
     });
+    logger.info("[call] runTencentMeetingTranscriptSyncAttempts step 4", {
+      message: "transcript synchronization retry scheduled",
+      ...logContext,
+      attempt,
+      nextAttempt: attempt + 1,
+      retryDelayMs,
+    });
     await waitForTencentMeetingTranscriptRetry(recordingId, retryDelayMs);
+    logger.info("[call] runTencentMeetingTranscriptSyncAttempts step 5", {
+      message: "transcript synchronization retry resumed",
+      ...logContext,
+      attempt,
+      nextAttempt: attempt + 1,
+    });
   }
+  logger.warn("[call] runTencentMeetingTranscriptSyncAttempts step 6", {
+    message: "transcript synchronization attempts exited without storing content",
+    ...logContext,
+    outcome: "not_stored",
+  });
   return { stored: false, outcome: "not_stored", attempt: maxAttempts, maxAttempts };
 }
 
 function queueTencentMeetingTranscriptSync(recordingId, info = {}) {
-  logger.info("[call] queueTencentMeetingTranscriptSync step 0", {
-    message: "transcript synchronization enqueue requested",
+  const logContext = {
     recordingId,
     recordFileId: String(info.recordFileId || ""),
     event: String(info.event || ""),
+    sourceKind: String(info.sourceKind || ""),
+  };
+  logger.info("[call] queueTencentMeetingTranscriptSync step 0", {
+    message: "transcript synchronization enqueue requested",
+    ...logContext,
   });
-  logger.info("call queueTencentMeetingTranscriptSync: ", {message: 'step 0'})
   if (!recordingId) {
+    logger.warn("[call] queueTencentMeetingTranscriptSync step 1", {
+      message: "transcript synchronization enqueue skipped",
+      ...logContext,
+      reason: "missing_recording_id",
+    });
     return false;
   }
   if (isRecordingJobCancelled(recordingId)) {
+    logger.info("[call] queueTencentMeetingTranscriptSync step 2", {
+      message: "transcript synchronization enqueue skipped",
+      ...logContext,
+      reason: "job_cancelled",
+    });
     return false;
   }
   if (tencentMeetingTranscriptJobs.has(recordingId)) {
     if (String(info.event || "") === "smart.transcripts") {
       tencentMeetingTranscriptRetrySignals.add(recordingId);
       tencentMeetingTranscriptRetryWakeups.get(recordingId)?.();
-      logger.info("[call] queueTencentMeetingTranscriptSync step 1", {
+      logger.info("[call] queueTencentMeetingTranscriptSync step 3", {
         message: "existing recorder transcript retry awakened by smart.transcripts",
-        recordingId,
-        recordFileId: String(info.recordFileId || ""),
+        ...logContext,
+        reason: "smart_transcripts_wakeup",
       });
       return false;
     }
-    logger.info("call queueTencentMeetingTranscriptSync: ", {message: '已有这个任务'})
+    logger.info("[call] queueTencentMeetingTranscriptSync step 3", {
+      message: "transcript synchronization enqueue coalesced with an existing job",
+      ...logContext,
+      reason: "job_already_queued",
+    });
     return false;
   }
   const jobVersion = recordingJobVersion(recordingId);
   tencentMeetingTranscriptJobs.add(recordingId);
+  logger.info("[call] queueTencentMeetingTranscriptSync step 4", {
+    message: "transcript synchronization job queued",
+    ...logContext,
+    jobVersion,
+  });
   setTimeout(() => {
+    logger.info("[call] queueTencentMeetingTranscriptSync step 5", {
+      message: "transcript synchronization job started",
+      ...logContext,
+      jobVersion,
+    });
     runTencentMeetingTranscriptSyncAttempts(recordingId, info, jobVersion)
+      .then((result) => {
+        logger.info("[call] queueTencentMeetingTranscriptSync step 6", {
+          message: "transcript synchronization job completed",
+          ...logContext,
+          jobVersion,
+          stored: Boolean(result?.stored),
+          outcome: String(result?.outcome || ""),
+          attempt: Number(result?.attempt || 0),
+          maxAttempts: Number(result?.maxAttempts || 0),
+        });
+      })
       .catch((error) => {
-        console.warn("[Tencent Meeting] transcript sync failed:", error instanceof Error ? error.message : error);
+        logger.error("[call] queueTencentMeetingTranscriptSync step 7", {
+          message: "transcript synchronization job failed",
+          ...logContext,
+          jobVersion,
+          errorCode: String(error?.code || ""),
+          errorMessage: error instanceof Error ? error.message : String(error),
+        });
       })
       .finally(() => {
         if (recordingJobVersion(recordingId) === jobVersion) tencentMeetingTranscriptJobs.delete(recordingId);
         tencentMeetingTranscriptRetrySignals.delete(recordingId);
         tencentMeetingTranscriptRetryWakeups.delete(recordingId);
+        logger.info("[call] queueTencentMeetingTranscriptSync step 8", {
+          message: "transcript synchronization job cleaned up",
+          ...logContext,
+          jobVersion,
+          stillQueued: tencentMeetingTranscriptJobs.has(recordingId),
+        });
       });
   }, 80);
   return true;
@@ -2369,25 +2684,31 @@ async function importTencentMeetingWebhookPayload(
   });
 
   for (const result of results) {
+    let transcriptQueued = false;
     if (syncTranscript) {
-      queueTencentMeetingTranscriptSync(result.recordingId, {
+      transcriptQueued = queueTencentMeetingTranscriptSync(result.recordingId, {
         ...result.info,
         event: payload.event,
       });
     }
+    let audioQueued = false;
     if (syncAudio) {
-      const audioQueued = queueTencentMeetingImportSync(result.recordingId, {
+      audioQueued = queueTencentMeetingImportSync(result.recordingId, {
         ...result.info,
         event,
       });
-      logger.info("[call] importTencentMeetingWebhookPayload step 4", {
-        message: "audio synchronization enqueue completed",
-        event,
-        recordingId: result.recordingId,
-        recordFileId: result.recordFileId,
-        audioQueued,
-      });
     }
+    logger.info("[call] importTencentMeetingWebhookPayload step 4", {
+      message: "recording background jobs enqueue completed",
+      event,
+      recordingId: result.recordingId,
+      recordFileId: result.recordFileId,
+      sourceKind: result.info?.sourceKind || "",
+      syncTranscript,
+      transcriptQueued,
+      syncAudio,
+      audioQueued,
+    });
   }
 
   logger.info("[call] importTencentMeetingWebhookPayload step 5", {
