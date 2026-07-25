@@ -1160,10 +1160,41 @@ async function fetchTencentMeetingSummaryTranscript(info = {}, durationMs = 0, f
   return null;
 }
 
+function tencentMeetingLookupIdentityKind(params = {}) {
+  if (params.userid) return "userid";
+  if (params.operator_id) return "operator_id";
+  return "unknown";
+}
+
+function tencentMeetingLookupPayloadKeys(value) {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return [];
+  return Object.keys(value).sort().slice(0, 30);
+}
+
+function tencentMeetingLookupErrorMessage(error) {
+  return String(error instanceof Error ? error.message : error)
+    .replace(/([?&](?:userid|operator_id|operator_id_type)=)[^&\s]+/gi, "$1[redacted]")
+    .slice(0, 500);
+}
+
 async function findTencentMeetingDownloadTarget(info) {
   const recordFileId = String(info?.recordFileId || "").trim();
-  if (!recordFileId) return null;
+  logger.info("[call] findTencentMeetingDownloadTarget step 0", {
+    message: "download target resolution started",
+    recordFileId,
+    hasProvidedDownloadUrl: Boolean(info?.downloadUrl),
+  });
+  if (!recordFileId) {
+    logger.warn("[call] findTencentMeetingDownloadTarget step 1", {
+      message: "download target resolution skipped: record_file_id is missing",
+    });
+    return null;
+  }
   if (info.downloadUrl) {
+    logger.info("[call] findTencentMeetingDownloadTarget step 2", {
+      message: "using download URL supplied by normalized recording information",
+      recordFileId,
+    });
     return {
       record: info.record || {},
       file: info.file || {},
@@ -1174,20 +1205,59 @@ async function findTencentMeetingDownloadTarget(info) {
       downloadUrl: info.downloadUrl,
     };
   }
-  if (!tencentMeetingApiConfigured()) return null;
+  if (!tencentMeetingApiConfigured()) {
+    logger.warn("[call] findTencentMeetingDownloadTarget step 3", {
+      message: "download target resolution skipped: Tencent Meeting API is not configured",
+      recordFileId,
+    });
+    return null;
+  }
   const { startTime, endTime } = tencentMeetingSearchWindow(info);
-  logger.log("[call] findTencentMeetingDownloadTarget ", {message: `startTime: ${startTime}, endTime: ${endTime}`})
   const identityParams = tencentMeetingCandidateDownloadIdentityParams(info);
-  if (!identityParams.length) return null;
+  logger.info("[call] findTencentMeetingDownloadTarget step 4", {
+    message: "download lookup context prepared",
+    recordFileId,
+    identityCount: identityParams.length,
+    identityKinds: [...new Set(identityParams.map(tencentMeetingLookupIdentityKind))],
+    startTime,
+    endTime,
+  });
+  if (!identityParams.length) {
+    logger.warn("[call] findTencentMeetingDownloadTarget step 5", {
+      message: "download target resolution skipped: no candidate Tencent Meeting identity",
+      recordFileId,
+    });
+    return null;
+  }
   await requestTencentMeetingStsTokenIfNeeded();
+  logger.info("[call] findTencentMeetingDownloadTarget step 6", {
+    message: "STS token readiness check completed",
+    recordFileId,
+  });
 
-  for (const params of identityParams) {
+  for (const [identityIndex, params] of identityParams.entries()) {
+    const identityKind = tencentMeetingLookupIdentityKind(params);
     const uri = tencentMeetingQuery(`/v1/addresses/${encodeURIComponent(recordFileId)}`, params);
     try {
       const payload = await tencentMeetingApiRequest("GET", uri);
       const file = payload.record_file || payload.file || payload.data || payload;
       const downloadUrl = tencentMeetingDownloadUrlFromFile(file);
+      logger.info("[call] findTencentMeetingDownloadTarget step 7", {
+        message: "recording address lookup completed",
+        recordFileId,
+        identityIndex,
+        identityKind,
+        payloadKeys: tencentMeetingLookupPayloadKeys(payload),
+        fileKeys: tencentMeetingLookupPayloadKeys(file),
+        hasDownloadUrl: Boolean(downloadUrl),
+      });
       if (downloadUrl) {
+        logger.info("[call] findTencentMeetingDownloadTarget step 8", {
+          message: "download target resolved from recording address API",
+          recordFileId,
+          identityIndex,
+          identityKind,
+        });
         return {
           record: payload,
           file,
@@ -1200,11 +1270,23 @@ async function findTencentMeetingDownloadTarget(info) {
         };
       }
     } catch (error) {
-      console.warn("[Tencent Meeting] address lookup skipped:", error instanceof Error ? error.message : error);
+      logger.warn("[call] findTencentMeetingDownloadTarget step 9", {
+        message: "recording address lookup failed",
+        recordFileId,
+        identityIndex,
+        identityKind,
+        errorMessage: tencentMeetingLookupErrorMessage(error),
+      });
     }
   }
 
-  for (const operatorParams of tencentMeetingCandidateOperatorParams()) {
+  const operatorParamsList = tencentMeetingCandidateOperatorParams();
+  logger.info("[call] findTencentMeetingDownloadTarget step 10", {
+    message: "falling back to corporate recording list lookup",
+    recordFileId,
+    operatorIdentityCount: operatorParamsList.length,
+  });
+  for (const [operatorIndex, operatorParams] of operatorParamsList.entries()) {
     for (let page = 1; page <= 10; page += 1) {
       const uri = tencentMeetingQuery("/v1/corp/records", {
         start_time: startTime,
@@ -1215,10 +1297,28 @@ async function findTencentMeetingDownloadTarget(info) {
       });
       try {
         const payload = await tencentMeetingApiRequest("GET", uri);
-        for (const record of tencentMeetingRecordsFromPayload(payload)) {
+        const records = tencentMeetingRecordsFromPayload(payload);
+        logger.info("[call] findTencentMeetingDownloadTarget step 11", {
+          message: "corporate recording list lookup completed",
+          recordFileId,
+          operatorIndex,
+          page,
+          recordCount: records.length,
+          payloadKeys: tencentMeetingLookupPayloadKeys(payload),
+        });
+        for (const record of records) {
           for (const file of tencentMeetingRecordFiles(record)) {
             const fileId = tencentMeetingRecordFileId(file);
             if (fileId !== recordFileId) continue;
+            const downloadUrl = tencentMeetingDownloadUrlFromFile(file);
+            logger.info("[call] findTencentMeetingDownloadTarget step 12", {
+              message: "matching recording found in corporate recording list",
+              recordFileId,
+              operatorIndex,
+              page,
+              fileKeys: tencentMeetingLookupPayloadKeys(file),
+              hasDownloadUrl: Boolean(downloadUrl),
+            });
             return {
               record,
               file,
@@ -1226,20 +1326,32 @@ async function findTencentMeetingDownloadTarget(info) {
               ownerName: tencentMeetingOwnerNameFromDetail(record, file, info.ownerName),
               creatorUserid: tencentMeetingCreatorUseridFromDetail(record, file, info.creatorUserid),
               durationMs: tencentMeetingDurationMsFromFile(file, record.meeting_info || record.meetingInfo || record, record),
-              downloadUrl: tencentMeetingDownloadUrlFromFile(file),
+              downloadUrl,
             };
           }
         }
         const hasMore = Boolean(payload.has_remaining || payload.has_more || payload.data?.has_more);
         if (!hasMore) break;
       } catch (error) {
-        console.warn("[Tencent Meeting] corp record lookup skipped:", error instanceof Error ? error.message : error);
+        logger.warn("[call] findTencentMeetingDownloadTarget step 13", {
+          message: "corporate recording list lookup failed",
+          recordFileId,
+          operatorIndex,
+          page,
+          errorMessage: tencentMeetingLookupErrorMessage(error),
+        });
         break;
       }
     }
   }
 
-  for (const params of identityParams) {
+  logger.info("[call] findTencentMeetingDownloadTarget step 14", {
+    message: "falling back to user recording list lookup",
+    recordFileId,
+    identityCount: identityParams.length,
+  });
+  for (const [identityIndex, params] of identityParams.entries()) {
+    const identityKind = tencentMeetingLookupIdentityKind(params);
     const listUri = tencentMeetingQuery("/v1/records", {
       start_time: startTime,
       end_time: endTime,
@@ -1249,10 +1361,28 @@ async function findTencentMeetingDownloadTarget(info) {
     });
     try {
       const payload = await tencentMeetingApiRequest("GET", listUri);
-      for (const record of tencentMeetingRecordsFromPayload(payload)) {
+      const records = tencentMeetingRecordsFromPayload(payload);
+      logger.info("[call] findTencentMeetingDownloadTarget step 15", {
+        message: "user recording list lookup completed",
+        recordFileId,
+        identityIndex,
+        identityKind,
+        recordCount: records.length,
+        payloadKeys: tencentMeetingLookupPayloadKeys(payload),
+      });
+      for (const record of records) {
         for (const file of tencentMeetingRecordFiles(record)) {
           const fileId = tencentMeetingRecordFileId(file);
           if (fileId !== recordFileId) continue;
+          const downloadUrl = tencentMeetingDownloadUrlFromFile(file);
+          logger.info("[call] findTencentMeetingDownloadTarget step 16", {
+            message: "matching recording found in user recording list",
+            recordFileId,
+            identityIndex,
+            identityKind,
+            fileKeys: tencentMeetingLookupPayloadKeys(file),
+            hasDownloadUrl: Boolean(downloadUrl),
+          });
           return {
             record,
             file,
@@ -1261,15 +1391,25 @@ async function findTencentMeetingDownloadTarget(info) {
             ownerName: tencentMeetingOwnerNameFromDetail(record, file, info.ownerName),
             creatorUserid: tencentMeetingCreatorUseridFromDetail(record, file, info.creatorUserid),
             durationMs: tencentMeetingDurationMsFromFile(file, record.meeting_info || record.meetingInfo || record, record),
-            downloadUrl: tencentMeetingDownloadUrlFromFile(file),
+            downloadUrl,
           };
         }
       }
     } catch (error) {
-      console.warn("[Tencent Meeting] user record lookup skipped:", error instanceof Error ? error.message : error);
+      logger.warn("[call] findTencentMeetingDownloadTarget step 17", {
+        message: "user recording list lookup failed",
+        recordFileId,
+        identityIndex,
+        identityKind,
+        errorMessage: tencentMeetingLookupErrorMessage(error),
+      });
     }
   }
 
+  logger.warn("[call] findTencentMeetingDownloadTarget step 18", {
+    message: "download target could not be resolved by any supported lookup",
+    recordFileId,
+  });
   return null;
 }
 
