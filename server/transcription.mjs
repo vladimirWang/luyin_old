@@ -3481,32 +3481,98 @@ export async function generateRecordingTag(recording, segments = []) {
 
 export async function generateMeetingOutline(recording, segments = []) {
   const expandedSegments = expandTranscriptSegments(segments, recording.durationMs || 0);
+  const recordingId = String(recording?.id || "");
+  const transcriptCharacterCount = expandedSegments.reduce(
+    (total, segment) => total + String(segment?.text || "").length,
+    0,
+  );
+  logger.info("[call] generateMeetingOutline step 0", {
+    message: "meeting outline generation requested",
+    recordingId,
+    segmentCount: expandedSegments.length,
+    transcriptCharacterCount,
+    durationMs: Number(recording?.durationMs || 0),
+  });
   if (expandedSegments.length === 0) {
+    logger.info("[call] generateMeetingOutline step 1", {
+      message: "meeting outline generation switched to local fallback",
+      recordingId,
+      reason: "transcript_empty",
+    });
     return localMeetingOutline(recording, expandedSegments);
   }
 
   const config = getQuestionAnsweringConfig();
+  let endpointTarget = "";
+  try {
+    const parsedEndpoint = new URL(config.endpoint);
+    endpointTarget = `${parsedEndpoint.origin}${parsedEndpoint.pathname}`;
+  } catch {
+    endpointTarget = config.endpoint ? "invalid_url" : "";
+  }
+  logger.info("[call] generateMeetingOutline step 2", {
+    message: "meeting outline model configuration evaluated",
+    recordingId,
+    provider: config.provider || "",
+    model: config.model || "",
+    endpointTarget,
+    endpointConfigured: Boolean(config.endpoint),
+    apiKeyConfigured: Boolean(config.apiKey),
+  });
   if (!config.endpoint || !config.apiKey) {
+    logger.warn("[call] generateMeetingOutline step 3", {
+      message: "meeting outline generation switched to local fallback",
+      recordingId,
+      provider: config.provider || "",
+      model: config.model || "",
+      reason: !config.endpoint ? "endpoint_missing" : "api_key_missing",
+    });
     return localMeetingOutline(recording, expandedSegments, "missing LLM_API_KEY");
   }
 
-  const transcript = expandedSegments
+  const transcriptLimit = Math.max(12000, numeric(env("LLM_MEETING_TRANSCRIPT_LIMIT", "22000"), 22000));
+  const fullTranscript = expandedSegments
     .map((segment) => {
       const speaker = segment.speakerName || segment.speakerKey || "说话人";
       return `[${formatTime(segment.startMs)}-${formatTime(segment.endMs)} | ${speaker}] ${segment.text}`;
     })
-    .join("\n")
-    .slice(0, Math.max(12000, numeric(env("LLM_MEETING_TRANSCRIPT_LIMIT", "22000"), 22000)));
+    .join("\n");
+  const transcript = fullTranscript.slice(0, transcriptLimit);
 
   const headers = { "Content-Type": "application/json" };
   if (config.provider === "mimo") headers["api-key"] = config.apiKey;
   else headers.Authorization = `Bearer ${config.apiKey}`;
 
   const timeoutMs = Math.max(3000, numeric(env("LLM_MEETING_TIMEOUT_MS", "120000"), 120000));
+  const maxCompletionTokens = Math.max(
+    3000,
+    numeric(env("LLM_MEETING_MAX_TOKENS", env("LLM_MAX_COMPLETION_TOKENS", "6000")), 6000),
+  );
+  logger.info("[call] generateMeetingOutline step 4", {
+    message: "meeting outline model request prepared",
+    recordingId,
+    provider: config.provider || "",
+    model: config.model || "",
+    segmentCount: expandedSegments.length,
+    transcriptCharacterCount,
+    requestTranscriptCharacters: transcript.length,
+    transcriptTruncated: transcript.length < fullTranscript.length,
+    transcriptLimit,
+    timeoutMs,
+    maxCompletionTokens,
+  });
 
+  const requestStartedAt = Date.now();
   try {
     const controller = new AbortController();
     let timeoutHandle;
+    logger.info("[call] generateMeetingOutline step 5", {
+      message: "meeting outline model request started",
+      recordingId,
+      provider: config.provider || "",
+      model: config.model || "",
+      endpointTarget,
+    });
     const response = await Promise.race([
       fetch(config.endpoint, {
       method: "POST",
@@ -3525,7 +3591,7 @@ export async function generateMeetingOutline(recording, segments = []) {
             content: `录音名称：${recording.name}\n录音编号：${String(recording.seq).padStart(3, "0")}\n录音转写：\n${transcript}\n\n固定会议报告大纲如下，每次都必须使用这个结构和标题顺序：\n${MEETING_REPORT_TEMPLATE}\n\n请生成结构化会议报告 JSON，字段如下：\n{\n  "title": "会议主题，不超过24字",\n  "summary": "会议总体结论，2到4句话",\n  "keywords": ["从第七部分会议总结里提炼出的关键词1", "关键词2", "关键词3"],\n  "reportMarkdown": "严格按固定大纲写出的完整会议报告，保留 Markdown 标题、列表和表格。必须包含一到七所有章节。没有提到的信息写未明确，不要编造，不要复制逐字稿长段原文。",\n  "sections": [{"title":"议题名称","summary":"这一段讨论了什么","startMs":0,"endMs":30000,"evidence":"对应原文短句"}],\n  "mainPoints": [{"title":"主要内容标题","summary":"主要内容说明","startMs":0,"endMs":30000,"evidence":"对应原文短句"}],\n  "keyPoints": [{"title":"关键点","summary":"为什么重要","startMs":0,"endMs":30000,"evidence":"对应原文短句"}],\n  "decisions": [{"title":"已达成决定","summary":"决定内容","startMs":0,"endMs":30000,"evidence":"对应原文短句"}],\n  "actionItems": [{"title":"待办事项","summary":"要做什么","owner":"负责人，不明确则写未明确","due":"截止时间，不明确则写未明确","startMs":0,"endMs":30000,"evidence":"对应原文短句"}],\n  "risks": [{"title":"风险/问题","summary":"风险说明","startMs":0,"endMs":30000,"evidence":"对应原文短句"}]\n}\n如果某类没有内容，请返回空数组。keywords 必须是 2 到 3 个短词，适合放在录音卡片标记中，并且要和第七部分会议总结的方向一致。`,
           },
         ],
-        max_completion_tokens: Math.max(3000, numeric(env("LLM_MEETING_MAX_TOKENS", env("LLM_MAX_COMPLETION_TOKENS", "6000")), 6000)),
+        max_completion_tokens: maxCompletionTokens,
         response_format: { type: "json_object" },
         stream: false,
         temperature: 0.1,
@@ -3541,16 +3607,61 @@ export async function generateMeetingOutline(recording, segments = []) {
       clearTimeout(timeoutHandle);
     });
 
+    logger.info("[call] generateMeetingOutline step 6", {
+      message: "meeting outline model response received",
+      recordingId,
+      provider: config.provider || "",
+      model: config.model || "",
+      httpStatus: Number(response.status || 0),
+      responseOk: Boolean(response.ok),
+      responseContentType: String(response.headers.get("content-type") || ""),
+      responseContentLength: Number(response.headers.get("content-length") || 0),
+      durationMs: Date.now() - requestStartedAt,
+    });
     const payload = await readApiPayload(response, "LLM meeting outline");
-    const outlineText = cleanLlmAnswer(textFromPayload(payload));
+    const rawOutlineText = textFromPayload(payload);
+    const outlineText = cleanLlmAnswer(rawOutlineText);
+    logger.info("[call] generateMeetingOutline step 7", {
+      message: "meeting outline model payload extracted",
+      recordingId,
+      provider: config.provider || "",
+      model: config.model || "",
+      payloadKeys: payload && typeof payload === "object" ? Object.keys(payload).slice(0, 20) : [],
+      rawOutlineCharacters: rawOutlineText.length,
+      cleanedOutlineCharacters: outlineText.length,
+      hasUsableContent: Boolean(outlineText),
+    });
     if (!outlineText || answerLooksUnusable(outlineText)) {
+      logger.warn("[call] generateMeetingOutline step 8", {
+        message: "meeting outline model payload rejected",
+        recordingId,
+        provider: config.provider || "",
+        model: config.model || "",
+        reason: !outlineText ? "content_empty_after_cleaning" : "content_unusable",
+        rawOutlineCharacters: rawOutlineText.length,
+      });
       throw new Error("Meeting outline returned unusable content");
     }
     const parsed = extractJsonObject(outlineText);
     const reportMarkdown = safeMeetingReportMarkdown(parsed.reportMarkdown || parsed.report || parsed.markdown || "");
     const composedReport = composeMeetingReport(recording, parsed, expandedSegments);
+    logger.info("[call] generateMeetingOutline step 9", {
+      message: "meeting outline JSON parsed",
+      recordingId,
+      provider: config.provider || "",
+      model: config.model || "",
+      parsedKeys: Object.keys(parsed).slice(0, 30),
+      reportMarkdownCharacters: reportMarkdown.length,
+      sectionCount: Array.isArray(parsed.sections || parsed.outline) ? (parsed.sections || parsed.outline).length : 0,
+      mainPointCount: Array.isArray(parsed.mainPoints || parsed.main_points || parsed.contents)
+        ? (parsed.mainPoints || parsed.main_points || parsed.contents).length
+        : 0,
+      actionItemCount: Array.isArray(parsed.actionItems || parsed.action_items || parsed.todos)
+        ? (parsed.actionItems || parsed.action_items || parsed.todos).length
+        : 0,
+    });
 
-    return {
+    const result = {
       provider: config.provider,
       model: config.model,
       generatedAt: new Date().toISOString(),
@@ -3565,8 +3676,51 @@ export async function generateMeetingOutline(recording, segments = []) {
       actionItems: normalizeOutlineItems(parsed.actionItems || parsed.action_items || parsed.todos, "待办"),
       risks: normalizeOutlineItems(parsed.risks || parsed.questions, "风险"),
     };
+    logger.info("[call] generateMeetingOutline step 10", {
+      message: "meeting outline generation completed",
+      recordingId,
+      provider: result.provider || "",
+      model: result.model || "",
+      durationMs: Date.now() - requestStartedAt,
+      reportMarkdownCharacters: result.reportMarkdown.length,
+      reportSource: reportMarkdown && !transcriptLikeText(reportMarkdown) ? "model" : "composed",
+      sectionCount: result.sections.length,
+      mainPointCount: result.mainPoints.length,
+      keyPointCount: result.keyPoints.length,
+      decisionCount: result.decisions.length,
+      actionItemCount: result.actionItems.length,
+      riskCount: result.risks.length,
+    });
+    return result;
   } catch (error) {
-    console.warn("[Meeting outline] fallback:", error instanceof Error ? error.message : error);
+    const rawErrorMessage = error instanceof Error ? error.message : String(error);
+    const httpStatusMatch = rawErrorMessage.match(/LLM meeting outline failed:\s*(\d+)/i);
+    const failureKind =
+      error?.name === "AbortError" || /超过\s*\d+\s*秒|timeout|timed out/i.test(rawErrorMessage)
+        ? "timeout"
+        : httpStatusMatch
+          ? "http_error"
+          : /JSON|parse|Unexpected token|Expected/i.test(rawErrorMessage)
+            ? "parse_error"
+            : /unusable content/i.test(rawErrorMessage)
+              ? "unusable_content"
+              : "request_error";
+    logger.warn("[call] generateMeetingOutline step 11", {
+      message: "meeting outline generation failed and switched to local fallback",
+      recordingId,
+      provider: config.provider || "",
+      model: config.model || "",
+      endpointTarget,
+      durationMs: Date.now() - requestStartedAt,
+      failureKind,
+      httpStatus: Number(httpStatusMatch?.[1] || 0),
+      errorName: String(error?.name || ""),
+      errorCode: String(error?.code || ""),
+      errorMessage:
+        failureKind === "http_error"
+          ? `LLM meeting outline failed with HTTP ${httpStatusMatch?.[1] || "unknown"}`
+          : rawErrorMessage.slice(0, 300),
+    });
     return localMeetingOutline(recording, expandedSegments, "meeting outline failed");
   }
 }

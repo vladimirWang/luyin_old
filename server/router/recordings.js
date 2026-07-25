@@ -88,19 +88,46 @@ async function sendRecordingAudio(req, res, disposition = "inline") {
 }
 
 async function handleMeetingOutlineRequest(req, res, next) {
+  const recordingId = String(req.params.id || "");
+  const forceRefresh = req.method === "POST" || req.query.refresh === "1";
+  logger.info("[call] handleMeetingOutlineRequest step 0", {
+    message: "meeting outline HTTP request started",
+    recordingId,
+    method: req.method,
+    forceRefresh,
+  });
   try {
     const { findRecording, findSegments, canManageRecording, generateAndStoreMeetingOutline } = dependencies;
     const db = await loadDb();
     const clientId = requestClientIdBetter(req);
     const clientName = requestClientNameAndDecode(req);
     const recording = findRecording(db, req.params.id);
+    logger.info("[call] handleMeetingOutlineRequest step 1", {
+      message: "meeting outline recording lookup completed",
+      recordingId,
+      recordingFound: Boolean(recording),
+      deleted: Boolean(recording?.deletedAt),
+      storedOutlineStatus: String(recording?.meetingOutlineStatus || ""),
+      hasStoredOutline: Boolean(recording?.meetingOutline),
+    });
     if (!recording || recording.deletedAt || !canReadRecording(recording, clientId)) {
+      logger.info("[call] handleMeetingOutlineRequest step 2", {
+        message: "meeting outline HTTP request rejected",
+        recordingId,
+        reason: !recording ? "recording_not_found" : recording.deletedAt ? "recording_deleted" : "recording_not_readable",
+      });
       res.status(404).json({ error: "录音不存在" });
       return;
     }
 
-    const forceRefresh = req.method === "POST" || req.query.refresh === "1";
     if (!forceRefresh && recording.meetingOutline) {
+      logger.info("[call] handleMeetingOutlineRequest step 3", {
+        message: "stored meeting outline returned",
+        recordingId,
+        storedOutlineStatus: String(recording.meetingOutlineStatus || "ready"),
+        provider: String(recording.meetingOutline?.provider || ""),
+        localFallback: recording.meetingOutline?.provider === "local-fallback",
+      });
       res.json({
         outline: recording.meetingOutline,
         status: recording.meetingOutlineStatus || "ready",
@@ -117,19 +144,64 @@ async function handleMeetingOutlineRequest(req, res, next) {
     const outlineIsStale =
       recording.meetingOutlineStatus === "generating" &&
       (!Number.isFinite(outlineStartedAt) || Date.now() - outlineStartedAt >= outlineStaleMs);
+    logger.info("[call] handleMeetingOutlineRequest step 4", {
+      message: "meeting outline generation state evaluated",
+      recordingId,
+      forceRefresh,
+      storedOutlineStatus: String(recording.meetingOutlineStatus || ""),
+      outlineIsStale,
+      outlineAgeMs: Number.isFinite(outlineStartedAt) ? Math.max(0, Date.now() - outlineStartedAt) : 0,
+      outlineStaleMs,
+    });
     if (!forceRefresh && recording.meetingOutlineStatus === "generating" && !outlineIsStale) {
+      logger.info("[call] handleMeetingOutlineRequest step 5", {
+        message: "active meeting outline generation returned",
+        recordingId,
+        status: "generating",
+      });
       res.json({ outline: null, status: "generating" });
       return;
     }
 
     const segments = expandTranscriptSegments(findSegments(db, recording.id), recording.durationMs || 0);
+    logger.info("[call] handleMeetingOutlineRequest step 6", {
+      message: "meeting outline transcript loaded",
+      recordingId,
+      segmentCount: segments.length,
+      transcriptCharacterCount: segments.reduce(
+        (total, segment) => total + String(segment?.text || "").length,
+        0,
+      ),
+    });
     if (!segments.length) {
+      logger.warn("[call] handleMeetingOutlineRequest step 7", {
+        message: "meeting outline generation rejected",
+        recordingId,
+        reason: "transcript_empty",
+      });
       res.status(409).json({ error: "No transcript is available for meeting outline generation." });
       return;
     }
 
+    const trigger = forceRefresh ? "manual_refresh" : "manual_request";
+    logger.info("[call] handleMeetingOutlineRequest step 8", {
+      message: "meeting outline generation invoked",
+      recordingId,
+      trigger,
+      segmentCount: segments.length,
+    });
     const outline = await generateAndStoreMeetingOutline(recording.id, segments, {
       updateTag: canManageRecording(recording, clientId, clientName),
+      trigger,
+    });
+    logger.info("[call] handleMeetingOutlineRequest step 9", {
+      message: "meeting outline generation response prepared",
+      recordingId,
+      trigger,
+      outlinePresent: Boolean(outline),
+      provider: String(outline?.provider || ""),
+      localFallback: outline?.provider === "local-fallback",
+      status: outline ? "ready" : "failed",
     });
     res.json({
       outline,
@@ -137,6 +209,15 @@ async function handleMeetingOutlineRequest(req, res, next) {
       generatedAt: outline?.generatedAt || "",
     });
   } catch (error) {
+    logger.error("[call] handleMeetingOutlineRequest step 10", {
+      message: "meeting outline HTTP request failed",
+      recordingId,
+      method: req.method,
+      forceRefresh,
+      errorName: String(error?.name || ""),
+      errorCode: String(error?.code || ""),
+      errorMessage: (error instanceof Error ? error.message : String(error)).split("\n")[0].slice(0, 300),
+    });
     next(error);
   }
 }
@@ -148,6 +229,11 @@ router.get("/", async (request, response, next) => {
   const canDeleteAll = canDeleteAllRecordings();
   const query = String(request.query.q || request.query.search || "").trim().toLowerCase();
   const folderId = request.query.folderId || "all";
+  logger.info("[call] listRecordings step 0", {
+    message: "recording list request started",
+    folderId,
+    hasQuery: Boolean(query),
+  });
   try {
     const folderWhere =
       folderId === "trash"
@@ -163,6 +249,29 @@ router.get("/", async (request, response, next) => {
       where: folderWhere,
       include: { segments: { orderBy: { startMs: "asc" } } },
       orderBy: { createdAt: "desc" },
+    });
+    const tencentMeetingRows = rows
+      .filter((row) => isTencentMeetingRecording(recordingFromPrisma(row)))
+      .slice(0, 20)
+      .map((row) => {
+        const recording = recordingFromPrisma(row);
+        const syncInfo = tencentMeetingSyncInfoFromRecording(recording);
+        return {
+          recordingId: recording.id,
+          recordFileId: syncInfo.recordFileId || "",
+          sourceKind: syncInfo.sourceKind || "",
+          status: recording.status || "",
+          transcriptProvider: recording.transcriptProvider || "",
+          transcriptSource: recording.transcriptSource || "",
+          segmentCount: row.segments.length,
+        };
+      });
+    logger.info("[call] listRecordings step 1", {
+      message: "recording rows loaded",
+      rowCount: rows.length,
+      tencentMeetingCount: rows.filter((row) => isTencentMeetingRecording(recordingFromPrisma(row))).length,
+      tencentMeetingRows,
+      tencentMeetingRowsTruncated: tencentMeetingRows.length < rows.filter((row) => isTencentMeetingRecording(recordingFromPrisma(row))).length,
     });
     // for (let i of rows) {
     //   if (i.id === "429d3888-47b1-462e-84aa-4570f6a64162") {
@@ -189,8 +298,31 @@ router.get("/", async (request, response, next) => {
     //       .sort((a, b) => b.score - a.score || new Date(b.recording.createdAt) - new Date(a.recording.createdAt))
     //       .map((item) => item.recording)
     //   : recordings;
+    logger.info("[call] listRecordings step 2", {
+      message: "recording list response prepared",
+      recordingCount: recordings.length,
+      tencentMeetingRecordings: recordings
+        .filter((recording) => recording.tencentMeeting?.imported)
+        .slice(0, 20)
+        .map((recording) => ({
+          recordingId: recording.id,
+          sourceKind: recording.tencentMeeting?.sourceKind || "",
+          status: recording.status || "",
+          transcriptSource: recording.transcriptSource || "",
+          transcriptCount: recording.transcript?.length || 0,
+          waitingDownload: Boolean(recording.tencentMeeting?.waitingDownload),
+          waitingTranscript: Boolean(recording.tencentMeeting?.waitingTranscript),
+        })),
+    });
     response.json({ recordings });
   } catch (error) {
+    logger.error("[call] listRecordings step 3", {
+      message: "recording list request failed",
+      folderId,
+      hasQuery: Boolean(query),
+      errorCode: String(error?.code || ""),
+      errorMessage: error instanceof Error ? error.message : String(error),
+    });
     next(error);
   }
 });
@@ -396,17 +528,45 @@ router.post("/segments", upload.array("audio", 480), async (request, response, n
 
 router.get("/:id", async (request, response) => {
   const { findRecording, findSegments, publicRecording } = dependencies;
+  logger.info("[call] getRecordingDetail step 0", {
+    message: "recording detail request started",
+    recordingId: request.params.id,
+  });
   const db = await loadDb();
   const clientId = requestClientIdBetter(request);
   const clientName = requestClientNameAndDecode(request);
   const canDeleteAll = canDeleteAllRecordings();
   const recording = findRecording(db, request.params.id);
   if (!recording || recording.deletedAt || (!canDeleteAll && !canReadRecording(recording, clientId))) {
+    logger.info("[call] getRecordingDetail step 1", {
+      message: "recording detail request rejected",
+      recordingId: request.params.id,
+      reason: !recording ? "not_found" : recording.deletedAt ? "deleted" : "not_readable",
+    });
     response.status(404).json({ error: "录音不存在" });
     return;
   }
 
-  response.json({ recording: publicRecording(recording, findSegments(db, recording.id), clientId, clientName, { canDeleteAllRecordings: canDeleteAll }) });
+  const segments = findSegments(db, recording.id);
+  const publicResult = publicRecording(recording, segments, clientId, clientName, {
+    canDeleteAllRecordings: canDeleteAll,
+  });
+  const syncInfo = tencentMeetingSyncInfoFromRecording(recording);
+  logger.info("[call] getRecordingDetail step 2", {
+    message: "recording detail response prepared",
+    recordingId: recording.id,
+    recordFileId: syncInfo.recordFileId || "",
+    sourceKind: syncInfo.sourceKind || "",
+    storedStatus: recording.status || "",
+    responseStatus: publicResult.status || "",
+    transcriptProvider: recording.transcriptProvider || "",
+    transcriptSource: recording.transcriptSource || "",
+    storedSegmentCount: segments.length,
+    responseTranscriptCount: publicResult.transcript?.length || 0,
+    waitingDownload: Boolean(publicResult.tencentMeeting?.waitingDownload),
+    waitingTranscript: Boolean(publicResult.tencentMeeting?.waitingTranscript),
+  });
+  response.json({ recording: publicResult });
 });
 
 router.patch("/:id", async (request, response) => {
@@ -705,6 +865,7 @@ router.get("/:id/meeting-outline.pdf", async (request, response, next) => {
       }
       outline = await generateAndStoreMeetingOutline(recording.id, segments, {
         updateTag: canManageRecording(recording, clientId, clientName),
+        trigger: "outline_pdf",
       });
       const refreshedDb = await loadDb();
       pdfRecording = findRecording(refreshedDb, recording.id) || recording;

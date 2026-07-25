@@ -1695,7 +1695,10 @@ async function storeTencentMeetingBuiltInTranscript(recordingId, transcriptResul
   markDailyBriefDirtyForRecording(recordingId).catch((error) =>
     console.warn("[Tencent Meeting] daily brief dirty mark failed:", error instanceof Error ? error.message : error),
   );
-  generateAndStoreMeetingOutline(recordingId, segments, { updateTag: true }).catch((error) =>
+  generateAndStoreMeetingOutline(recordingId, segments, {
+    updateTag: true,
+    trigger: "tencent_transcript_sync",
+  }).catch((error) =>
     console.warn("[Tencent Meeting] outline generation after transcript sync failed:", error instanceof Error ? error.message : error),
   );
   return true;
@@ -4630,47 +4633,173 @@ function outlineTitleText(outline, recording) {
 }
 
 async function setMeetingOutlineState(recordingId, patch, jobVersion) {
-  if (isRecordingJobCancelled(recordingId, jobVersion)) return;
-  await prisma.recording.updateMany({
+  logger.info("[call] setMeetingOutlineState step 0", {
+    message: "meeting outline state update requested",
+    recordingId,
+    jobVersion,
+    status: String(patch?.meetingOutlineStatus || ""),
+    hasError: Boolean(patch?.meetingOutlineError),
+    hasStartedAt: Boolean(patch?.meetingOutlineStartedAt),
+  });
+  if (isRecordingJobCancelled(recordingId, jobVersion)) {
+    logger.info("[call] setMeetingOutlineState step 1", {
+      message: "meeting outline state update skipped",
+      recordingId,
+      jobVersion,
+      reason: "job_cancelled",
+    });
+    return 0;
+  }
+  const updated = await prisma.recording.updateMany({
     where: { id: recordingId, deletedAt: null },
     data: { ...patch, updatedAt: new Date() },
   });
+  logger.info("[call] setMeetingOutlineState step 2", {
+    message: "meeting outline state update completed",
+    recordingId,
+    jobVersion,
+    status: String(patch?.meetingOutlineStatus || ""),
+    updatedCount: updated.count,
+  });
+  return updated.count;
 }
 
 // 用于根据录音转写内容生成并保存会议大纲/会议提纲
 async function generateAndStoreMeetingOutline(recordingId, segments = [], options = {}) {
   const id = String(recordingId || "").trim();
-  if (!id || isRecordingJobCancelled(id)) return null;
+  const trigger = String(options.trigger || "unspecified");
+  logger.info("[call] generateAndStoreMeetingOutline step 0", {
+    message: "meeting outline job enqueue requested",
+    recordingId: id,
+    trigger,
+    suppliedSegmentCount: Array.isArray(segments) ? segments.length : 0,
+    updateTag: options.updateTag !== false,
+    updateName: options.updateName !== false,
+  });
+  if (!id || isRecordingJobCancelled(id)) {
+    logger.info("[call] generateAndStoreMeetingOutline step 1", {
+      message: "meeting outline job enqueue skipped",
+      recordingId: id,
+      trigger,
+      reason: !id ? "recording_id_missing" : "job_cancelled",
+    });
+    return null;
+  }
   const activeJob = meetingOutlineJobs.get(id);
-  if (activeJob) return activeJob;
+  if (activeJob) {
+    logger.info("[call] generateAndStoreMeetingOutline step 2", {
+      message: "meeting outline job coalesced with active job",
+      recordingId: id,
+      trigger,
+    });
+    return activeJob;
+  }
 
   const jobVersion = recordingJobVersion(id);
-  const job = runMeetingOutlineJob(id, segments, options, jobVersion);
+  logger.info("[call] generateAndStoreMeetingOutline step 3", {
+    message: "meeting outline job started",
+    recordingId: id,
+    trigger,
+    jobVersion,
+  });
+  const job = runMeetingOutlineJob(id, segments, { ...options, trigger }, jobVersion);
   meetingOutlineJobs.set(id, job);
   try {
-    return await job;
+    const outline = await job;
+    logger.info("[call] generateAndStoreMeetingOutline step 4", {
+      message: "meeting outline job completed",
+      recordingId: id,
+      trigger,
+      jobVersion,
+      outlineStored: Boolean(outline),
+      provider: String(outline?.provider || ""),
+      localFallback: outline?.provider === "local-fallback",
+    });
+    return outline;
   } finally {
     if (meetingOutlineJobs.get(id) === job) meetingOutlineJobs.delete(id);
+    logger.info("[call] generateAndStoreMeetingOutline step 5", {
+      message: "meeting outline job cleaned up",
+      recordingId: id,
+      trigger,
+      jobVersion,
+      stillQueued: meetingOutlineJobs.has(id),
+    });
   }
 }
 
 async function runMeetingOutlineJob(recordingId, segments = [], options = {}, jobVersion = recordingJobVersion(recordingId)) {
-  if (isRecordingJobCancelled(recordingId, jobVersion)) return null;
+  const trigger = String(options.trigger || "unspecified");
+  logger.info("[call] runMeetingOutlineJob step 0", {
+    message: "meeting outline job execution started",
+    recordingId,
+    trigger,
+    jobVersion,
+    suppliedSegmentCount: Array.isArray(segments) ? segments.length : 0,
+  });
+  if (isRecordingJobCancelled(recordingId, jobVersion)) {
+    logger.info("[call] runMeetingOutlineJob step 1", {
+      message: "meeting outline job execution skipped",
+      recordingId,
+      trigger,
+      jobVersion,
+      reason: "job_cancelled",
+    });
+    return null;
+  }
   const row = await prisma.recording.findFirst({
     where: { id: recordingId, deletedAt: null },
     include: { segments: { orderBy: { startMs: "asc" } } },
   });
   const recording = row ? recordingFromPrisma(row) : null;
-  if (!recording) return null;
+  logger.info("[call] runMeetingOutlineJob step 2", {
+    message: "meeting outline recording loaded",
+    recordingId,
+    trigger,
+    jobVersion,
+    recordingFound: Boolean(recording),
+    storedStatus: String(recording?.status || ""),
+    storedOutlineStatus: String(recording?.meetingOutlineStatus || ""),
+    storedSegmentCount: row?.segments?.length || 0,
+  });
+  if (!recording) {
+    logger.info("[call] runMeetingOutlineJob step 3", {
+      message: "meeting outline job execution stopped",
+      recordingId,
+      trigger,
+      jobVersion,
+      reason: "recording_not_found",
+    });
+    return null;
+  }
 
   const transcriptSegments = segments.length ? segments : row.segments.map(transcriptSegmentFromPrisma);
   const expandedSegments = expandTranscriptSegments(transcriptSegments, recording.durationMs || 0);
+  logger.info("[call] runMeetingOutlineJob step 4", {
+    message: "meeting outline transcript prepared",
+    recordingId,
+    trigger,
+    jobVersion,
+    segmentSource: segments.length ? "supplied" : "database",
+    segmentCount: expandedSegments.length,
+    transcriptCharacterCount: expandedSegments.reduce(
+      (total, segment) => total + String(segment?.text || "").length,
+      0,
+    ),
+  });
   if (!expandedSegments.length) {
     await setMeetingOutlineState(recordingId, {
       meetingOutlineStatus: "failed",
       meetingOutlineError: "当前还没有可用于生成会议提纲的转写内容。",
       meetingOutlineStartedAt: null,
     }, jobVersion);
+    logger.warn("[call] runMeetingOutlineJob step 5", {
+      message: "meeting outline job failed before model request",
+      recordingId,
+      trigger,
+      jobVersion,
+      reason: "transcript_empty",
+    });
     return null;
   }
 
@@ -4679,10 +4808,45 @@ async function runMeetingOutlineJob(recordingId, segments = [], options = {}, jo
     meetingOutlineError: "",
     meetingOutlineStartedAt: new Date(),
   }, jobVersion);
+  logger.info("[call] runMeetingOutlineJob step 6", {
+    message: "meeting outline generating state stored",
+    recordingId,
+    trigger,
+    jobVersion,
+  });
 
   try {
+    logger.info("[call] runMeetingOutlineJob step 7", {
+      message: "meeting outline provider generation started",
+      recordingId,
+      trigger,
+      jobVersion,
+      segmentCount: expandedSegments.length,
+    });
     const outline = await generateMeetingOutline(recording, expandedSegments);
-    if (isRecordingJobCancelled(recordingId, jobVersion)) return null;
+    logger.info("[call] runMeetingOutlineJob step 8", {
+      message: "meeting outline provider generation completed",
+      recordingId,
+      trigger,
+      jobVersion,
+      outlinePresent: Boolean(outline),
+      provider: String(outline?.provider || ""),
+      model: String(outline?.model || ""),
+      localFallback: outline?.provider === "local-fallback",
+      reportMarkdownCharacters: String(outline?.reportMarkdown || "").length,
+      sectionCount: Array.isArray(outline?.sections) ? outline.sections.length : 0,
+      actionItemCount: Array.isArray(outline?.actionItems) ? outline.actionItems.length : 0,
+    });
+    if (isRecordingJobCancelled(recordingId, jobVersion)) {
+      logger.info("[call] runMeetingOutlineJob step 9", {
+        message: "meeting outline job stopped after provider generation",
+        recordingId,
+        trigger,
+        jobVersion,
+        reason: "job_cancelled_after_generation",
+      });
+      return null;
+    }
     const outlineKeywords = outlineKeywordText(outline);
     const outlineTitle = outlineTitleText(outline, recording);
     const generatedAt = new Date(outline?.generatedAt || Date.now());
@@ -4699,19 +4863,64 @@ async function runMeetingOutlineJob(recordingId, segments = [], options = {}, jo
     if (options.updateName !== false && outlineTitle && isDefaultRecordingName(recording.name)) {
       data.name = outlineTitle;
     }
-    await prisma.recording.updateMany({
+    logger.info("[call] runMeetingOutlineJob step 10", {
+      message: "meeting outline persistence started",
+      recordingId,
+      trigger,
+      jobVersion,
+      outlineStatus,
+      provider: String(outline?.provider || ""),
+      localFallback: outline?.provider === "local-fallback",
+      outlineJsonCharacters: data.meetingOutlineJson?.length || 0,
+      updatesTag: Boolean(data.tag),
+      updatesName: Boolean(data.name),
+    });
+    const updated = await prisma.recording.updateMany({
       where: { id: recordingId, deletedAt: null },
       data,
     });
+    logger.info("[call] runMeetingOutlineJob step 11", {
+      message: "meeting outline persistence completed",
+      recordingId,
+      trigger,
+      jobVersion,
+      outlineStatus,
+      provider: String(outline?.provider || ""),
+      localFallback: outline?.provider === "local-fallback",
+      updatedCount: updated.count,
+    });
     return outline;
   } catch (error) {
-    if (isRecordingJobCancelled(recordingId, jobVersion)) return null;
-    console.warn("[Meeting outline] store failed:", error instanceof Error ? error.message : error);
+    if (isRecordingJobCancelled(recordingId, jobVersion)) {
+      logger.info("[call] runMeetingOutlineJob step 12", {
+        message: "meeting outline failure handling skipped",
+        recordingId,
+        trigger,
+        jobVersion,
+        reason: "job_cancelled",
+      });
+      return null;
+    }
+    logger.error("[call] runMeetingOutlineJob step 13", {
+      message: "meeting outline job failed",
+      recordingId,
+      trigger,
+      jobVersion,
+      errorName: String(error?.name || ""),
+      errorCode: String(error?.code || ""),
+      errorMessage: (error instanceof Error ? error.message : String(error)).split("\n")[0].slice(0, 300),
+    });
     await setMeetingOutlineState(recordingId, {
       meetingOutlineStatus: "failed",
       meetingOutlineError: userSafeErrorMessage(error, "会议提纲暂未稳定生成，请稍后重新生成。"),
       meetingOutlineStartedAt: null,
     }, jobVersion);
+    logger.info("[call] runMeetingOutlineJob step 14", {
+      message: "meeting outline failed state stored",
+      recordingId,
+      trigger,
+      jobVersion,
+    });
     return null;
   }
 }
@@ -4832,7 +5041,10 @@ async function runTranscriptionJob(recordingId, jobVersion = recordingJobVersion
       if (!updated.count) throw new Error("Recording was deleted while transcription was running.");
     });
     if (isRecordingJobCancelled(recordingId, jobVersion)) return;
-    await generateAndStoreMeetingOutline(recordingId, segments, { updateTag: true });
+    await generateAndStoreMeetingOutline(recordingId, segments, {
+      updateTag: true,
+      trigger: "transcription_completed",
+    });
     await markDailyBriefDirtyForRecording(recordingId);
     logger.info("transcription.job.success", {message: `recordingId: ${recordingId}, segmentCount: ${segments.length}, transcriptSource: ${recording?.source || "unknown"}`, recordingId, segmentCount: segments.length, transcriptSource: recording?.source || "unknown"});
   } catch (error) {
@@ -4942,6 +5154,13 @@ async function queuePendingLocalTranscriptionJobs(reason = "sweep") {
 
 async function queuePendingMeetingOutlineJobs(reason = "sweep", options = {}) {
   const staleBefore = new Date(Date.now() - MEETING_OUTLINE_STALE_MS);
+  logger.info("[call] queuePendingMeetingOutlineJobs step 0", {
+    message: "pending meeting outline sweep started",
+    reason,
+    force: Boolean(options.force),
+    staleBefore: staleBefore.toISOString(),
+    sweepLimit: MEETING_OUTLINE_SWEEP_LIMIT,
+  });
   const rows = await prisma.recording.findMany({
     where: {
       deletedAt: null,
@@ -4956,11 +5175,33 @@ async function queuePendingMeetingOutlineJobs(reason = "sweep", options = {}) {
     take: MEETING_OUTLINE_SWEEP_LIMIT,
     select: { id: true },
   });
+  logger.info("[call] queuePendingMeetingOutlineJobs step 1", {
+    message: "pending meeting outline candidates loaded",
+    reason,
+    candidateCount: rows.length,
+    activeJobCount: rows.filter(({ id }) => meetingOutlineJobs.has(id)).length,
+  });
   const jobs = rows
     .filter(({ id }) => !meetingOutlineJobs.has(id))
-    .map(({ id }) => generateAndStoreMeetingOutline(id, [], { updateTag: true }));
-  if (jobs.length) logger.info("meeting-outline.recovered", { message: `reason: ${reason}, queued: ${jobs.length}`, reason, queued: jobs.length });
-  await Promise.allSettled(jobs);
+    .map(({ id }) =>
+      generateAndStoreMeetingOutline(id, [], {
+        updateTag: true,
+        trigger: `recovery_${reason}`,
+      }),
+    );
+  logger.info("[call] queuePendingMeetingOutlineJobs step 2", {
+    message: "pending meeting outline jobs queued",
+    reason,
+    queuedCount: jobs.length,
+  });
+  const results = await Promise.allSettled(jobs);
+  logger.info("[call] queuePendingMeetingOutlineJobs step 3", {
+    message: "pending meeting outline sweep completed",
+    reason,
+    queuedCount: jobs.length,
+    fulfilledCount: results.filter((result) => result.status === "fulfilled").length,
+    rejectedCount: results.filter((result) => result.status === "rejected").length,
+  });
   return jobs.length;
 }
 
