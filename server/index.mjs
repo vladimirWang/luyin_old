@@ -173,6 +173,9 @@ function cancelRecordingJobs(recordingId) {
   meetingOutlineJobs.delete(id);
   tencentMeetingImportJobs.delete(id);
   tencentMeetingTranscriptJobs.delete(id);
+  tencentMeetingTranscriptRetrySignals.delete(id);
+  tencentMeetingTranscriptRetryWakeups.get(id)?.();
+  tencentMeetingTranscriptRetryWakeups.delete(id);
   return state;
 }
 
@@ -614,6 +617,8 @@ const upload = multer({
 
 const tencentMeetingImportJobs = new Set();
 const tencentMeetingTranscriptJobs = new Set();
+const tencentMeetingTranscriptRetrySignals = new Set();
+const tencentMeetingTranscriptRetryWakeups = new Map();
 const tencentMeetingCreatorNameCache = new Map();
 let tencentMeetingCloudDiscoveryJob = null;
 
@@ -1461,6 +1466,20 @@ async function fetchTencentMeetingBuiltInTranscript(info = {}, durationMs = 0) {
       }
     } catch (error) {
       failureKinds.push(tencentMeetingTranscriptErrorKind(error));
+      if (String(error?.tencentMeetingApiErrorCode || "") === "500227") {
+        logger.warn("[call] fetchTencentMeetingBuiltInTranscript step 2", {
+          message: "transcript lookup deferred until replacement STS token callback",
+          recordFileId,
+          apiErrorCode: String(error.tencentMeetingApiErrorCode),
+          stsRefreshReason: String(error.stsRefreshReason || ""),
+        });
+        return {
+          segments: [],
+          unavailable: true,
+          failureKind: "pending",
+          recordFileId,
+        };
+      }
       if (!isTencentMeetingTranscriptUnavailableError(error)) {
         console.warn("[Tencent Meeting] built-in transcript lookup skipped:", error instanceof Error ? error.message : error);
       }
@@ -2006,8 +2025,25 @@ function queueTencentMeetingImportSync(recordingId, info = {}) {
   return true;
 }
 
-function waitForTencentMeetingTranscriptRetry(delayMs) {
-  return new Promise((resolve) => setTimeout(resolve, delayMs));
+function waitForTencentMeetingTranscriptRetry(recordingId, delayMs) {
+  const id = String(recordingId || "").trim();
+  if (tencentMeetingTranscriptRetrySignals.delete(id)) return Promise.resolve();
+
+  return new Promise((resolve) => {
+    let completed = false;
+    const finish = () => {
+      if (completed) return;
+      completed = true;
+      clearTimeout(timer);
+      if (tencentMeetingTranscriptRetryWakeups.get(id) === finish) {
+        tencentMeetingTranscriptRetryWakeups.delete(id);
+      }
+      tencentMeetingTranscriptRetrySignals.delete(id);
+      resolve();
+    };
+    const timer = setTimeout(finish, delayMs);
+    tencentMeetingTranscriptRetryWakeups.set(id, finish);
+  });
 }
 
 async function runTencentMeetingTranscriptSyncAttempts(recordingId, info, jobVersion) {
@@ -2039,12 +2075,18 @@ async function runTencentMeetingTranscriptSyncAttempts(recordingId, info, jobVer
       createdAt: recording.createdAt?.toISOString?.() || recording.createdAt,
       updatedAt: recording.updatedAt?.toISOString?.() || recording.updatedAt,
     });
-    await waitForTencentMeetingTranscriptRetry(retryDelayMs);
+    await waitForTencentMeetingTranscriptRetry(recordingId, retryDelayMs);
   }
   return { stored: false, outcome: "not_stored", attempt: maxAttempts, maxAttempts };
 }
 
 function queueTencentMeetingTranscriptSync(recordingId, info = {}) {
+  logger.info("[call] queueTencentMeetingTranscriptSync step 0", {
+    message: "transcript synchronization enqueue requested",
+    recordingId,
+    recordFileId: String(info.recordFileId || ""),
+    event: String(info.event || ""),
+  });
   logger.info("call queueTencentMeetingTranscriptSync: ", {message: 'step 0'})
   if (!recordingId) {
     return false;
@@ -2053,6 +2095,16 @@ function queueTencentMeetingTranscriptSync(recordingId, info = {}) {
     return false;
   }
   if (tencentMeetingTranscriptJobs.has(recordingId)) {
+    if (String(info.event || "") === "smart.transcripts") {
+      tencentMeetingTranscriptRetrySignals.add(recordingId);
+      tencentMeetingTranscriptRetryWakeups.get(recordingId)?.();
+      logger.info("[call] queueTencentMeetingTranscriptSync step 1", {
+        message: "existing recorder transcript retry awakened by smart.transcripts",
+        recordingId,
+        recordFileId: String(info.recordFileId || ""),
+      });
+      return false;
+    }
     logger.info("call queueTencentMeetingTranscriptSync: ", {message: '已有这个任务'})
     return false;
   }
@@ -2065,6 +2117,8 @@ function queueTencentMeetingTranscriptSync(recordingId, info = {}) {
       })
       .finally(() => {
         if (recordingJobVersion(recordingId) === jobVersion) tencentMeetingTranscriptJobs.delete(recordingId);
+        tencentMeetingTranscriptRetrySignals.delete(recordingId);
+        tencentMeetingTranscriptRetryWakeups.delete(recordingId);
       });
   }, 80);
   return true;
