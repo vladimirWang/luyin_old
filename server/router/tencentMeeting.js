@@ -103,12 +103,14 @@ router.post("/webhook", async (request, response) => {
   } = dependencies;
   try {
     const plaintext = tencentMeetingVerifiedPlaintext(request, request.body?.data);
-    logger.info("logger.info listen /webhook tencentmeeting webhook plaintext: ", {message: plaintext})
-    console.log("console.log listen /webhook tencentmeeting webhook plaintext: ", {message: plaintext})
     const payload = parseJsonObject(plaintext);
-    logger.info("logger.info listen /webhook tencentmeeting webhook payload: ", {message: JSON.stringify(payload)})
-    console.log("console.log listen /webhook tencentmeeting webhook payload: ", {message: JSON.stringify(payload)})
     const action = tencentMeetingWebhookEventAction(payload);
+    logger.info("[call] tencentMeetingWebhookPost step 0", {
+      message: "verified webhook received",
+      event: String(payload?.event || ""),
+      traceId: String(payload?.trace_id || ""),
+      action,
+    });
     // 记录腾讯会议webhhook日志
     const persisted = await appendTencentMeetingWebhookEvent({
       receivedAt: new Date().toISOString(),
@@ -120,6 +122,13 @@ router.post("/webhook", async (request, response) => {
     logger.debug("listen /webhook 成功响应腾讯会议webhook: ", {message: '继续后续逻辑'})
     if (payload) {
       const eventId = persisted.event.id;
+      logger.info("[call] tencentMeetingWebhookPost step 1", {
+        message: "webhook acknowledged and persisted",
+        event: String(payload.event || ""),
+        traceId: String(payload.trace_id || ""),
+        eventId,
+        duplicate: Boolean(persisted.duplicate),
+      });
       const duplicateAlreadyHandled = persisted.duplicate && ["processing", "processed"].includes(persisted.event.status);
       if (duplicateAlreadyHandled) {
         logger.info("tencent_meeting.webhook.duplicate_skipped", {
@@ -132,6 +141,13 @@ router.post("/webhook", async (request, response) => {
       void Promise.resolve()
         .then(async () => {
           await markTencentMeetingWebhookEventProcessing(eventId);
+          logger.info("[call] tencentMeetingWebhookPost step 2", {
+            message: "webhook background processing started",
+            event: String(payload.event || ""),
+            traceId: String(payload.trace_id || ""),
+            eventId,
+            action,
+          });
           switch (action) {
             case "sts-token": {
               const saved = await importTencentMeetingStsTokenPayload(payload);
@@ -142,15 +158,12 @@ router.post("/webhook", async (request, response) => {
               // The persisted event is later used to resolve recorder ownership.
               break;
             case "recording-completed":
-              logger.info("logger.info listen /webhook tencentmeeting event recording-completed: ", {message: JSON.stringify(payload)})
               await importTencentMeetingRecordingCompletedPayload(payload);
               break;
             case "audio-completed":
-              logger.info("logger.info listen /webhook tencentmeeting event audio-completed: ", {message: JSON.stringify(payload)})
               await importTencentMeetingAudioCompletedPayload(payload);
               break;
             case "transcript-ready": {
-              logger.info("logger.info listen /webhook tencentmeeting event transcript-ready: ", {message: JSON.stringify(payload)})
               await importTencentMeetingTranscriptReadyPayload(payload);
               break;
             }
@@ -161,6 +174,13 @@ router.post("/webhook", async (request, response) => {
               });
           }
           await markTencentMeetingWebhookEventProcessed(eventId);
+          logger.info("[call] tencentMeetingWebhookPost step 3", {
+            message: "webhook background processing completed",
+            event: String(payload.event || ""),
+            traceId: String(payload.trace_id || ""),
+            eventId,
+            action,
+          });
         })
         .catch(async (error) => {
           try {
@@ -171,7 +191,16 @@ router.post("/webhook", async (request, response) => {
               persistError instanceof Error ? persistError.message : persistError,
             );
           }
-          console.warn("[Tencent Meeting] webhook background import failed:", error instanceof Error ? error.message : error);
+          logger.error("[call] tencentMeetingWebhookPost step 4", {
+            message: "webhook background processing failed",
+            event: String(payload.event || ""),
+            traceId: String(payload.trace_id || ""),
+            eventId,
+            action,
+            errorCode: error?.code || "",
+            errorMessage: error instanceof Error ? error.message : String(error),
+            errorStack: error instanceof Error ? error.stack : "",
+          });
         });
     } else {
       console.warn("[Tencent Meeting] webhook decrypted but did not contain JSON payload.");

@@ -886,15 +886,23 @@ function extractTencentMeetingRecordingEvents(payload) {
     return [];
   }
 
-  const containers = payload.payload
-  logger.info("[call] extractTencentMeetingRecordingEvents step 3: ", {message: `container: ${JSON.stringify(containers)}`})
+  const containers = asArray(payload.payload);
+  logger.info("[call] extractTencentMeetingRecordingEvents step 3", {
+    message: "canonical payload containers loaded",
+    event,
+    containerCount: containers.length,
+  });
   const recordingContainers = containers
     .filter((container) => {
-      const isObj = container && typeof container === "object"  
-      if (!isObj) {
-        logger.info("[call] extractTencentMeetingRecordingEvents step 4: ", {message: `container: ${JSON.stringify(containers)}`})
+      const isObject = Boolean(container && typeof container === "object");
+      if (!isObject) {
+        logger.info("[call] extractTencentMeetingRecordingEvents step 4", {
+          message: "non-object canonical payload container skipped",
+          event,
+          reason: "invalid_container",
+        });
       }
-      return isObj
+      return isObject;
     })
     .map((container) => ({ container, files: tencentMeetingRecordingFilesFromContainer(container) }))
     .filter(({ files }) => files.length > 0);
@@ -905,15 +913,23 @@ function extractTencentMeetingRecordingEvents(payload) {
     });
     return [];
   }
-  logger.info("[call] extractTencentMeetingRecordingEvents step 6: ", {message: `recordingContainers: ${JSON.stringify(recordingContainers)}`})
+  logger.info("[call] extractTencentMeetingRecordingEvents step 6", {
+    message: "recording containers normalized",
+    event,
+    recordingContainerCount: recordingContainers.length,
+    recordingFileCount: recordingContainers.reduce((count, item) => count + item.files.length, 0),
+  });
 
   const entries = [];
   const seen = new Set();
 
   for (const { container, files } of recordingContainers) {
     logger.info("[call] extractTencentMeetingRecordingEvents step 7", {
-      message: `container: ${JSON.stringify(container)}, files.length: ${files.length}`,
+      message: "recording container processing started",
       event,
+      fileCount: files.length,
+      operateTime: container.operate_time || 0,
+      hasMeetingInfo: Boolean(container.meeting_info),
     });
     const meetingInfo = container.meeting_info || {};
     const creator = meetingInfo.creator || {};
@@ -964,7 +980,7 @@ function extractTencentMeetingRecordingEvents(payload) {
     message: `extraction complete: event=${event}, recordingFileCount=${entries.length}`,
     event,
     recordingFileCount: entries.length,
-    entries
+    recordFileIds: entries.map((entry) => entry.recordFileId),
   });
   return entries;
 }
@@ -1521,22 +1537,73 @@ async function inspectTencentMeetingDownloadedFile(targetPath, downloadInfo = {}
 }
 
 async function syncTencentMeetingRecordingAudio(recordingId, info = {}, jobVersion = recordingJobVersion(recordingId)) {
-  if (isRecordingJobCancelled(recordingId, jobVersion)) return false;
+  const logContext = {
+    recordingId,
+    recordFileId: String(info.recordFileId || ""),
+    event: String(info.event || ""),
+    sourceKind: String(info.sourceKind || ""),
+    jobVersion,
+  };
+  logger.info("[call] syncTencentMeetingRecordingAudio step 0", {
+    message: "audio synchronization started",
+    ...logContext,
+  });
+  if (isRecordingJobCancelled(recordingId, jobVersion)) {
+    logger.info("[call] syncTencentMeetingRecordingAudio step 1", {
+      message: "audio synchronization skipped: job cancelled",
+      ...logContext,
+      reason: "job_cancelled",
+    });
+    return false;
+  }
   const recordingBeforeSync = await prisma.recording.findFirst({
     where: { id: recordingId, deletedAt: null },
   });
-  if (!recordingBeforeSync) return false;
-  if (resolveRecordingAudioPathBetter(recordingBeforeSync, projectRoot)) return true;
+  if (!recordingBeforeSync) {
+    logger.warn("[call] syncTencentMeetingRecordingAudio step 2", {
+      message: "audio synchronization skipped: recording not found",
+      ...logContext,
+      reason: "recording_not_found",
+    });
+    return false;
+  }
+  const existingAudioPath = resolveRecordingAudioPathBetter(recordingBeforeSync, projectRoot);
+  if (existingAudioPath) {
+    logger.info("[call] syncTencentMeetingRecordingAudio step 3", {
+      message: "audio synchronization skipped: audio already stored",
+      ...logContext,
+      reason: "audio_already_stored",
+      storagePath: existingAudioPath,
+    });
+    return true;
+  }
 
-  console.info(`[CALL] syncTencentMeetingRecordingAudio: recordingId: ${recordingId}`);
+  logger.info("[call] syncTencentMeetingRecordingAudio step 4", {
+    message: "resolving Tencent Meeting download target",
+    ...logContext,
+  });
   const target = await findTencentMeetingDownloadTarget(info);
-  console.info(`[CALL] syncTencentMeetingRecordingAudio`);
+  logger.info("[call] syncTencentMeetingRecordingAudio step 5", {
+    message: "Tencent Meeting download target resolution completed",
+    ...logContext,
+    hasDownloadUrl: Boolean(target?.downloadUrl),
+    hasOwnerName: Boolean(target?.ownerName),
+    hasCreatorUserid: Boolean(target?.creatorUserid),
+    targetDurationMs: Number(target?.durationMs || 0),
+  });
   if (!target?.downloadUrl) {
     const needsIdentity = !tencentMeetingCandidateDownloadIdentityParams(info).length;
     const hasStsToken = Boolean(await loadTencentMeetingStsToken());
     const canRequestStsToken = Boolean(tencentMeetingStsOperatorId());
     const waitsForTencentTranscript = info.sourceKind === "recorder" || /audio-completed|smart\.transcripts/i.test(String(info.event || ""));
-    if (isRecordingJobCancelled(recordingId, jobVersion)) return false;
+    if (isRecordingJobCancelled(recordingId, jobVersion)) {
+      logger.info("[call] syncTencentMeetingRecordingAudio step 6", {
+        message: "audio synchronization stopped after target lookup: job cancelled",
+        ...logContext,
+        reason: "job_cancelled_after_target_lookup",
+      });
+      return false;
+    }
     const data = {
       updatedAt: new Date(),
       tencentMeetingSourceKind: info.sourceKind || recordingBeforeSync.tencentMeetingSourceKind || "",
@@ -1578,6 +1645,17 @@ async function syncTencentMeetingRecordingAudio(recordingId, info = {}, jobVersi
       where: { id: recordingId, deletedAt: null },
       data,
     });
+    logger.warn("[call] syncTencentMeetingRecordingAudio step 7", {
+      message: "audio synchronization deferred: download target unavailable",
+      ...logContext,
+      reason: needsIdentity
+        ? "missing_download_identity"
+        : !hasStsToken
+          ? "missing_sts_token"
+          : "download_url_unavailable",
+      hasStsToken,
+      canRequestStsToken,
+    });
     return false;
   }
 
@@ -1585,18 +1663,52 @@ async function syncTencentMeetingRecordingAudio(recordingId, info = {}, jobVersi
   const fileName = `${recordingId}.mp3`;
   const storagePath = path.join(audioDir, fileName);
   try {
+    logger.info("[call] syncTencentMeetingRecordingAudio step 8", {
+      message: "audio download started",
+      ...logContext,
+      tempPath,
+      storagePath,
+    });
     const downloadInfo = await downloadTencentMeetingFile(target.downloadUrl, tempPath);
+    logger.info("[call] syncTencentMeetingRecordingAudio step 9", {
+      message: "audio download completed",
+      ...logContext,
+      downloadedSize: Number(downloadInfo.size || 0),
+      contentType: String(downloadInfo.contentType || ""),
+    });
     const inspection = await inspectTencentMeetingDownloadedFile(tempPath, downloadInfo);
     const conversionInput =
       inspection.useRemoteInput || isTencentMeetingStreamingMedia(target.downloadUrl, downloadInfo) ? target.downloadUrl : tempPath;
+    logger.info("[call] syncTencentMeetingRecordingAudio step 10", {
+      message: "audio conversion started",
+      ...logContext,
+      inputKind: conversionInput === tempPath ? "downloaded_file" : "remote_stream",
+      storagePath,
+    });
     await convertAudioFileToMp3(conversionInput, storagePath);
+    logger.info("[call] syncTencentMeetingRecordingAudio step 11", {
+      message: "audio conversion completed",
+      ...logContext,
+      storagePath,
+    });
     if (isRecordingJobCancelled(recordingId, jobVersion)) {
       await removeFileIfExists(tempPath);
       await removeFileIfExists(storagePath);
+      logger.info("[call] syncTencentMeetingRecordingAudio step 12", {
+        message: "converted audio removed: job cancelled",
+        ...logContext,
+        reason: "job_cancelled_after_conversion",
+      });
       return false;
     }
     await removeFileIfExists(tempPath);
     const { storedFile, durationMs } = await verifiedStoredRecording(storagePath, target.durationMs || info.durationMs || 0);
+    logger.info("[call] syncTencentMeetingRecordingAudio step 13", {
+      message: "stored audio verification completed",
+      ...logContext,
+      fileSize: Number(storedFile.size || 0),
+      audioDurationMs: Number(durationMs || 0),
+    });
     if (isRecordingJobCancelled(recordingId, jobVersion)) {
       await removeFileIfExists(storagePath);
       return false;
@@ -1637,10 +1749,32 @@ async function syncTencentMeetingRecordingAudio(recordingId, info = {}, jobVersi
     });
     if (!synced.count) {
       await removeFileIfExists(storagePath);
+      logger.warn("[call] syncTencentMeetingRecordingAudio step 14", {
+        message: "stored audio removed: recording update affected no rows",
+        ...logContext,
+        reason: "recording_update_missed",
+      });
       return false;
     }
+    logger.info("[call] syncTencentMeetingRecordingAudio step 15", {
+      message: "audio synchronization completed",
+      ...logContext,
+      storagePath,
+      fileSize: Number(storedFile.size || 0),
+      audioDurationMs: Number(durationMs || 0),
+    });
     return true;
   } catch (error) {
+    logger.error("[call] syncTencentMeetingRecordingAudio step 16", {
+      message: "audio synchronization failed",
+      ...logContext,
+      stage: "download_convert_verify_or_persist",
+      errorCode: error?.code || "",
+      errorMessage: error instanceof Error ? error.message : String(error),
+      errorStack: error instanceof Error ? error.stack : "",
+      tempPath,
+      storagePath,
+    });
     await removeFileIfExists(tempPath);
     await removeFileIfExists(storagePath);
     if (!isRecordingJobCancelled(recordingId, jobVersion)) {
@@ -1658,15 +1792,61 @@ async function syncTencentMeetingRecordingAudio(recordingId, info = {}, jobVersi
 }
 
 function queueTencentMeetingImportSync(recordingId, info = {}) {
-  if (!tencentMeetingAudioSyncEnabled()) return false;
-  if (!recordingId || isRecordingJobCancelled(recordingId) || tencentMeetingImportJobs.has(recordingId)) return false;
+  const logContext = {
+    recordingId,
+    recordFileId: String(info.recordFileId || ""),
+    event: String(info.event || ""),
+    sourceKind: String(info.sourceKind || ""),
+  };
+  logger.info("[call] queueTencentMeetingImportSync step 0", {
+    message: "audio synchronization enqueue requested",
+    ...logContext,
+  });
+  if (!tencentMeetingAudioSyncEnabled()) {
+    logger.warn("[call] queueTencentMeetingImportSync step 1", {
+      message: "audio synchronization enqueue skipped: feature disabled",
+      ...logContext,
+      reason: "audio_sync_disabled",
+    });
+    return false;
+  }
+  const cancelled = Boolean(recordingId && isRecordingJobCancelled(recordingId));
+  const alreadyQueued = Boolean(recordingId && tencentMeetingImportJobs.has(recordingId));
+  if (!recordingId || cancelled || alreadyQueued) {
+    logger.warn("[call] queueTencentMeetingImportSync step 2", {
+      message: "audio synchronization enqueue skipped",
+      ...logContext,
+      reason: !recordingId ? "missing_recording_id" : cancelled ? "job_cancelled" : "already_queued",
+    });
+    return false;
+  }
   const jobVersion = recordingJobVersion(recordingId);
   tencentMeetingImportJobs.add(recordingId);
+  logger.info("[call] queueTencentMeetingImportSync step 3", {
+    message: "audio synchronization enqueued",
+    ...logContext,
+    jobVersion,
+  });
   setTimeout(() => {
     syncTencentMeetingRecordingAudio(recordingId, info, jobVersion)
-      .catch((error) => console.warn("[Tencent Meeting] import sync failed:", error instanceof Error ? error.message : error))
+      .catch((error) => {
+        logger.error("[call] queueTencentMeetingImportSync step 4", {
+          message: "queued audio synchronization failed",
+          ...logContext,
+          jobVersion,
+          errorCode: error?.code || "",
+          errorMessage: error instanceof Error ? error.message : String(error),
+          errorStack: error instanceof Error ? error.stack : "",
+        });
+      })
       .finally(() => {
         if (recordingJobVersion(recordingId) === jobVersion) tencentMeetingImportJobs.delete(recordingId);
+        logger.info("[call] queueTencentMeetingImportSync step 5", {
+          message: "queued audio synchronization finished",
+          ...logContext,
+          jobVersion,
+          removedFromQueue: !tencentMeetingImportJobs.has(recordingId),
+        });
       });
   }, 50);
   return true;
@@ -1943,20 +2123,42 @@ async function importTencentMeetingWebhookPayload(
   payload,
   { syncAudio = false, syncTranscript = false, userAgent = "tencent-meeting-webhook" } = {},
 ) {
-  logger.debug("[call] importTencentMeetingWebhookPayload step 0: ", {message: `payload: ${JSON.stringify(payload)}`})
+  const event = String(payload?.event || "");
+  logger.info("[call] importTencentMeetingWebhookPayload step 0", {
+    message: "webhook import started",
+    event,
+    syncAudio,
+    syncTranscript,
+    userAgent,
+  });
   
   const events = extractTencentMeetingRecordingEvents(payload)
-  logger.debug("[call] importTencentMeetingWebhookPayload", {message: `step 1 length: ${events.length}, events: ${JSON.stringify(events)}`})
-  if (!events.length) return [];
-  const results = await upsertTencentMeetingRecordingInfos(events, userAgent);
-  if (results.length) {
-    console.info(
-      "[call] importTencentMeetingWebhookPayload",
-      results
-        .map((result) => `${result.info?.sourceKind || "unknown"}:${result.recordFileId}:${result.created ? "created" : "updated"}`)
-        .join(", "),
-    );
+  logger.info("[call] importTencentMeetingWebhookPayload step 1", {
+    message: "recording events extracted",
+    event,
+    recordingEventCount: events.length,
+    recordFileIds: events.map((info) => String(info.recordFileId || "")).filter(Boolean),
+  });
+  if (!events.length) {
+    logger.info("[call] importTencentMeetingWebhookPayload step 2", {
+      message: "webhook import skipped: no recording events",
+      event,
+      reason: "no_recording_events",
+    });
+    return [];
   }
+  const results = await upsertTencentMeetingRecordingInfos(events, userAgent);
+  logger.info("[call] importTencentMeetingWebhookPayload step 3", {
+    message: "recording persistence completed",
+    event,
+    resultCount: results.length,
+    results: results.map((result) => ({
+      recordingId: result.recordingId,
+      recordFileId: result.recordFileId,
+      sourceKind: result.info?.sourceKind || "",
+      created: Boolean(result.created),
+    })),
+  });
 
   for (const result of results) {
     if (syncTranscript) {
@@ -1966,10 +2168,25 @@ async function importTencentMeetingWebhookPayload(
       });
     }
     if (syncAudio) {
-      queueTencentMeetingImportSync(result.recordingId, result.info);
+      const audioQueued = queueTencentMeetingImportSync(result.recordingId, {
+        ...result.info,
+        event,
+      });
+      logger.info("[call] importTencentMeetingWebhookPayload step 4", {
+        message: "audio synchronization enqueue completed",
+        event,
+        recordingId: result.recordingId,
+        recordFileId: result.recordFileId,
+        audioQueued,
+      });
     }
   }
 
+  logger.info("[call] importTencentMeetingWebhookPayload step 5", {
+    message: "webhook import completed",
+    event,
+    resultCount: results.length,
+  });
   return results;
 }
 
