@@ -70,6 +70,40 @@ export async function getTMToken(options = {}) {
   }
 }
 
+/**
+ * Remove a rejected token only when Redis still contains the same value.
+ * This prevents a late failure response from deleting a newer callback token.
+ */
+export async function invalidateTMToken(expectedValue = "") {
+  if (!redisClient.isReady) return false;
+  const token = String(expectedValue || "").trim();
+  if (!token) return false;
+
+  try {
+    const removed = await redisClient.sendCommand([
+      "EVAL",
+      "local raw = redis.call('get', KEYS[1]); if not raw then return 0 end; local ok, value = pcall(cjson.decode, raw); if ok and value['value'] == ARGV[1] then return redis.call('del', KEYS[1]) end; return 0",
+      "1",
+      TM_TOKEN_KEY,
+      token,
+    ]);
+    const invalidated = Number(removed) > 0;
+    logger.warn("[call] invalidateTMToken step 0", {
+      message: invalidated
+        ? "Tencent Meeting rejected STS token removed from Redis"
+        : "rejected STS token was already replaced or absent",
+      invalidated,
+    });
+    return invalidated;
+  } catch (error) {
+    logger.warn("[call] invalidateTMToken step 1", {
+      message: "failed to invalidate rejected Tencent Meeting STS token",
+      errorMessage: error instanceof Error ? error.message : String(error),
+    });
+    return false;
+  }
+}
+
 async function acquireRequestLock(owner, ttlMs) {
   if (!redisClient.isReady) return false;
   const result = await redisClient.set(TM_TOKEN_REQUEST_LOCK_KEY, owner, {

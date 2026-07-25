@@ -4,7 +4,7 @@ import { normalizeTencentMeetingEncryptedData, tencentMeetingDecryptData } from 
 import { firstEnv, parseJsonObject, splitEnvList, firstNonEmptyValue, asArray, boundedNumber } from "./common.mjs";
 import { decodedTencentMeetingAesKeyLength } from "./algo.js";
 import {TENCENT_MEETING_SOURCE_PREFIX} from '../constant.js'
-import { getTMToken, requestTMToken, setTMToken } from "./token.js";
+import { getTMToken, invalidateTMToken, requestTMToken, setTMToken } from "./token.js";
 
 export async function requestTencentMeetingStsTokenIfNeeded() {
   return requestTMToken();
@@ -67,9 +67,10 @@ export async function tencentMeetingApiHeaders(method, uri, bodyText = "", optio
 export async function tencentMeetingApiRequest(method, uri, body = null, options = {}) {
   const config = tencentMeetingApiConfig();
   const bodyText = body ? JSON.stringify(body) : "";
+  const headers = await tencentMeetingApiHeaders(method, uri, bodyText, options);
   const response = await fetch(`${config.baseUrl.replace(/\/+$/, "")}${uri}`, {
     method,
-    headers: await tencentMeetingApiHeaders(method, uri, bodyText, options),
+    headers,
     body: bodyText || undefined,
     signal: AbortSignal.timeout(Math.max(5000, Number(process.env.TENCENT_MEETING_API_TIMEOUT_MS || 30000))),
   });
@@ -79,7 +80,28 @@ export async function tencentMeetingApiRequest(method, uri, body = null, options
   const apiErrorCode = apiError?.new_error_code || apiError?.error_code || apiError?.code || payload?.code;
   if (!response.ok || apiErrorCode) {
     const message = apiError?.message || apiError?.msg || payload?.message || text || response.statusText;
-    throw new Error(`Tencent Meeting API ${method} ${uri} failed: ${response.status} ${apiErrorCode || ""} ${String(message).slice(0, 160)}`.trim());
+    const error = new Error(
+      `Tencent Meeting API ${method} ${uri} failed: ${response.status} ${apiErrorCode || ""} ${String(message).slice(0, 160)}`.trim(),
+    );
+    error.tencentMeetingApiErrorCode = String(apiErrorCode || "");
+    error.httpStatus = response.status;
+
+    if (!options.skipStsToken && String(apiErrorCode) === "500227") {
+      const rejectedToken = String(headers["STS-Token"] || "");
+      error.stsTokenInvalidated = await invalidateTMToken(rejectedToken);
+      const refresh = await requestTMToken();
+      error.stsRefreshReason = refresh.reason;
+      logger.warn("[call] tencentMeetingApiRequest step 0", {
+        message: "Tencent Meeting rejected STS token; replacement requested",
+        apiErrorCode: String(apiErrorCode),
+        httpStatus: response.status,
+        tokenInvalidated: error.stsTokenInvalidated,
+        refreshRequested: Boolean(refresh.requested),
+        refreshReason: refresh.reason,
+      });
+    }
+
+    throw error;
   }
   return payload;
 }

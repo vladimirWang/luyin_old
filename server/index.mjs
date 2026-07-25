@@ -1276,7 +1276,12 @@ async function findTencentMeetingDownloadTarget(info) {
         identityIndex,
         identityKind,
         errorMessage: tencentMeetingLookupErrorMessage(error),
+        apiErrorCode: String(error?.tencentMeetingApiErrorCode || ""),
+        stsRefreshReason: String(error?.stsRefreshReason || ""),
       });
+      // A replacement token arrives asynchronously through common.sts-token;
+      // stop using other identities with the rejected token and let that callback resume pending imports.
+      if (String(error?.tencentMeetingApiErrorCode || "") === "500227") return null;
     }
   }
 
