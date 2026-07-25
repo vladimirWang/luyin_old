@@ -57,7 +57,6 @@ export function RecordCard({
     recording.canManage !== false &&
     (recording.status === "failed" || recording.transcriptHealth?.isFallback);
   const canDeleteThisRecording = recording.canDelete !== false;
-  const ownerLabel = recording.ownerName && recording.ownerName !== "未设置姓名" ? recording.ownerName : getClientName();
 
   useEffect(() => {
     setDraftName(recording.name);
@@ -342,8 +341,8 @@ export function RecordCard({
             ))}
           </select>
 
-          <div className="record-owner-badge" title={ownerLabel}>
-            <span>{ownerLabel}</span>
+          <div className="record-owner-badge">
+            <span>{recording.tencentMeeting.sourceKing === 'cloud' ? recording.ownerName: 'recording.audio-completed'}</span>
           </div>
         </div>
 
