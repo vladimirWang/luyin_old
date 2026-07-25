@@ -35,6 +35,7 @@ import {
   recordingFromPrisma,
   transcriptSegmentFromPrisma,
 } from "../repositories/recordings.mjs";
+import { nextRecordingSequence } from "../services/recordingSequence.js";
 
 const prisma = await import('../plugins/prisma.cjs').then(m => m.default || m);
 
@@ -234,14 +235,9 @@ router.post("/", upload.single("audio"), async (request, response, next) => {
     await removeFileIfExists(request.file.path);
     const { storedFile, durationMs } = await verifiedStoredRecording(storagePath, request.body.durationMs);
     const fileSize = storedFile.size
-    const lastRecording = await prisma.recording.findFirst({
-      orderBy: {
-        seq: 'desc'
-      }
-    })
-    const seq = lastRecording ? lastRecording.seq + 1 : 1
+    const seq = await nextRecordingSequence();
     const {ownerClientId, ownerName, userId} = trustedOwner
-    logger.info("recording.uploaded lastRecording", { message: `lastRecording.id: ${lastRecording? lastRecording.id: "没有lastRecording"}, seq: ${seq}` });
+    logger.info("recording.uploaded.sequence", { message: `seq: ${seq}`, seq });
     // logger.info("recording.uploaded mock", { message: `recordingId: ${id}, ownerClientId: ${mockOwner.ownerClientId}, ownerName: ${mockOwner.ownerName}, durationMs: ${durationMs}, fileSize: ${fileSize}` });
     const safeDurationMs = BigInt(durationMs || 0);
     const safeFileSize = BigInt(fileSize || 0);
@@ -319,11 +315,7 @@ router.post("/segments", upload.array("audio", 480), async (request, response, n
     await Promise.all(files.map((file) => removeFileIfExists(file.path)));
     const { storedFile, durationMs } = await verifiedStoredRecording(storagePath, request.body.durationMs);
 
-    const latestRecording = await prisma.recording.findFirst({
-      orderBy: { seq: "desc" },
-      select: { seq: true },
-    });
-    const seq = (latestRecording?.seq || 0) + 1;
+    const seq = await nextRecordingSequence();
     const recording = {
       id,
       seq,
@@ -355,7 +347,7 @@ router.post("/segments", upload.array("audio", 480), async (request, response, n
       userAgent: request.get("user-agent") || "",
       audioUrl: ''
     };
-    logger.debug('request segements: ', {message: `request /segments lastSeq: ${latestRecording.seq}, durationMs: ${durationMs}`})
+    logger.debug("request segments", {message: `seq: ${seq}, durationMs: ${durationMs}`})
     await prisma.recording.create({
       data: {
         id: recording.id,

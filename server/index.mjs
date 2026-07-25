@@ -11,6 +11,8 @@ import { fileURLToPath } from "node:url";
 import multer from "multer";
 import PDFDocument from "pdfkit";
 import logger from "./utils/log.js";
+import fs from 'node:fs'
+import dayjs from 'dayjs'
 import { requestAccountPayload, signAccountToken, normalizeAccountUsername, accountClientId, passwordHash, verifyPassword } from "./utils/auth.mjs";
 import { canReadRecording, parseJsonObject, splitEnvList, envFlag, firstNonEmptyValue, asArray, boundedNumber, normalizeTtsText, detectTtsAudioFormat, userSafeErrorMessage, userSafeTranscriptionError } from "./utils/common.mjs";
 import {
@@ -55,7 +57,6 @@ import {
   tencentMeetingApiRequest,
   tencentMeetingEventTimeMs,
   tencentMeetingTimestampMs,
-  tencentMeetingDurationValueMs,
   tencentMeetingDurationMsFromFile,
   tencentMeetingDisplayTime,
   tencentMeetingPlaceholderName,
@@ -63,8 +64,6 @@ import {
   tencentMeetingImportTag,
   tencentMeetingRecordFileId,
   isTencentMeetingRecording,
-  tencentMeetingMeetingRecordId,
-  tencentMeetingSourceKindFromEvent,
   tencentMeetingRecordFiles,
   tencentMeetingRecordsFromPayload,
   firstTencentMeetingMediaUrl,
@@ -129,6 +128,7 @@ import {connectRedis} from './plugins/redis.js'
 import { startTencentMeetingStsTokenCron } from "./cron/tencentMeeting.js";
 import { startDailyBriefCron } from "./cron/dailyBrief.js";
 import { startTranscriptionRecoveryCron } from "./cron/transcriptionRecovery.js";
+import { initializeRecordingSequence, nextRecordingSequence } from "./services/recordingSequence.js";
 const prisma = await import('./plugins/prisma.cjs').then(m => m.default || m);
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -205,6 +205,7 @@ async function loadEnvFile(filePath) {
 
 await connectRedis()
 await init();
+await initializeRecordingSequence();
 console.log("process.env.PORT:", process.env.PORT);
 // await loadEnvFile(path.join(projectRoot, ".env"));
 
@@ -849,139 +850,122 @@ function isLocalApiTranscriptionRecording(recording = {}) {
   return result
 }
 
+const TENCENT_MEETING_RECORDING_FILE_EVENTS = new Set([
+  "recording.completed",
+  "recording.audio-completed",
+  "smart.transcripts",
+]);
+
+function tencentMeetingRecordingFilesFromContainer(container) {
+  if (!container || typeof container !== "object") return [];
+  return asArray(container.recording_files);
+}
+
+function canonicalTencentMeetingRecordingDurationMs(meetingInfo) {
+  // A partial meeting time range is not enough to infer a reliable duration.
+  if (!meetingInfo?.start_time || !meetingInfo?.end_time) return 0;
+  const startMs = tencentMeetingTimestampMs(meetingInfo.start_time);
+  const endMs = tencentMeetingTimestampMs(meetingInfo.end_time);
+  if (!startMs || !endMs || endMs <= startMs) return 0;
+  return endMs - startMs;
+}
+
 function extractTencentMeetingRecordingEvents(payload) {
-  if (!payload || typeof payload !== "object") return [];
+  logger.info("[call] extractTencentMeetingRecordingEvents step 0", { message: "start" });
+  if (!payload || typeof payload !== "object") {
+    logger.info("[call] extractTencentMeetingRecordingEvents step 1", { message: "invalid payload, skip extraction" });
+    return [];
+  }
+
   const event = String(payload.event || "").trim();
-  const containers = [
-    payload,
-    ...asArray(payload.payload),
-    ...asArray(payload.Payload),
-    ...asArray(payload.data),
-    ...asArray(payload.Data),
-  ];
+  if (!TENCENT_MEETING_RECORDING_FILE_EVENTS.has(event)) {
+    logger.info("[call] extractTencentMeetingRecordingEvents step 2", {
+      message: `event does not expose recording files, skip extraction: ${event || "missing"}`,
+      event,
+    });
+    return [];
+  }
+
+  const containers = payload.payload
+  logger.info("[call] extractTencentMeetingRecordingEvents step 3: ", {message: `container: ${JSON.stringify(containers)}`})
+  const recordingContainers = containers
+    .filter((container) => {
+      const isObj = container && typeof container === "object"  
+      if (!isObj) {
+        logger.info("[call] extractTencentMeetingRecordingEvents step 4: ", {message: `container: ${JSON.stringify(containers)}`})
+      }
+      return isObj
+    })
+    .map((container) => ({ container, files: tencentMeetingRecordingFilesFromContainer(container) }))
+    .filter(({ files }) => files.length > 0);
+  if (!recordingContainers.length) {
+    logger.info("[call] extractTencentMeetingRecordingEvents step 5", {
+      message: `no recording files, skip extraction: ${event}`,
+      event,
+    });
+    return [];
+  }
+  logger.info("[call] extractTencentMeetingRecordingEvents step 6: ", {message: `recordingContainers: ${JSON.stringify(recordingContainers)}`})
+
   const entries = [];
   const seen = new Set();
 
-  for (const container of containers) {
-    if (!container || typeof container !== "object") continue;
-    const meetingInfo = container.meeting_info || container.meetingInfo || payload.meeting_info || payload.meetingInfo || {};
-    const creator = meetingInfo.creator || container.creator || payload.creator || {};
-    const operator = container.operator || payload.operator || {};
-    const nestedFiles = [
-      ...asArray(container.recording_files),
-      ...asArray(container.recordingFiles),
-      ...asArray(container.record_files),
-      ...asArray(container.records),
-      ...asArray(container.record_file),
-      ...asArray(container.recordFile),
-      ...asArray(container.meeting_record),
-      ...asArray(container.meetingRecord),
-    ];
-    const files = nestedFiles.length
-      ? nestedFiles
-      : tencentMeetingRecordFileId(container)
-        ? [container]
-        : [];
-    const operateTime =
-      container.operate_time ||
-      container.operateTime ||
-      payload.operate_time ||
-      payload.operateTime ||
-      payload.timestamp ||
-      Date.now();
+  for (const { container, files } of recordingContainers) {
+    logger.info("[call] extractTencentMeetingRecordingEvents step 7", {
+      message: `container: ${JSON.stringify(container)}, files.length: ${files.length}`,
+      event,
+    });
+    const meetingInfo = container.meeting_info || {};
+    const creator = meetingInfo.creator || {};
+    const operator = container.creator || {};
+    const operateTime = container.operate_time || Date.now();
     for (const file of files) {
-      const recordFileId = tencentMeetingRecordFileId(file);
+      const recordFileId = String(file?.record_file_id || "").trim();
       if (!recordFileId || seen.has(recordFileId)) continue;
       seen.add(recordFileId);
-      const fileOwner = file?.owner || file?.file_owner || file?.fileOwner || file?.user || file?.creator || {};
-      const durationMs = tencentMeetingDurationMsFromFile(file, meetingInfo, container);
+      const fileOwner = file?.owner || {};
+      const durationMs = canonicalTencentMeetingRecordingDurationMs(meetingInfo);
       entries.push({
         event,
         recordFileId,
-        meetingRecordId: tencentMeetingMeetingRecordId(container, file),
-        sourceKind: tencentMeetingSourceKindFromEvent(event, container, file),
+        sourceKind: event === "recording.completed" ? "cloud" : "recorder",
         operateTime,
         subject:
           firstNonEmptyValue([
             file?.subject,
-            file?.meeting_subject,
-            file?.meetingSubject,
             file?.record_file_name,
-            file?.recordFileName,
             file?.file_name,
-            file?.name,
             container.subject,
             container.meeting_subject,
-            container.meetingSubject,
             meetingInfo.subject,
-            meetingInfo.meeting_subject,
-            meetingInfo.meetingSubject,
           ]) || "",
-        ownerName:
-          firstNonEmptyValue([
-            file?.owner_name,
-            file?.ownerName,
-            file?.user_name,
-            file?.userName,
-            file?.display_name,
-            file?.displayName,
-            file?.nick_name,
-            file?.nickName,
-            file?.nickname,
-            fileOwner.user_name,
-            fileOwner.userName,
-            fileOwner.display_name,
-            fileOwner.displayName,
-            fileOwner.nick_name,
-            fileOwner.nickName,
-            fileOwner.nickname,
-            fileOwner.username,
-            fileOwner.name,
-            creator.user_name,
-            creator.userName,
-            creator.display_name,
-            creator.displayName,
-            creator.nick_name,
-            creator.nickName,
-            creator.nickname,
-            creator.username,
-            creator.name,
-            operator.user_name,
-            operator.userName,
-            operator.display_name,
-            operator.displayName,
-            operator.nick_name,
-            operator.nickName,
-            operator.nickname,
-            operator.username,
-            operator.name,
-          ]) || "",
+        ownerName: creator.user_name,
         creatorUserid:
           firstNonEmptyValue([
             file?.userid,
             file?.user_id,
-            file?.userId,
             fileOwner.userid,
             fileOwner.user_id,
-            fileOwner.userId,
             creator.userid,
             creator.user_id,
-            creator.UserID,
-            creator.userId,
             operator.userid,
             operator.user_id,
-            operator.UserID,
-            operator.userId,
           ]) || "",
         durationMs,
-        meetingId: meetingInfo.meeting_id || meetingInfo.meetingId || container.meeting_id || container.meetingId || "",
-        meetingCode: meetingInfo.meeting_code || meetingInfo.meetingCode || container.meeting_code || container.meetingCode || "",
-        downloadUrl: tencentMeetingDownloadUrlFromFile(file),
+        meetingId: meetingInfo.meeting_id || "",
+        meetingCode: meetingInfo.meeting_code || "",
+        downloadUrl: String(file?.download_url || "").trim(),
         payload,
       });
     }
   }
 
+  logger.info("[call] extractTencentMeetingRecordingEvents step 8", {
+    message: `extraction complete: event=${event}, recordingFileCount=${entries.length}`,
+    event,
+    recordingFileCount: entries.length,
+    entries
+  });
   return entries;
 }
 
@@ -1084,23 +1068,6 @@ async function loadTencentMeetingRecorderOwnerContexts() {
   return buildTencentMeetingRecorderOwnerContexts(payloads);
 }
 
-async function enrichTencentMeetingRecorderOwnerContexts(events = []) {
-  if (!events.length) return events;
-  const contexts = await loadTencentMeetingRecorderOwnerContexts();
-  return events.map((info) => {
-    const context = contexts.get(String(info.recordFileId || ""));
-    if (!context) return info;
-    return {
-      ...info,
-      ownerName: info.ownerName || context.ownerName || "",
-      creatorUserid: info.creatorUserid || context.creatorUserid || "",
-      subject: info.subject || context.subject || "",
-      meetingId: info.meetingId || context.meetingId || "",
-      meetingCode: info.meetingCode || context.meetingCode || "",
-    };
-  });
-}
-
 function cleanTencentMeetingSummaryText(text = "") {
   return String(text || "")
     .replace(/^\uFEFF/, "")
@@ -1137,42 +1104,39 @@ async function fetchTencentMeetingSummaryTranscript(info = {}, durationMs = 0, f
   const recordFileId = String(info.recordFileId || info.record_file_id || "").trim();
   if (!recordFileId || !tencentMeetingApiConfigured()) return null;
 
-  const ids = [
-    recordFileId,
-    String(info.meetingRecordId || info.meeting_record_id || "").trim(),
-  ].filter((value, index, list) => value && list.indexOf(value) === index);
   const identityParamsList = tencentMeetingCandidateDownloadIdentityParams(info);
-  if (!ids.length || !identityParamsList.length) return null;
+  if (!identityParamsList.length) return null;
   await requestTencentMeetingStsTokenIfNeeded();
 
   for (const params of identityParamsList) {
-    for (const id of ids) {
-      try {
-        const payload = await tencentMeetingApiRequest("GET", tencentMeetingQuery(`/v1/addresses/${encodeURIComponent(id)}`, params));
-        const summaryUrls = tencentMeetingSummaryDownloadUrlsFromPayload(payload);
-        for (const summaryUrl of summaryUrls) {
-          try {
-            const summaryText = await fetchTencentMeetingSummaryText(summaryUrl);
-            const result = tencentMeetingTranscriptSegmentsFromText(summaryText, durationMs);
-            if (result.segments.length > 0) {
-              return {
-                ...result,
-                provider: "tencent-meeting",
-                source: "meeting_summary",
-                recordFileId,
-                operator: params,
-              };
-            }
-          } catch (error) {
-            failureKinds.push(tencentMeetingTranscriptErrorKind(error));
-            console.warn("[Tencent Meeting] summary text download skipped:", error instanceof Error ? error.message : error);
+    try {
+      const payload = await tencentMeetingApiRequest(
+        "GET",
+        tencentMeetingQuery(`/v1/addresses/${encodeURIComponent(recordFileId)}`, params),
+      );
+      const summaryUrls = tencentMeetingSummaryDownloadUrlsFromPayload(payload);
+      for (const summaryUrl of summaryUrls) {
+        try {
+          const summaryText = await fetchTencentMeetingSummaryText(summaryUrl);
+          const result = tencentMeetingTranscriptSegmentsFromText(summaryText, durationMs);
+          if (result.segments.length > 0) {
+            return {
+              ...result,
+              provider: "tencent-meeting",
+              source: "meeting_summary",
+              recordFileId,
+              operator: params,
+            };
           }
+        } catch (error) {
+          failureKinds.push(tencentMeetingTranscriptErrorKind(error));
+          console.warn("[Tencent Meeting] summary text download skipped:", error instanceof Error ? error.message : error);
         }
-      } catch (error) {
-        failureKinds.push(tencentMeetingTranscriptErrorKind(error));
-        if (!isTencentMeetingTranscriptUnavailableError(error)) {
-          console.warn("[Tencent Meeting] summary detail lookup skipped:", error instanceof Error ? error.message : error);
-        }
+      }
+    } catch (error) {
+      failureKinds.push(tencentMeetingTranscriptErrorKind(error));
+      if (!isTencentMeetingTranscriptUnavailableError(error)) {
+        console.warn("[Tencent Meeting] summary detail lookup skipped:", error instanceof Error ? error.message : error);
       }
     }
   }
@@ -1183,12 +1147,10 @@ async function fetchTencentMeetingSummaryTranscript(info = {}, durationMs = 0, f
 async function findTencentMeetingDownloadTarget(info) {
   const recordFileId = String(info?.recordFileId || "").trim();
   if (!recordFileId) return null;
-  const meetingRecordId = String(info?.meetingRecordId || info?.meeting_record_id || "").trim();
   if (info.downloadUrl) {
     return {
       record: info.record || {},
       file: info.file || {},
-      meetingRecordId,
       name: info.subject || info.name || "",
       ownerName: info.ownerName || "",
       creatorUserid: info.creatorUserid || "",
@@ -1204,32 +1166,25 @@ async function findTencentMeetingDownloadTarget(info) {
   await requestTencentMeetingStsTokenIfNeeded();
 
   for (const params of identityParams) {
-    const addressIds = [...new Set([recordFileId, meetingRecordId].filter(Boolean))];
-    const addressUris = addressIds.flatMap((addressId) => [
-      tencentMeetingQuery(`/v1/addresses/${encodeURIComponent(addressId)}`, params),
-      tencentMeetingQuery("/v1/addresses", { meeting_record_id: addressId, ...params }),
-    ]);
-    for (const uri of addressUris) {
-      try {
-        const payload = await tencentMeetingApiRequest("GET", uri);
-        const file = payload.record_file || payload.file || payload.data || payload;
-        const downloadUrl = tencentMeetingDownloadUrlFromFile(file);
-        if (downloadUrl) {
-          return {
-            record: payload,
-            file,
-            ...params,
-            meetingRecordId: tencentMeetingMeetingRecordId(payload, file, meetingRecordId),
-            name: tencentMeetingNameFromDetail(payload, file, info.subject),
-            ownerName: tencentMeetingOwnerNameFromDetail(payload, file, info.ownerName),
-            creatorUserid: tencentMeetingCreatorUseridFromDetail(payload, file, info.creatorUserid),
-            durationMs: tencentMeetingDurationMsFromFile(file, payload.meeting_info || payload.meetingInfo || payload, payload),
-            downloadUrl,
-          };
-        }
-      } catch (error) {
-        console.warn("[Tencent Meeting] address lookup skipped:", error instanceof Error ? error.message : error);
+    const uri = tencentMeetingQuery(`/v1/addresses/${encodeURIComponent(recordFileId)}`, params);
+    try {
+      const payload = await tencentMeetingApiRequest("GET", uri);
+      const file = payload.record_file || payload.file || payload.data || payload;
+      const downloadUrl = tencentMeetingDownloadUrlFromFile(file);
+      if (downloadUrl) {
+        return {
+          record: payload,
+          file,
+          ...params,
+          name: tencentMeetingNameFromDetail(payload, file, info.subject),
+          ownerName: tencentMeetingOwnerNameFromDetail(payload, file, info.ownerName),
+          creatorUserid: tencentMeetingCreatorUseridFromDetail(payload, file, info.creatorUserid),
+          durationMs: tencentMeetingDurationMsFromFile(file, payload.meeting_info || payload.meetingInfo || payload, payload),
+          downloadUrl,
+        };
       }
+    } catch (error) {
+      console.warn("[Tencent Meeting] address lookup skipped:", error instanceof Error ? error.message : error);
     }
   }
 
@@ -1251,7 +1206,6 @@ async function findTencentMeetingDownloadTarget(info) {
             return {
               record,
               file,
-              meetingRecordId: tencentMeetingMeetingRecordId(record, file, meetingRecordId),
               name: tencentMeetingNameFromDetail(record, file, info.subject),
               ownerName: tencentMeetingOwnerNameFromDetail(record, file, info.ownerName),
               creatorUserid: tencentMeetingCreatorUseridFromDetail(record, file, info.creatorUserid),
@@ -1287,7 +1241,6 @@ async function findTencentMeetingDownloadTarget(info) {
             record,
             file,
             ...params,
-            meetingRecordId: tencentMeetingMeetingRecordId(record, file, meetingRecordId),
             name: tencentMeetingNameFromDetail(record, file, info.subject),
             ownerName: tencentMeetingOwnerNameFromDetail(record, file, info.ownerName),
             creatorUserid: tencentMeetingCreatorUseridFromDetail(record, file, info.creatorUserid),
@@ -1605,7 +1558,6 @@ async function syncTencentMeetingRecordingAudio(recordingId, info = {}, jobVersi
       data.ownerName = target.ownerName;
     }
     if (target?.creatorUserid) data.tencentMeetingCreatorUserid = target.creatorUserid;
-    if (target?.meetingRecordId) data.tencentMeetingMeetingRecordId = target.meetingRecordId;
     if (target?.record?.meeting_id || target?.record?.meetingId) {
       data.tencentMeetingMeetingId = target.record.meeting_id || target.record.meetingId;
     }
@@ -1673,7 +1625,6 @@ async function syncTencentMeetingRecordingAudio(recordingId, info = {}, jobVersi
       data.ownerName = target.ownerName;
     }
     if (target.creatorUserid) data.tencentMeetingCreatorUserid = target.creatorUserid;
-    if (target.meetingRecordId) data.tencentMeetingMeetingRecordId = target.meetingRecordId;
     if (target.record?.meeting_id || target.record?.meetingId) {
       data.tencentMeetingMeetingId = target.record.meeting_id || target.record.meetingId;
     }
@@ -1842,6 +1793,10 @@ async function backfillTencentMeetingRecorderOwnersFromWebhookHistory() {
 }
 
 async function upsertTencentMeetingRecordingInfos(recordInfos = [], userAgent = "tencent-meeting-sync") {
+  logger.info("[call] upsertTencentMeetingRecordingInfos step 0", {
+    message: `start: recordInfoCount=${recordInfos.length}`,
+    recordInfoCount: recordInfos.length,
+  });
   const uniqueInfos = [];
   const seen = new Set();
   for (const info of recordInfos) {
@@ -1854,40 +1809,32 @@ async function upsertTencentMeetingRecordingInfos(recordInfos = [], userAgent = 
       ownerName: (await resolveTencentMeetingOwnerName(info)) || info.ownerName || "",
     });
   }
-  logger.info("[call] upsertTencentMeetingRecordingInfos step 1: ", {message: `uniqueInfos`})
+  logger.info("[call] upsertTencentMeetingRecordingInfos step 1", {
+    message: `normalized: uniqueInfoCount=${uniqueInfos.length}`,
+    uniqueInfoCount: uniqueInfos.length,
+  });
   if (!uniqueInfos.length) return [];
 
   const now = new Date();
   return prisma.$transaction(async (tx) => {
-    const latest = await tx.recording.findFirst({ orderBy: { seq: "desc" }, select: { seq: true } });
-    let nextSeq = Number(latest?.seq || 0);
     const results = [];
     for (const eventInfo of uniqueInfos) {
-      logger.info("[call] upsertTencentMeetingRecordingInfos step 2: ", {message: `fileId: ${eventInfo.recordFileId}`})
+      logger.info("[call] upsertTencentMeetingRecordingInfos step 2", {
+        message: `lookup: recordFileId=${eventInfo.recordFileId}, sourceKind=${eventInfo.sourceKind || ""}`,
+        recordFileId: eventInfo.recordFileId,
+        sourceKind: eventInfo.sourceKind || "",
+      });
       const source = tencentMeetingSourceKey(eventInfo.recordFileId);
       const existing = await tx.recording.findFirst({
         where: { source },
         include: { segments: { select: { id: true }, take: 1 } },
       });
-      logger.info("[call] upsertTencentMeetingRecordingInfos step 3: ", {message: ``})
-      const meetingRecordId = String(eventInfo.meetingRecordId || "").trim();
-      logger.info("[call] upsertTencentMeetingRecordingInfos step 4: ", {message: `meetingRecordId && meetingRecordId !== eventInfo.recordFileId: ${JSON.stringify(meetingRecordId && meetingRecordId !== eventInfo.recordFileId)}`})
-      if (meetingRecordId && meetingRecordId !== eventInfo.recordFileId) {
-        const duplicate = await tx.recording.findFirst({
-          where: { source: tencentMeetingSourceKey(meetingRecordId), deletedAt: null },
-          include: { segments: { select: { id: true }, take: 1 } },
-        });
-        const matchesMeeting =
-          duplicate &&
-          (!duplicate.tencentMeetingMeetingId || !eventInfo.meetingId || duplicate.tencentMeetingMeetingId === eventInfo.meetingId) &&
-          (!duplicate.tencentMeetingMeetingCode || !eventInfo.meetingCode || duplicate.tencentMeetingMeetingCode === eventInfo.meetingCode);
-        if (matchesMeeting && !duplicate.segments.length && !resolveRecordingAudioPath(recordingFromPrisma(duplicate), projectRoot)) {
-          await tx.recording.update({
-            where: { id: duplicate.id },
-            data: { deletedAt: now, errorMessage: "已由腾讯会议真实录制文件替代。" },
-          });
-        }
-      }
+      logger.info("[call] upsertTencentMeetingRecordingInfos step 3", {
+        message: `lookup complete: existing=${Boolean(existing)}`,
+        recordFileId: eventInfo.recordFileId,
+        recordingId: existing?.id || "",
+        existing: Boolean(existing),
+      });
       if (existing) {
         const hasSegments = existing.segments.length > 0;
         const existingOwnerName = String(existing.ownerName || "").trim();
@@ -1912,7 +1859,6 @@ async function upsertTencentMeetingRecordingInfos(recordInfos = [], userAgent = 
         if (eventInfo.creatorUserid) data.tencentMeetingCreatorUserid = eventInfo.creatorUserid;
         if (eventInfo.meetingId) data.tencentMeetingMeetingId = eventInfo.meetingId;
         if (eventInfo.meetingCode) data.tencentMeetingMeetingCode = eventInfo.meetingCode;
-        if (eventInfo.meetingRecordId) data.tencentMeetingMeetingRecordId = eventInfo.meetingRecordId;
         if (eventInfo.sourceKind) data.tencentMeetingSourceKind = eventInfo.sourceKind;
         if (eventInfo.sourceKind === "cloud" && (!existing.tag || /录音笔|等待同步|已同步/.test(existing.tag))) {
           data.tag = tencentMeetingImportTag(eventInfo, hasSegments ? "已同步转写" : "等待转写");
@@ -1922,49 +1868,71 @@ async function upsertTencentMeetingRecordingInfos(recordInfos = [], userAgent = 
         continue;
       }
 
-      nextSeq += 1;
+      const seq = await nextRecordingSequence();
       const recordingId = crypto.randomUUID();
-      logger.info("[call] upsertTencentMeetingRecordingInfos step 5: ", {message: `recordFileId: ${eventInfo.recordFileId}, id: ${recordingId}`})
-      
-      await tx.recording.create({
-        data: {
-          id: recordingId,
-          seq: nextSeq,
-          name: tencentMeetingPlaceholderName(eventInfo),
-          createdAt: new Date(tencentMeetingEventTimeMs(eventInfo.operateTime)),
-          updatedAt: now,
-          durationMs: BigInt(Math.max(0, Math.round(Number(eventInfo.durationMs || 0)))),
-          mimeType: "audio/mpeg",
-          fileSize: 0n,
-          fileName: "",
-          storageProvider: "local",
-          storageKey: "",
-          transcriptPath: "",
-          favorite: false,
-          ownerClientId: tencentMeetingImportOwnerClientId(),
-          ownerName: eventInfo.ownerName || tencentMeetingImportOwnerName(),
-          shared: true,
-          sharedAt: now,
-          speakerName: "speaker-1",
-          speakerMapJson: "{}",
-          tag: tencentMeetingImportTag(eventInfo, "等待同步"),
-          deletedAt: null,
-          transcriptProvider: "tencent-meeting",
-          transcriptSource: "",
-          transcribedAt: null,
-          status: "uploaded",
-          source,
-          tencentMeetingCreatorUserid: eventInfo.creatorUserid || "",
-          tencentMeetingMeetingId: eventInfo.meetingId || "",
-          tencentMeetingMeetingCode: eventInfo.meetingCode || "",
-          tencentMeetingMeetingRecordId: eventInfo.meetingRecordId || "",
-          tencentMeetingSourceKind: eventInfo.sourceKind || "",
-          errorMessage: "",
-          userAgent,
-          audioUrl: tencentMeetingRecordingAudioUrl(recordingId),
-        },
+      logger.info("[call] upsertTencentMeetingRecordingInfos step 4", {
+        message: `create: recordFileId=${eventInfo.recordFileId}, recordingId=${recordingId}, seq=${seq}`,
+        recordFileId: eventInfo.recordFileId,
+        recordingId,
+        seq,
       });
-      logger.info("[call] upsertTencentMeetingRecordingInfos step 6: ", {message: ``})
+
+
+      try {
+        await tx.recording.create({
+          data: {
+            id: recordingId,
+            seq,
+            name: tencentMeetingPlaceholderName(eventInfo),
+            createdAt: new Date(tencentMeetingEventTimeMs(eventInfo.operateTime)),
+            updatedAt: now,
+            durationMs: BigInt(Math.max(0, Math.round(Number(eventInfo.durationMs || 0)))),
+            mimeType: "audio/mpeg",
+            fileSize: 0n,
+            fileName: "",
+            storageProvider: "local",
+            storageKey: "",
+            transcriptPath: "",
+            favorite: false,
+            ownerClientId: tencentMeetingImportOwnerClientId(),
+            ownerName: eventInfo.ownerName || tencentMeetingImportOwnerName(),
+            shared: true,
+            sharedAt: now,
+            speakerName: "speaker-1",
+            speakerMapJson: "{}",
+            tag: tencentMeetingImportTag(eventInfo, "等待同步"),
+            deletedAt: null,
+            transcriptProvider: "tencent-meeting",
+            transcriptSource: "",
+            transcribedAt: null,
+            status: "uploaded",
+            source,
+            tencentMeetingCreatorUserid: eventInfo.creatorUserid || "",
+            tencentMeetingMeetingId: eventInfo.meetingId || "",
+            tencentMeetingMeetingCode: eventInfo.meetingCode || "",
+            tencentMeetingSourceKind: eventInfo.sourceKind || "",
+            errorMessage: "",
+            userAgent,
+            audioUrl: tencentMeetingRecordingAudioUrl(recordingId),
+          },
+        });
+      } catch (error) {
+        logger.error("[call] upsertTencentMeetingRecordingInfos step failed: ", {
+          message: "recording create failed",
+          recordFileId: eventInfo.recordFileId,
+          recordingId,
+          seq,
+          errorCode: error?.code || "",
+          errorMessage: error?.message || String(error),
+          errorMeta: error?.meta || {},
+        });
+        throw error;
+      }
+      logger.info("[call] upsertTencentMeetingRecordingInfos step 5", {
+        message: `created: recordFileId=${eventInfo.recordFileId}, recordingId=${recordingId}`,
+        recordFileId: eventInfo.recordFileId,
+        recordingId,
+      });
       results.push({ recordingId, recordFileId: eventInfo.recordFileId, created: true, info: eventInfo });
     }
     return results;
@@ -1975,14 +1943,15 @@ async function importTencentMeetingWebhookPayload(
   payload,
   { syncAudio = false, syncTranscript = false, userAgent = "tencent-meeting-webhook" } = {},
 ) {
-  logger.debug("触发ststoken获取", {message: 'step2'})
-  const events = await enrichTencentMeetingRecorderOwnerContexts(extractTencentMeetingRecordingEvents(payload));
-  logger.debug("触发ststoken获取", {message: `step3 length: ${events.length}`})
+  logger.debug("[call] importTencentMeetingWebhookPayload step 0: ", {message: `payload: ${JSON.stringify(payload)}`})
+  
+  const events = extractTencentMeetingRecordingEvents(payload)
+  logger.debug("[call] importTencentMeetingWebhookPayload", {message: `step 1 length: ${events.length}, events: ${JSON.stringify(events)}`})
   if (!events.length) return [];
   const results = await upsertTencentMeetingRecordingInfos(events, userAgent);
   if (results.length) {
     console.info(
-      "[Tencent Meeting] webhook imported:",
+      "[call] importTencentMeetingWebhookPayload",
       results
         .map((result) => `${result.info?.sourceKind || "unknown"}:${result.recordFileId}:${result.created ? "created" : "updated"}`)
         .join(", "),

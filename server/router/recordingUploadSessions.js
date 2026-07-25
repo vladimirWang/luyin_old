@@ -4,6 +4,7 @@ import crypto from "node:crypto";
 import path from "node:path";
 import { mkdir, readdir, rename, rm, writeFile } from "node:fs/promises";
 import logger from "../utils/log.js";
+import { nextRecordingSequence } from "../services/recordingSequence.js";
 import { getTranscriptionMode } from "../transcription.mjs";
 import { audioDir, tempDir, updateDb } from "../db.mjs";
 import { mergeAudioFilesToMp3 } from "../media.mjs";
@@ -169,9 +170,8 @@ router.post("/:sessionId/finalize", async (request, response, next) => {
     await mergeAudioFilesToMp3(partFiles, storagePath);
     const { storedFile, durationMs } = await verifiedStoredRecording(storagePath, meta.durationMs || request.body?.durationMs);
 
+    const seq = await nextRecordingSequence();
     const recording = await updateDb((db) => {
-      db.counters.recordingSeq += 1;
-      const seq = db.counters.recordingSeq;
       const item = {
         id,
         seq,

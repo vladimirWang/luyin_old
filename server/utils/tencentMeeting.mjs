@@ -3,8 +3,6 @@ import logger from "./log.js";
 import { normalizeTencentMeetingEncryptedData, tencentMeetingDecryptData } from "./tencentMeetingCrypto.mjs";
 import { firstEnv, parseJsonObject, splitEnvList, firstNonEmptyValue, asArray, boundedNumber } from "./common.mjs";
 import { decodedTencentMeetingAesKeyLength } from "./algo.js";
-import { resolveRecordingAudioPath } from "./recordings.js";
-import { projectRoot } from "../config.js";
 import {TENCENT_MEETING_SOURCE_PREFIX} from '../constant.js'
 import { getTMToken, requestTMToken, setTMToken } from "./token.js";
 
@@ -114,22 +112,6 @@ export function expandTencentMeetingKeyCandidates(keys) {
   }
 
   return output.slice(0, 512);
-}
-
-export function findTencentMeetingContainerDuplicate(db, info = {}) {
-  const meetingRecordId = String(info.meetingRecordId || info.meeting_record_id || "").trim();
-  const recordFileId = String(info.recordFileId || info.record_file_id || "").trim();
-  if (!meetingRecordId || !recordFileId || meetingRecordId === recordFileId) return null;
-
-  return (db.recordings || []).find((recording) => {
-    if (recording.source !== `tencent-meeting:${meetingRecordId}`) return false;
-    if (recording.deletedAt) return false;
-    if (recording.tencentMeetingMeetingId && info.meetingId && recording.tencentMeetingMeetingId !== info.meetingId) return false;
-    if (recording.tencentMeetingMeetingCode && info.meetingCode && recording.tencentMeetingMeetingCode !== info.meetingCode) return false;
-
-    const hasSegments = (db.transcriptSegments || []).some((segment) => segment.recordingId === recording.id);
-    return !hasSegments && !resolveRecordingAudioPath(recording, projectRoot);
-  });
 }
 
 // 说明：对外部输入或模型输出做规整与安全清理。
@@ -356,21 +338,6 @@ export function tencentMeetingRecordFileId(file = {}) {
 
 export function isTencentMeetingRecording(recording = {}) {
   return String(recording.source || "").startsWith(TENCENT_MEETING_SOURCE_PREFIX);
-}
-
-export function tencentMeetingMeetingRecordId(record = {}, file = {}, fallback = "") {
-  return String(
-    firstNonEmptyValue([
-      file.meeting_record_id,
-      file.meetingRecordId,
-      record.meeting_record_id,
-      record.meetingRecordId,
-      record.record_id,
-      record.recordId,
-      record.id,
-      fallback,
-    ]),
-  ).trim();
 }
 
 export function tencentMeetingSourceKindFromEvent(event = "", container = {}, file = {}, fallback = "") {
@@ -960,13 +927,11 @@ export function tencentMeetingOperateTimeFromRecord(record = {}, file = {}, fall
 export function tencentMeetingInfoFromRecordFile(record = {}, file = {}, fallback = {}, sourceKind = "cloud") {
   const meetingInfo = record.meeting_info || record.meetingInfo || record;
   const recordFileId = tencentMeetingRecordFileId(file) || String(fallback.recordFileId || "").trim();
-  const meetingRecordId = tencentMeetingMeetingRecordId(record, file, fallback.meetingRecordId || fallback.meeting_record_id || "");
   const detectedSourceKind = tencentMeetingSourceKindFromEvent(fallback.event || record.event || "", record, file, sourceKind);
   return {
     event: fallback.event || "recording.discovery",
     sourceKind: detectedSourceKind,
     recordFileId,
-    meetingRecordId,
     operateTime: tencentMeetingOperateTimeFromRecord(record, file, fallback.operateTime),
     subject: tencentMeetingNameFromDetail(record, file, fallback.subject),
     ownerName: tencentMeetingOwnerNameFromDetail(record, file, fallback.ownerName),
@@ -983,7 +948,6 @@ export function tencentMeetingInfoFromRecordFile(record = {}, file = {}, fallbac
 export function tencentMeetingSyncInfoFromRecording(recording = {}) {
   return {
     recordFileId: String(recording.source || "").slice(TENCENT_MEETING_SOURCE_PREFIX.length+1),
-    meetingRecordId: recording.tencentMeetingMeetingRecordId || "",
     sourceKind:
       recording.tencentMeetingSourceKind ||
       (/云录制|cloud|recording\.completed/i.test(`${recording.tag || ""} ${recording.userAgent || ""}`) ? "cloud" : "recorder"),

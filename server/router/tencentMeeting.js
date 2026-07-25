@@ -142,12 +142,15 @@ router.post("/webhook", async (request, response) => {
               // The persisted event is later used to resolve recorder ownership.
               break;
             case "recording-completed":
+              logger.info("logger.info listen /webhook tencentmeeting event recording-completed: ", {message: JSON.stringify(payload)})
               await importTencentMeetingRecordingCompletedPayload(payload);
               break;
             case "audio-completed":
+              logger.info("logger.info listen /webhook tencentmeeting event audio-completed: ", {message: JSON.stringify(payload)})
               await importTencentMeetingAudioCompletedPayload(payload);
               break;
             case "transcript-ready": {
+              logger.info("logger.info listen /webhook tencentmeeting event transcript-ready: ", {message: JSON.stringify(payload)})
               await importTencentMeetingTranscriptReadyPayload(payload);
               break;
             }
