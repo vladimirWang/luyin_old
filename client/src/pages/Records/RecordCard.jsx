@@ -342,7 +342,7 @@ export function RecordCard({
           </select>
 
           <div className="record-owner-badge">
-            <span>{recording.tencentMeeting.sourceKing === 'cloud' ? recording.ownerName: 'recording.audio-completed'}</span>
+            <span>{recording.tencentMeeting.sourceKind === 'cloud' ? recording.ownerName: 'recording.audio-completed'}</span>
           </div>
         </div>
 
