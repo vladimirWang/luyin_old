@@ -11,7 +11,12 @@ import {
   tencentMeetingWebhookEventAction,
   tencentMeetingTranscriptSegmentsFromPayload,
   tencentMeetingTranscriptSegmentsFromText,
+  tencentMeetingDisplayTime,
 } from "./tencentMeeting.mjs";
+
+test("Tencent Meeting recording display time is formatted in Asia/Shanghai", () => {
+  assert.equal(tencentMeetingDisplayTime(Date.UTC(2026, 6, 25, 13, 22, 0)), "07/25 21:22");
+});
 
 test("only the canonical smart.transcripts event marks a transcript as ready", () => {
   assert.equal(isTencentMeetingTranscriptReadyEvent({ event: "smart.transcripts" }), true);

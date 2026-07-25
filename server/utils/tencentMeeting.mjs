@@ -317,8 +317,16 @@ export function tencentMeetingDurationMsFromFile(file = {}, meetingInfo = {}, co
 
 export function tencentMeetingDisplayTime(value) {
   const date = new Date(tencentMeetingEventTimeMs(value));
-  const pad = (part) => String(part).padStart(2, "0");
-  return `${pad(date.getMonth() + 1)}/${pad(date.getDate())} ${pad(date.getHours())}:${pad(date.getMinutes())}`;
+  const parts = new Intl.DateTimeFormat("en-US", {
+    timeZone: "Asia/Shanghai",
+    month: "2-digit",
+    day: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit",
+    hourCycle: "h23",
+  }).formatToParts(date);
+  const valueByType = Object.fromEntries(parts.map((part) => [part.type, part.value]));
+  return `${valueByType.month}/${valueByType.day} ${valueByType.hour}:${valueByType.minute}`;
 }
 
 export function tencentMeetingPlaceholderName(info) {
