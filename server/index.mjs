@@ -1424,7 +1424,12 @@ async function fetchTencentMeetingBuiltInTranscript(info = {}, durationMs = 0) {
   const failureKinds = [];
 
   const operatorParamsList = tencentMeetingCandidateTranscriptOperatorParams(info);
-  logger.info("[CALL] fetchTencentMeetingBuiltInTranscript", {message: `operatorParamsList: ${JSON.stringify(operatorParamsList)}`});
+  logger.info("[call] fetchTencentMeetingBuiltInTranscript step 0", {
+    message: "transcript lookup identities prepared",
+    recordFileId,
+    identityCount: operatorParamsList.length,
+    identityKinds: [...new Set(operatorParamsList.map(tencentMeetingLookupIdentityKind))],
+  });
   for (const operatorParams of operatorParamsList) {
     // 方式a 标准转写详情接口
     const uri = tencentMeetingQuery("/v1/records/transcripts/details", {
@@ -1433,7 +1438,11 @@ async function fetchTencentMeetingBuiltInTranscript(info = {}, durationMs = 0) {
       transcripts_type: Number(process.env.TENCENT_MEETING_TRANSCRIPTS_TYPE || 1),
       ...operatorParams,
     });
-    logger.info("[CALL] fetchTencentMeetingBuiltInTranscript", {message: `uri: ${uri}`});
+    logger.info("[call] fetchTencentMeetingBuiltInTranscript step 1", {
+      message: "transcript detail lookup started",
+      recordFileId,
+      identityKind: tencentMeetingLookupIdentityKind(operatorParams),
+    });
     try {
       const payload = await tencentMeetingApiRequest("GET", uri);
       const result = tencentMeetingTranscriptSegmentsFromPayload(payload, durationMs);

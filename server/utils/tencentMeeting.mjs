@@ -136,7 +136,10 @@ function tencentMeetingCallbackSignature(token, timestamp, nonce, data) {
 
 // 说明：校验腾讯会议 webhook 签名并解密密文，只接受可信回调。
 export function tencentMeetingVerifiedPlaintext(request, encryptedData) {
-  logger.info("[CALL] tencentMeetingVerifiedPlaintext encryptedData ", {message: encryptedData})
+  logger.info("[call] tencentMeetingVerifiedPlaintext step 0", {
+    message: "encrypted webhook verification started",
+    hasEncryptedData: Boolean(String(encryptedData || "").trim()),
+  });
   const config = tencentMeetingWebhookConfig();
   if (!config.tokens.length || !config.encodingAesKeys.length) {
     const error = new Error("Tencent Meeting webhook is not configured.");
