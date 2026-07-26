@@ -4,3 +4,7 @@ import req from "../utils/request";
 export function getRecordings(params) {
     return req.get("/api/recordings", {params})
 }
+
+export function createRecordingAudioShareLink(recordingId) {
+    return req.post(`/api/recordings/${encodeURIComponent(recordingId)}/audio-share-url`)
+}

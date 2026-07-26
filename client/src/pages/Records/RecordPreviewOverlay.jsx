@@ -409,7 +409,7 @@ export function RecordPreviewOverlay({ recording, onClose, onAsk, onShare, onRet
                 {shareBusyMode === "text" ? "准备中" : "文字 TXT"}
               </button>
               <button type="button" disabled={Boolean(shareBusyMode)} onClick={(event) => handleShare("audio", event)}>
-                {shareBusyMode === "audio" ? "准备中" : "录音 MP3"}
+                {shareBusyMode === "audio" ? "准备中" : "录音链接"}
               </button>
             </div>
           ) : null}

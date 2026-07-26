@@ -37,6 +37,7 @@ import {
   transcriptSegmentFromPrisma,
 } from "../repositories/recordings.mjs";
 import { nextRecordingSequence } from "../services/recordingSequence.js";
+import { createAudioDownloadToken, hasValidAudioDownloadToken } from "../utils/audioShare.js";
 
 const prisma = await import('../plugins/prisma.cjs').then(m => m.default || m);
 
@@ -52,7 +53,7 @@ export function configure(root, deps) {
 }
 
 async function sendRecordingAudio(req, res, disposition = "inline") {
-  const { hasValidAudioDownloadToken, queueTencentMeetingImportSync, findRecording, resolveRecordingAudioPath } = dependencies;
+  const { queueTencentMeetingImportSync, findRecording, resolveRecordingAudioPath } = dependencies;
   const db = await loadDb();
   const clientId = requestClientIdBetter(req);
   const clientName = requestClientNameAndDecode(req);
@@ -778,7 +779,7 @@ router.get("/:id/audio.mp3", async (request, response) => {
 });
 
 router.post("/:id/audio-share-url", async (request, response) => {
-  const { createAudioDownloadToken, findRecording, resolveRecordingAudioPath } = dependencies;
+  const { findRecording, resolveRecordingAudioPath } = dependencies;
   const db = await loadDb();
   const clientId = requestClientIdBetter(request);
   const clientName = requestClientNameAndDecode(request);
@@ -792,7 +793,7 @@ router.post("/:id/audio-share-url", async (request, response) => {
   const fileName = `${safeDownloadName(recording.name || "recording")}.mp3`;
   const token = createAudioDownloadToken(recording.id);
   response.json({
-    url: `/api/recordings/${encodeURIComponent(recording.id)}/audio.mp3?token=${encodeURIComponent(token)}`,
+    url: `/api/recordings/${encodeURIComponent(recording.id)}/audio?token=${encodeURIComponent(token)}`,
     fileName,
     contentType: "audio/mpeg",
     size: statSync(audioPath).size,

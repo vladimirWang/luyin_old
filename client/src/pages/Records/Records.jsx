@@ -105,7 +105,7 @@ import {useUploadManager} from '../../hooks/useUploadManager.js'
 import { useWecomAuthStore } from '../../stores/useWecomAuthStore.js'
 import {QA_ACTIVE_MESSAGE_KEY, DAILY_BRIEF_ACTIVE_KEY, PROFILE_STORAGE_KEY} from '../../constant.js'
 import {appendUrlParam} from '../../utils/index.js'
-import {getRecordings} from '../../api/recordings.js'
+import { createRecordingAudioShareLink, getRecordings } from "../../api/recordings.js";
 import {fetchPdfFile} from '../../utils/pdf.js'
 
 const cardColors = ["coral", "indigo", "violet", "teal", "clay", "ink"];
@@ -660,12 +660,10 @@ export default function Records() {
 
     async function getAudioShareInfo() {
       if (audioShareInfo) return audioShareInfo;
-      const payload = await api(`/api/recordings/${recording.id}/audio-share-url`, { method: "POST" });
-      const downloadUrl = new URL(payload.url || audioDownloadUrl, window.location.origin);
-      downloadUrl.searchParams.set("download", "1");
+      const payload = await createRecordingAudioShareLink(recording.id);
       audioShareInfo = {
         ...payload,
-        url: downloadUrl.toString(),
+        url: new URL(payload.url || audioDownloadUrl, window.location.origin).toString(),
         fileName: safeFileNameWithExtension(payload.fileName || audioFileName, ".mp3"),
         contentType: payload.contentType || "audio/mpeg",
       };
@@ -675,7 +673,9 @@ export default function Records() {
     async function getAudioFile() {
       if (audioFile) return audioFile;
       const shareInfo = await getAudioShareInfo();
-      const audioResponse = await fetchWithClient(shareInfo.url, { cache: "no-store" });
+      const downloadUrl = new URL(shareInfo.url);
+      downloadUrl.searchParams.set("download", "1");
+      const audioResponse = await fetchWithClient(downloadUrl.toString(), { cache: "no-store" });
       if (!audioResponse.ok) throw new Error("MP3 录音读取失败");
       const responseType = audioResponse.headers.get("content-type") || "";
       if (/application\/json|text\/|text\/html/i.test(responseType)) throw new Error("MP3 录音读取失败");
@@ -741,7 +741,9 @@ export default function Records() {
 
     async function downloadAudioFileFallback(toastText) {
       const shareInfo = await getAudioShareInfo();
-      openDownloadUrl(shareInfo.url, shareInfo.fileName || audioFileName);
+      const downloadUrl = new URL(shareInfo.url);
+      downloadUrl.searchParams.set("download", "1");
+      openDownloadUrl(downloadUrl.toString(), shareInfo.fileName || audioFileName);
       showToast(toastText);
     }
 
@@ -751,22 +753,49 @@ export default function Records() {
       return true;
     }
 
+    async function shareAudioLink() {
+      const shareInfo = await getAudioShareInfo();
+      const shareText = `${recording.name}\n时长：${formatDuration(recording.durationMs)}\n录音链接：${shareInfo.url}`;
+
+      if (isInWeCom() && window.wx?.invoke) {
+        try {
+          await invokeWecom("shareAppMessage", {
+            title: recording.name,
+            desc: `录音，时长 ${formatDuration(recording.durationMs)}`,
+            link: shareInfo.url,
+            imgUrl: "",
+          });
+          showToast("已打开企业微信录音链接分享");
+          return;
+        } catch {
+          // Continue with system link sharing or clipboard copy.
+        }
+      }
+
+      try {
+        if (await shareUrl(shareInfo.url, shareText)) {
+          showToast("已调起录音链接分享");
+          return;
+        }
+      } catch (error) {
+        if (error?.name === "AbortError") return;
+        // Continue with clipboard copy when native link sharing is unavailable.
+      }
+
+      try {
+        await navigator.clipboard.writeText(shareInfo.url);
+        showToast("录音链接已复制");
+      } catch {
+        setShareSheet({ title: recording.name, text: shareText });
+      }
+    }
+
     try {
       if (shareMode === "text") {
         if (await shareFiles([transcriptFile])) return;
         if (await shareUrl(transcriptUrl, `${text}\nTXT：${transcriptUrl}`)) return;
       } else if (shareMode === "audio") {
-        try {
-          if (await shareWecomAudioFile()) return;
-        } catch {
-          // Continue with system file sharing or local save.
-        }
-        const mp3File = await getAudioFile();
-        if (await shareFiles([mp3File], "", { fileOnly: true })) {
-          showToast("已调起 MP3 文件分享");
-          return;
-        }
-        await downloadAudioFileFallback("已开始下载 MP3 文件，请从企业微信文件里发送");
+        await shareAudioLink();
         return;
       } else if (shareMode === "outline") {
         const pdfFile = await getOutlineFile();
@@ -808,13 +837,8 @@ export default function Records() {
         }
       }
       if (shareMode === "audio") {
-        try {
-          await downloadAudioFileFallback("已开始下载 MP3 文件，请从企业微信文件里发送");
-          return;
-        } catch {
-          showToast(error instanceof Error ? error.message : "MP3 分享失败");
-          return;
-        }
+        showToast(error instanceof Error ? error.message : "录音链接分享失败");
+        return;
       }
     }
 

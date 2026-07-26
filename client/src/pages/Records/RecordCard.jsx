@@ -205,7 +205,7 @@ export function RecordCard({
   const shareOptions = [
     { mode: "outline", label: "会议提纲" },
     { mode: "text", label: "逐字稿" },
-    { mode: "audio", label: "录音" },
+    { mode: "audio", label: "录音链接" },
   ];
   const sourceMeta = recordSourceMeta(recording);
   const sourceKind = String(recording.tencentMeeting?.sourceKind || "").toLowerCase();
