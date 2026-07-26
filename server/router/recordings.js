@@ -21,6 +21,7 @@ import {
 } from "../utils/recordings.js";
 import { uploadWecomTemporaryFile } from "../utils/wecom.js";
 import { isTencentMeetingRecording, tencentMeetingSyncInfoFromRecording } from "../utils/tencentMeeting.mjs";
+import { TENCENT_MEETING_WEBHOOK_EVENTS } from "../constant.js";
 // import prisma from "../plugins/prisma.js";
 import {
   finalizeStagedFileDeletions,
@@ -907,7 +908,7 @@ router.post("/:id/transcribe", async (request, response) => {
     if (syncInfo.sourceKind === "recorder") {
       const queued = queueTencentMeetingTranscriptSync(recording.id, {
         ...syncInfo,
-        event: "recording.audio-completed",
+        event: TENCENT_MEETING_WEBHOOK_EVENTS["RECORDING.AUDIO-COMPLETED"],
       });
       response.status(202).json({
         ok: true,

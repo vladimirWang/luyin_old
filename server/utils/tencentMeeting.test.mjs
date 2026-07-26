@@ -8,7 +8,6 @@ import {
   tencentMeetingTranscriptErrorKind,
   tencentMeetingTranscriptSyncMaxAttempts,
   tencentMeetingSummaryDownloadUrlsFromPayload,
-  tencentMeetingWebhookEventAction,
   tencentMeetingTranscriptSegmentsFromPayload,
   tencentMeetingTranscriptSegmentsFromText,
   tencentMeetingDisplayTime,
@@ -57,16 +56,6 @@ test("recorder detail payload exposes intelligent transcript text downloads", ()
     }),
     ["https://example.test/recorder-transcript.txt"],
   );
-});
-
-test("Tencent Meeting webhook events map to separate canonical actions", () => {
-  assert.equal(tencentMeetingWebhookEventAction({ event: "common.sts-token" }), "sts-token");
-  assert.equal(tencentMeetingWebhookEventAction({ event: "recording.started" }), "recording-started");
-  assert.equal(tencentMeetingWebhookEventAction({ event: "recording.completed" }), "recording-completed");
-  assert.equal(tencentMeetingWebhookEventAction({ event: "recording.audio-completed" }), "audio-completed");
-  assert.equal(tencentMeetingWebhookEventAction({ event: "smart.transcripts" }), "transcript-ready");
-  assert.equal(tencentMeetingWebhookEventAction({ event_type: "recording.audio-completed" }), "ignored");
-  assert.equal(tencentMeetingWebhookEventAction({ event: "unknown.event" }), "ignored");
 });
 
 test("Tencent Meeting payload parser returns the transcript result shape used by sync jobs", () => {

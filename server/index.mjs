@@ -110,7 +110,7 @@ import {
 import {removeFileIfExists} from './utils/file.js'
 import {getWecomUserByUserId} from './utils/wecom.js'
 import {dailyBriefScheduleHours, projectRoot, transcriptionRecoveryBatchSize} from './config.js'
-import {TENCENT_MEETING_SOURCE_PREFIX} from './constant.js'
+import { TENCENT_MEETING_SOURCE_PREFIX, TENCENT_MEETING_WEBHOOK_EVENTS } from "./constant.js";
 import {
   listActiveRecordingsCreatedBetweenWithPrisma,
   listActiveRecordingsWithPrisma,
@@ -856,9 +856,9 @@ function isLocalApiTranscriptionRecording(recording = {}) {
 }
 
 const TENCENT_MEETING_RECORDING_FILE_EVENTS = new Set([
-  "recording.completed",
-  "recording.audio-completed",
-  "smart.transcripts",
+  TENCENT_MEETING_WEBHOOK_EVENTS["RECORDING.COMPLETED"],
+  TENCENT_MEETING_WEBHOOK_EVENTS["RECORDING.AUDIO-COMPLETED"],
+  TENCENT_MEETING_WEBHOOK_EVENTS["SMART.TRANSCRIPTS"],
 ]);
 
 function tencentMeetingRecordingFilesFromContainer(container) {
@@ -949,7 +949,7 @@ function extractTencentMeetingRecordingEvents(payload) {
       entries.push({
         event,
         recordFileId,
-        sourceKind: event === "recording.completed" ? "cloud" : "recorder",
+        sourceKind: event === TENCENT_MEETING_WEBHOOK_EVENTS["RECORDING.COMPLETED"] ? "cloud" : "recorder",
         operateTime,
         subject:
           firstNonEmptyValue([
@@ -993,7 +993,7 @@ function extractTencentMeetingRecordingEvents(payload) {
 function extractTencentMeetingStartedOwnerContext(payload) {
   if (!payload || typeof payload !== "object") return null;
   const event = String(payload.event || "").trim();
-  if (event !== "recording.started") return null;
+  if (event !== TENCENT_MEETING_WEBHOOK_EVENTS["RECORDING.STARTED"]) return null;
 
   const containers = asArray(payload.payload);
   for (const container of containers) {
@@ -1053,7 +1053,7 @@ function buildTencentMeetingRecorderOwnerContexts(webhookPayloads = []) {
     }
 
     const event = String(payload?.event || "").trim();
-    if (event !== "recording.audio-completed") continue;
+    if (event !== TENCENT_MEETING_WEBHOOK_EVENTS["RECORDING.AUDIO-COMPLETED"]) continue;
     const completedFiles = extractTencentMeetingRecordingEvents(payload);
     if (!completedFiles.length) continue;
     const completedAt = Math.min(...completedFiles.map((info) => tencentMeetingEventTimeMs(info.operateTime)));
@@ -1561,7 +1561,7 @@ async function fetchTencentMeetingBuiltInTranscript(info = {}, durationMs = 0) {
 
   }
 
-  const recorderSummaryFallback = event === "recording.audio-completed";
+  const recorderSummaryFallback = event === TENCENT_MEETING_WEBHOOK_EVENTS["RECORDING.AUDIO-COMPLETED"];
   if (recorderSummaryFallback || tencentMeetingSummaryFallbackEnabled(info)) {
     logger.info("[call] fetchTencentMeetingBuiltInTranscript step 10", {
       message: "transcript text-file fallback started",
@@ -2003,7 +2003,8 @@ async function syncTencentMeetingRecordingAudio(recordingId, info = {}, jobVersi
     if (waitsForTencentTranscript && !needsIdentity) {
       data.tag = tencentMeetingImportTag(info, "等待腾讯会议文字");
       data.errorMessage =
-        info.sourceKind === "recorder" || String(info.event || "") === "recording.audio-completed"
+        info.sourceKind === "recorder" ||
+        String(info.event || "") === TENCENT_MEETING_WEBHOOK_EVENTS["RECORDING.AUDIO-COMPLETED"]
           ? "腾讯会议录音笔已完成音频处理，正在同步录音笔转写内容；如果文字仍在生成，后台会按计划重试。"
           : "腾讯会议转写内容尚未返回，后台会等待对应事件后继续同步。";
     }
@@ -2376,7 +2377,7 @@ function queueTencentMeetingTranscriptSync(recordingId, info = {}) {
     return false;
   }
   if (tencentMeetingTranscriptJobs.has(recordingId)) {
-    if (String(info.event || "") === "smart.transcripts") {
+    if (String(info.event || "") === TENCENT_MEETING_WEBHOOK_EVENTS["SMART.TRANSCRIPTS"]) {
       tencentMeetingTranscriptRetrySignals.add(recordingId);
       tencentMeetingTranscriptRetryWakeups.get(recordingId)?.();
       logger.info("[call] queueTencentMeetingTranscriptSync step 3", {
@@ -2685,7 +2686,6 @@ async function importTencentMeetingWebhookPayload(
       created: Boolean(result.created),
     })),
   });
-
   for (const result of results) {
     let transcriptQueued = false;
     if (syncTranscript) {
@@ -2765,11 +2765,11 @@ async function replayMissingTencentMeetingRecordingWebhooks() {
     if (infos.every((info) => existingSources.has(tencentMeetingSourceKey(info.recordFileId)))) continue;
     const event = String(payload?.event || "").trim();
     const results =
-      event === "recording.audio-completed"
+      event === TENCENT_MEETING_WEBHOOK_EVENTS["RECORDING.AUDIO-COMPLETED"]
         ? await importTencentMeetingAudioCompletedPayload(payload)
-        : event === "recording.completed"
+        : event === TENCENT_MEETING_WEBHOOK_EVENTS["RECORDING.COMPLETED"]
           ? await importTencentMeetingRecordingCompletedPayload(payload)
-          : event === "smart.transcripts"
+          : event === TENCENT_MEETING_WEBHOOK_EVENTS["SMART.TRANSCRIPTS"]
             ? await importTencentMeetingTranscriptReadyPayload(payload)
             : await importTencentMeetingWebhookPayload(payload);
     for (const result of results) existingSources.add(tencentMeetingSourceKey(result.recordFileId));

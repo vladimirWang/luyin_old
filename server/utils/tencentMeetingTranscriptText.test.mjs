@@ -8,6 +8,7 @@ test("Tencent Meeting payload parser extracts text from nested values", () => {
       paragraphs: [
         {
           start_time: 2_000,
+          speaker: { user_name: "Test user" },
           text: [{ text: "validated. " }, { content: "transcript ready." }],
         },
       ],
@@ -15,4 +16,5 @@ test("Tencent Meeting payload parser extracts text from nested values", () => {
   });
 
   assert.deepEqual(result.segments.map((segment) => segment.text), ["validated.transcript ready."]);
+  assert.equal(result.segments[0].speakerName, "Test user");
 });

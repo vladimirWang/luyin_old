@@ -4,10 +4,10 @@ import { parseJsonObject } from "../utils/common.mjs";
 import {
   importTencentMeetingStsTokenPayload,
   requestTencentMeetingStsTokenIfNeeded,
-  tencentMeetingWebhookEventAction,
   tencentMeetingVerifiedPlaintext,
   tencentMeetingWebhookStatus,
 } from "../utils/tencentMeeting.mjs";
+import { TENCENT_MEETING_WEBHOOK_EVENTS } from "../constant.js";
 import {
   appendTencentMeetingWebhookEvent,
   markTencentMeetingWebhookEventFailed,
@@ -103,18 +103,15 @@ router.post("/webhook", async (request, response) => {
   } = dependencies;
   let event = "";
   let traceId = "";
-  let action = "ignored";
   try {
     const plaintext = tencentMeetingVerifiedPlaintext(request, request.body?.data);
     const payload = parseJsonObject(plaintext);
     event = String(payload?.event || "");
     traceId = String(payload?.trace_id || "");
-    action = tencentMeetingWebhookEventAction(payload);
     logger.info("[call] tencentMeetingWebhookPost step 0", {
       message: "verified webhook received",
       event,
       traceId,
-      action,
     });
     // 记录腾讯会议webhhook日志
     const persisted = await appendTencentMeetingWebhookEvent({
@@ -151,24 +148,23 @@ router.post("/webhook", async (request, response) => {
             event: String(payload.event || ""),
             traceId: String(payload.trace_id || ""),
             eventId,
-            action,
           });
-          switch (action) {
-            case "sts-token": {
+          switch (event) {
+            case TENCENT_MEETING_WEBHOOK_EVENTS["COMMON.STS-TOKEN"]: {
               const saved = await importTencentMeetingStsTokenPayload(payload);
               if (saved) await queueTencentMeetingPendingImports();
               break;
             }
-            case "recording-started":
+            case TENCENT_MEETING_WEBHOOK_EVENTS["RECORDING.STARTED"]:
               // The persisted event is later used to resolve recorder ownership.
               break;
-            case "recording-completed":
+            case TENCENT_MEETING_WEBHOOK_EVENTS["RECORDING.COMPLETED"]:
               await importTencentMeetingRecordingCompletedPayload(payload);
               break;
-            case "audio-completed":
+            case TENCENT_MEETING_WEBHOOK_EVENTS["RECORDING.AUDIO-COMPLETED"]:
               await importTencentMeetingAudioCompletedPayload(payload);
               break;
-            case "transcript-ready": {
+            case TENCENT_MEETING_WEBHOOK_EVENTS["SMART.TRANSCRIPTS"]: {
               await importTencentMeetingTranscriptReadyPayload(payload);
               break;
             }
@@ -184,7 +180,6 @@ router.post("/webhook", async (request, response) => {
             event: String(payload.event || ""),
             traceId: String(payload.trace_id || ""),
             eventId,
-            action,
           });
         })
         .catch(async (error) => {
@@ -201,7 +196,6 @@ router.post("/webhook", async (request, response) => {
             event: String(payload.event || ""),
             traceId: String(payload.trace_id || ""),
             eventId,
-            action,
             errorCode: error?.code || "",
             errorMessage: error instanceof Error ? error.message : String(error),
             errorStack: error instanceof Error ? error.stack : "",
@@ -215,7 +209,6 @@ router.post("/webhook", async (request, response) => {
       message: "webhook rejected before acknowledgement",
       event,
       traceId,
-      action,
       errorCode: String(error?.code || ""),
       statusCode: Number(error?.statusCode || 400),
       errorMessage: error instanceof Error ? error.message : String(error),

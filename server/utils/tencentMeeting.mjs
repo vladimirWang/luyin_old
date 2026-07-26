@@ -3,7 +3,7 @@ import logger from "./log.js";
 import { normalizeTencentMeetingEncryptedData, tencentMeetingDecryptData } from "./tencentMeetingCrypto.mjs";
 import { firstEnv, parseJsonObject, splitEnvList, firstNonEmptyValue, asArray, boundedNumber } from "./common.mjs";
 import { decodedTencentMeetingAesKeyLength } from "./algo.js";
-import {TENCENT_MEETING_SOURCE_PREFIX} from '../constant.js'
+import { TENCENT_MEETING_SOURCE_PREFIX, TENCENT_MEETING_WEBHOOK_EVENTS } from "../constant.js";
 import { getTMToken, invalidateTMToken, requestTMToken, setTMToken } from "./token.js";
 
 export async function requestTencentMeetingStsTokenIfNeeded() {
@@ -773,9 +773,21 @@ export function tencentMeetingTranscriptTextFromParagraph(paragraph = {}) {
   return tencentMeetingTranscriptTextValue(paragraph);
 }
 
+function tencentMeetingTranscriptSpeakerValue(value) {
+  if (typeof value === "string" || typeof value === "number") return String(value).trim();
+  if (!value || typeof value !== "object") return "";
+  for (const key of ["speaker_name", "speakerName", "user_name", "userName", "name", "nickname"]) {
+    const name = tencentMeetingTranscriptSpeakerValue(value[key]);
+    if (name) return name;
+  }
+  return "";
+}
+
 export function tencentMeetingTranscriptSpeakerName(paragraph = {}, fallback = "") {
-  const speakerId = String(paragraph.speaker_id || paragraph.speakerId || "").trim();
-  const speakerName = String(paragraph.speaker_name || paragraph.speakerName || paragraph.speaker || "").trim();
+  const speakerId = tencentMeetingTranscriptSpeakerValue(paragraph.speaker_id || paragraph.speakerId);
+  const speakerName = tencentMeetingTranscriptSpeakerValue(
+    paragraph.speaker_name || paragraph.speakerName || paragraph.speaker,
+  );
   if (speakerName) return speakerName.slice(0, 100);
   if (speakerId) return `参会人${speakerId.slice(0, 8)}`;
   return fallback || "未知发言人";
@@ -820,7 +832,8 @@ export function tencentMeetingTranscriptSegmentsFromPayload(payload = {}, durati
     if (!text) continue;
 
     const speakerName = tencentMeetingTranscriptSpeakerName(paragraph);
-    const speakerIdentity = paragraph.speaker_id || paragraph.speakerId || speakerName;
+    const speakerIdentity =
+      tencentMeetingTranscriptSpeakerValue(paragraph.speaker_id || paragraph.speakerId) || speakerName;
     const startTimeMs = tencentMeetingTranscriptOffsetMs(paragraph.start_time ?? paragraph.startTime ?? paragraph.begin_time);
     const endTimeMs = tencentMeetingTranscriptOffsetMs(paragraph.end_time ?? paragraph.endTime ?? paragraph.finish_time);
 
@@ -1123,11 +1136,11 @@ export function tencentMeetingApiConfigured() {
 }
 
 export function isTencentMeetingTranscriptReadyEvent(payload = {}) {
-  return String(payload?.event || "").trim() === "smart.transcripts";
+  return String(payload?.event || "").trim() === TENCENT_MEETING_WEBHOOK_EVENTS["SMART.TRANSCRIPTS"];
 }
 
 export function isTencentMeetingRecorderTranscriptEvent(payload = {}) {
-  return String(payload?.event || "").trim() === "recording.audio-completed";
+  return String(payload?.event || "").trim() === TENCENT_MEETING_WEBHOOK_EVENTS["RECORDING.AUDIO-COMPLETED"];
 }
 
 export function isTencentMeetingTranscriptSyncEvent(payload = {}) {
@@ -1137,23 +1150,6 @@ export function isTencentMeetingTranscriptSyncEvent(payload = {}) {
 export function tencentMeetingTranscriptSyncMaxAttempts(info = {}) {
   if (!isTencentMeetingRecorderTranscriptEvent(info)) return 1;
   return boundedNumber(process.env.TENCENT_MEETING_RECORDER_TRANSCRIPT_MAX_ATTEMPTS, 6, 1, 24);
-}
-
-export function tencentMeetingWebhookEventAction(payload = {}) {
-  switch (String(payload?.event || "").trim()) {
-    case "common.sts-token":
-      return "sts-token";
-    case "recording.started":
-      return "recording-started";
-    case "recording.completed":
-      return "recording-completed";
-    case "recording.audio-completed":
-      return "audio-completed";
-    case "smart.transcripts":
-      return "transcript-ready";
-    default:
-      return "ignored";
-  }
 }
 
 export function tencentMeetingQuery(pathname, params = {}) {
@@ -1277,7 +1273,7 @@ export async function importTencentMeetingStsTokenPayload(payload = {}) {
   // })
   // return Promise.all(saveTasks)
   const event = String(payload.event || "").trim();
-  if (event !== "common.sts-token") return false;
+  if (event !== TENCENT_MEETING_WEBHOOK_EVENTS["COMMON.STS-TOKEN"]) return false;
   let saved = false;
   for (const item of asArray(payload.payload)) {
     if (await saveTencentMeetingStsToken(item?.token_info)) saved = true;
