@@ -778,6 +778,51 @@ router.get("/:id/audio.mp3", async (request, response) => {
   await sendRecordingAudio(request, response, "attachment");
 });
 
+router.get("/:id/audio-share", async (request, response) => {
+  const { findRecording, resolveRecordingAudioPath } = dependencies;
+  const db = await loadDb();
+  const recording = findRecording(db, request.params.id);
+  const audioPath = recording ? resolveRecordingAudioPath(recording, projectRoot) : "";
+  const token = String(request.query.token || "");
+  if (!recording || recording.deletedAt || !audioPath || !hasValidAudioDownloadToken(token, recording.id)) {
+    response.status(404).send("Recording not found");
+    return;
+  }
+
+  const title = String(recording.name || "录音")
+    .replaceAll("&", "&amp;")
+    .replaceAll("<", "&lt;")
+    .replaceAll(">", "&gt;")
+    .replaceAll('"', "&quot;")
+    .replaceAll("'", "&#39;");
+  const audioUrl = `/api/recordings/${encodeURIComponent(recording.id)}/audio?token=${encodeURIComponent(token)}`;
+  response.setHeader("Content-Type", "text/html; charset=utf-8");
+  response.setHeader("Cache-Control", "private, no-store");
+  response.send(`<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+  <title>${title}</title>
+  <link rel="icon" href="/icon.png">
+  <style>
+    body{margin:0;min-height:100vh;display:grid;place-items:center;background:#f3f5f9;color:#101114;font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif}
+    main{box-sizing:border-box;width:min(92vw,520px);padding:32px 24px;border-radius:28px;background:#fff;box-shadow:0 18px 50px rgba(31,41,55,.10)}
+    img{width:64px;height:64px;border-radius:16px}h1{margin:20px 0 8px;font-size:24px;line-height:1.3}p{margin:0 0 24px;color:#737985}
+    audio{display:block;width:100%}
+  </style>
+</head>
+<body>
+  <main>
+    <img src="/icon.png" alt="">
+    <h1>${title}</h1>
+    <p>点击播放录音</p>
+    <audio controls preload="metadata" src="${audioUrl}"></audio>
+  </main>
+</body>
+</html>`);
+});
+
 router.post("/:id/audio-share-url", async (request, response) => {
   const { findRecording, resolveRecordingAudioPath } = dependencies;
   const db = await loadDb();
@@ -792,8 +837,11 @@ router.post("/:id/audio-share-url", async (request, response) => {
 
   const fileName = `${safeDownloadName(recording.name || "recording")}.mp3`;
   const token = createAudioDownloadToken(recording.id);
+  const encodedId = encodeURIComponent(recording.id);
+  const encodedToken = encodeURIComponent(token);
   response.json({
-    url: `/api/recordings/${encodeURIComponent(recording.id)}/audio?token=${encodeURIComponent(token)}`,
+    url: `/api/recordings/${encodedId}/audio?token=${encodedToken}`,
+    shareUrl: `/api/recordings/${encodedId}/audio-share?token=${encodedToken}`,
     fileName,
     contentType: "audio/mpeg",
     size: statSync(audioPath).size,

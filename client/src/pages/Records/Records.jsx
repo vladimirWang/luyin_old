@@ -666,6 +666,7 @@ export default function Records() {
       audioShareInfo = {
         ...payload,
         url: new URL(payload.url || audioDownloadUrl, window.location.origin).toString(),
+        shareUrl: new URL(payload.shareUrl || payload.url || audioDownloadUrl, window.location.origin).toString(),
         fileName: safeFileNameWithExtension(payload.fileName || audioFileName, ".mp3"),
         contentType: payload.contentType || "audio/mpeg",
       };
@@ -757,14 +758,14 @@ export default function Records() {
 
     async function shareAudioLink() {
       const shareInfo = await getAudioShareInfo();
-      const shareText = `${recording.name}\n时长：${formatDuration(recording.durationMs)}\n录音链接：${shareInfo.url}`;
+      const shareText = `${recording.name}\n时长：${formatDuration(recording.durationMs)}\n录音链接：${shareInfo.shareUrl}`;
 
       if (isInWeCom() && window.wx?.invoke) {
         try {
           await invokeWecom("shareAppMessage", {
             title: recording.name,
             desc: `录音，时长 ${formatDuration(recording.durationMs)}`,
-            link: shareInfo.url,
+            link: shareInfo.shareUrl,
             imgUrl: shareImageUrl,
           });
           showToast("已打开企业微信录音链接分享");
@@ -778,7 +779,7 @@ export default function Records() {
         await configureWeChatAudioLinkShare({
           title: recording.name,
           description: `录音，时长 ${formatDuration(recording.durationMs)}`,
-          link: shareInfo.url,
+          link: shareInfo.shareUrl,
           imageUrl: shareImageUrl,
         });
         showToast("微信分享已准备，请点击右上角发送给朋友或分享到朋友圈");
@@ -786,7 +787,7 @@ export default function Records() {
       }
 
       try {
-        if (await shareUrl(shareInfo.url, shareText)) {
+        if (await shareUrl(shareInfo.shareUrl, shareText)) {
           showToast("已调起录音链接分享");
           return;
         }
@@ -796,7 +797,7 @@ export default function Records() {
       }
 
       try {
-        await navigator.clipboard.writeText(shareInfo.url);
+        await navigator.clipboard.writeText(shareInfo.shareUrl);
         showToast("录音链接已复制");
       } catch {
         setShareSheet({ title: recording.name, text: shareText });

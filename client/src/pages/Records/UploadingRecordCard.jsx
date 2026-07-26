@@ -11,7 +11,7 @@ export function UploadingRecordCard({ item }) {
           <em>{dateParts.month}</em>
           <span>{dateParts.day}</span>
         </span>
-        <span className="status-dot uploaded">上传中1</span>
+        <span className="status-dot uploaded">上传中</span>
       </div>
       <div className="upload-card-title">{item.name || "新录音"}</div>
       <div className="record-meta upload-card-meta">
