@@ -2882,7 +2882,10 @@ function getQuestionAnsweringConfig() {
       provider: "deepseek",
       endpoint: env("LLM_API_URL", `${baseUrl}/chat/completions`),
       apiKey: llmKey,
-      model: env("LLM_QA_MODEL", env("DEEPSEEK_QA_MODEL", env("DEEPSEEK_MODEL", "deepseek-chat"))),
+      model: env(
+        "LLM_QA_MODEL",
+        env("DEEPSEEK_QA_MODEL", env("DEEPSEEK_MODEL", env("LLM_MODEL", "deepseek-chat"))),
+      ),
       thinking: env("LLM_QA_THINKING", env("DEEPSEEK_THINKING", env("LLM_THINKING", "disabled"))).toLowerCase(),
       reasoningEffort: env("LLM_QA_REASONING_EFFORT", env("DEEPSEEK_REASONING_EFFORT", env("LLM_REASONING_EFFORT", "low"))).toLowerCase(),
       temperature: Math.max(0, Math.min(1, numeric(env("LLM_QA_TEMPERATURE", env("LLM_TEMPERATURE", "0.25")), 0.25))),

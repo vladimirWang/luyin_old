@@ -102,6 +102,7 @@ async function handleMeetingOutlineRequest(req, res, next) {
     const clientId = requestClientIdBetter(req);
     const clientName = requestClientNameAndDecode(req);
     const recording = findRecording(db, req.params.id);
+    const storedOutlineIsFallback = recording?.meetingOutline?.provider === "local-fallback";
     logger.info("[call] handleMeetingOutlineRequest step 1", {
       message: "meeting outline recording lookup completed",
       recordingId,
@@ -109,6 +110,7 @@ async function handleMeetingOutlineRequest(req, res, next) {
       deleted: Boolean(recording?.deletedAt),
       storedOutlineStatus: String(recording?.meetingOutlineStatus || ""),
       hasStoredOutline: Boolean(recording?.meetingOutline),
+      storedOutlineIsFallback,
     });
     if (!recording || recording.deletedAt || !canReadRecording(recording, clientId)) {
       logger.info("[call] handleMeetingOutlineRequest step 2", {
@@ -120,7 +122,7 @@ async function handleMeetingOutlineRequest(req, res, next) {
       return;
     }
 
-    if (!forceRefresh && recording.meetingOutline) {
+    if (!forceRefresh && recording.meetingOutline && !storedOutlineIsFallback) {
       logger.info("[call] handleMeetingOutlineRequest step 3", {
         message: "stored meeting outline returned",
         recordingId,

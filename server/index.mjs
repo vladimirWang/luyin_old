@@ -3021,6 +3021,17 @@ function publicRecording(recording, segments = [], viewerClientId = "", viewerNa
     isTencentMeetingImport && expandedSegments.length > 0 && recording.transcriptSource === "tencent-meeting"
       ? "ready"
       : recording.status;
+  // A local fallback is an error placeholder, not a successfully generated meeting outline.
+  const meetingOutlineIsFallback = recording.meetingOutline?.provider === "local-fallback";
+  const publicMeetingOutline = meetingOutlineIsFallback ? null : recording.meetingOutline || null;
+  const publicMeetingOutlineStatus = meetingOutlineIsFallback
+    ? "failed"
+    : recording.meetingOutlineStatus || "";
+  const publicMeetingOutlineError = meetingOutlineIsFallback
+    ? "会议提纲暂未稳定生成，请点击重新生成。"
+    : recording.meetingOutlineError
+      ? userSafeErrorMessage(recording.meetingOutlineError, "会议提纲暂未稳定生成，请稍后重新生成。")
+      : "";
   
   return {
     id: recording.id,
@@ -3059,11 +3070,9 @@ function publicRecording(recording, segments = [], viewerClientId = "", viewerNa
         : recording.transcriptSource || diagnostics.mode,
     transcriptionStartedAt: recording.transcriptionStartedAt || "",
     transcribedAt: recording.transcribedAt || "",
-    meetingOutline: recording.meetingOutline || null,
-    meetingOutlineStatus: recording.meetingOutlineStatus || "",
-    meetingOutlineError: recording.meetingOutlineError
-      ? userSafeErrorMessage(recording.meetingOutlineError, "会议提纲暂未稳定生成，请稍后重新生成。")
-      : "",
+    meetingOutline: publicMeetingOutline,
+    meetingOutlineStatus: publicMeetingOutlineStatus,
+    meetingOutlineError: publicMeetingOutlineError,
     meetingOutlineStartedAt: recording.meetingOutlineStartedAt || "",
     meetingOutlinedAt: recording.meetingOutlinedAt || "",
     tencentMeeting: {
@@ -3265,10 +3274,15 @@ function mergeDailyBriefRecordingIds(...recordingIdGroups) {
 
 function publicDailyBriefRecordingState(recording, db) {
   const segments = db ? findSegments(db, recording.id) : [];
-  const hasMeetingOutline = Boolean(recording.meetingOutline);
+  const meetingOutlineIsFallback = recording.meetingOutline?.provider === "local-fallback";
+  const hasMeetingOutline = Boolean(recording.meetingOutline) && !meetingOutlineIsFallback;
   const transcriptReady = segments.length > 0 || Boolean(recording.transcribedAt || recording.transcriptPath);
   const rawOutlineStatus = String(recording.meetingOutlineStatus || "").trim();
-  const meetingOutlineStatus = hasMeetingOutline ? "ready" : rawOutlineStatus || (transcriptReady ? "pending" : "waiting_transcript");
+  const meetingOutlineStatus = meetingOutlineIsFallback
+    ? "failed"
+    : hasMeetingOutline
+      ? "ready"
+      : rawOutlineStatus || (transcriptReady ? "pending" : "waiting_transcript");
   return {
     id: recording.id,
     seq: recording.seq,
@@ -4847,16 +4861,24 @@ async function runMeetingOutlineJob(recordingId, segments = [], options = {}, jo
       });
       return null;
     }
-    const outlineKeywords = outlineKeywordText(outline);
-    const outlineTitle = outlineTitleText(outline, recording);
+    // Do not persist the local error placeholder as a ready outline.
+    const localFallback = outline?.provider === "local-fallback";
+    const usableOutline = outline && !localFallback ? outline : null;
+    const outlineKeywords = outlineKeywordText(usableOutline);
+    const outlineTitle = outlineTitleText(usableOutline, recording);
     const generatedAt = new Date(outline?.generatedAt || Date.now());
-    const outlineStatus = outline ? "ready" : "failed";
+    const outlineStatus = usableOutline ? "ready" : "failed";
     const data = {
-      meetingOutlineJson: outline ? JSON.stringify(outline) : null,
+      meetingOutlineJson: usableOutline ? JSON.stringify(usableOutline) : null,
       meetingOutlineStatus: outlineStatus,
-      meetingOutlineError: outlineStatus === "failed" ? "Meeting outline generation failed." : "",
+      meetingOutlineError: outlineStatus === "failed" ? "会议提纲暂未稳定生成，请点击重新生成。" : "",
       meetingOutlineStartedAt: null,
-      meetingOutlinedAt: Number.isNaN(generatedAt.getTime()) ? new Date() : generatedAt,
+      meetingOutlinedAt:
+        outlineStatus === "ready"
+          ? Number.isNaN(generatedAt.getTime())
+            ? new Date()
+            : generatedAt
+          : null,
       updatedAt: new Date(),
     };
     if (options.updateTag !== false && outlineKeywords) data.tag = outlineKeywords;
@@ -4870,7 +4892,7 @@ async function runMeetingOutlineJob(recordingId, segments = [], options = {}, jo
       jobVersion,
       outlineStatus,
       provider: String(outline?.provider || ""),
-      localFallback: outline?.provider === "local-fallback",
+      localFallback,
       outlineJsonCharacters: data.meetingOutlineJson?.length || 0,
       updatesTag: Boolean(data.tag),
       updatesName: Boolean(data.name),
@@ -4886,10 +4908,10 @@ async function runMeetingOutlineJob(recordingId, segments = [], options = {}, jo
       jobVersion,
       outlineStatus,
       provider: String(outline?.provider || ""),
-      localFallback: outline?.provider === "local-fallback",
+      localFallback,
       updatedCount: updated.count,
     });
-    return outline;
+    return usableOutline;
   } catch (error) {
     if (isRecordingJobCancelled(recordingId, jobVersion)) {
       logger.info("[call] runMeetingOutlineJob step 12", {
@@ -5154,6 +5176,13 @@ async function queuePendingLocalTranscriptionJobs(reason = "sweep") {
 
 async function queuePendingMeetingOutlineJobs(reason = "sweep", options = {}) {
   const staleBefore = new Date(Date.now() - MEETING_OUTLINE_STALE_MS);
+  const pendingGenerationWhere = {
+    meetingOutlineStatus: "generating",
+    meetingOutlineJson: null,
+    ...(options.force
+      ? {}
+      : { OR: [{ meetingOutlineStartedAt: null }, { meetingOutlineStartedAt: { lte: staleBefore } }] }),
+  };
   logger.info("[call] queuePendingMeetingOutlineJobs step 0", {
     message: "pending meeting outline sweep started",
     reason,
@@ -5164,22 +5193,25 @@ async function queuePendingMeetingOutlineJobs(reason = "sweep", options = {}) {
   const rows = await prisma.recording.findMany({
     where: {
       deletedAt: null,
-      meetingOutlineStatus: "generating",
-      meetingOutlineJson: null,
       segments: { some: {} },
-      ...(options.force
-        ? {}
-        : { OR: [{ meetingOutlineStartedAt: null }, { meetingOutlineStartedAt: { lte: staleBefore } }] }),
+      OR: [
+        pendingGenerationWhere,
+        // Legacy versions persisted this error placeholder as a ready outline; regenerate it once.
+        { meetingOutlineJson: { contains: '"provider":"local-fallback"' } },
+      ],
     },
     orderBy: { meetingOutlineStartedAt: "asc" },
     take: MEETING_OUTLINE_SWEEP_LIMIT,
-    select: { id: true },
+    select: { id: true, meetingOutlineJson: true },
   });
   logger.info("[call] queuePendingMeetingOutlineJobs step 1", {
     message: "pending meeting outline candidates loaded",
     reason,
     candidateCount: rows.length,
     activeJobCount: rows.filter(({ id }) => meetingOutlineJobs.has(id)).length,
+    legacyFallbackCount: rows.filter(({ meetingOutlineJson }) =>
+      String(meetingOutlineJson || "").includes('"provider":"local-fallback"'),
+    ).length,
   });
   const jobs = rows
     .filter(({ id }) => !meetingOutlineJobs.has(id))
