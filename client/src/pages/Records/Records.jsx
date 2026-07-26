@@ -100,7 +100,8 @@ import {
 } from '../../utils/index.js'
 import {loadImageSource, compressAvatarImage} from '../../utils/image.js'
 import {isUploadableMediaFile, getAudioFileDuration} from '../../utils/audio.js'
-import { isInWeCom } from '../../utils/wecom.js'
+import { isInWeChat, isInWeCom } from "../../utils/wecom.js";
+import { configureWeChatAudioLinkShare } from "../../utils/wechat.js";
 import {useUploadManager} from '../../hooks/useUploadManager.js'
 import { useWecomAuthStore } from '../../stores/useWecomAuthStore.js'
 import {QA_ACTIVE_MESSAGE_KEY, DAILY_BRIEF_ACTIVE_KEY, PROFILE_STORAGE_KEY} from '../../constant.js'
@@ -770,6 +771,16 @@ export default function Records() {
         } catch {
           // Continue with system link sharing or clipboard copy.
         }
+      }
+
+      if (isInWeChat()) {
+        await configureWeChatAudioLinkShare({
+          title: recording.name,
+          description: `录音，时长 ${formatDuration(recording.durationMs)}`,
+          link: shareInfo.url,
+        });
+        showToast("微信分享已准备，请点击右上角发送给朋友或分享到朋友圈");
+        return;
       }
 
       try {

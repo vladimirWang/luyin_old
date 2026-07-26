@@ -38,6 +38,7 @@ import recordingUploadSessionsRouter, { configure as configureRecordingUploadSes
 import tencentMeetingRouter, { configure as configureTencentMeetingRouter } from "./router/tencentMeeting.js";
 import ttsRouter, { configure as configureTtsRouter } from "./router/tts.js";
 import wecomRouter from "./router/wecom.js";
+import wechatRouter from "./router/wechat.js";
 import healthRouter, { configure as configureHealthRouter } from "./router/health.js";
 import meetingBriefsRouter, { configure as configureMeetingBriefsRouter } from "./router/meetingBriefs.js";
 import qaMessagesRouter, { configure as configureQaMessagesRouter } from "./router/qaMessages.js";
@@ -714,6 +715,7 @@ configureTtsRouter({
 app.use("/api/tts", ttsRouter);
 
 app.use("/api/wecom", wecomRouter);
+app.use("/api/wechat", wechatRouter);
 
 configureHealthRouter({
   getTranscriptionDiagnostics,
