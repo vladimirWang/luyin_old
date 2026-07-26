@@ -645,6 +645,7 @@ export default function Records() {
     const audioDownloadUrl = `${window.location.origin}/api/recordings/${encodeURIComponent(recording.id)}/audio.mp3`;
     const transcriptUrl = `${window.location.origin}/api/recordings/${encodeURIComponent(recording.id)}/transcript.txt`;
     const outlineUrl = `${window.location.origin}/api/recordings/${encodeURIComponent(recording.id)}/meeting-outline.pdf`;
+    const shareImageUrl = `${window.location.origin}/icon.png`;
     const audioFileName = safeFileNameWithExtension(recording.name, ".mp3");
     const text =
       shareMode === "text"
@@ -764,7 +765,7 @@ export default function Records() {
             title: recording.name,
             desc: `录音，时长 ${formatDuration(recording.durationMs)}`,
             link: shareInfo.url,
-            imgUrl: "",
+            imgUrl: shareImageUrl,
           });
           showToast("已打开企业微信录音链接分享");
           return;
@@ -778,6 +779,7 @@ export default function Records() {
           title: recording.name,
           description: `录音，时长 ${formatDuration(recording.durationMs)}`,
           link: shareInfo.url,
+          imageUrl: shareImageUrl,
         });
         showToast("微信分享已准备，请点击右上角发送给朋友或分享到朋友圈");
         return;
@@ -882,7 +884,7 @@ export default function Records() {
                     ? `MP3 录音，时长 ${formatDuration(recording.durationMs)}`
                     : `TXT 文字稿 + MP3 录音，时长 ${formatDuration(recording.durationMs)}`,
               link: shareMode === "outline" ? outlineUrl : shareMode === "audio" ? audioDownloadUrl : shareMode === "text" ? transcriptUrl : audioDownloadUrl,
-              imgUrl: "",
+              imgUrl: shareImageUrl,
             },
             (result) => {
               const message = String(result?.err_msg || "");
