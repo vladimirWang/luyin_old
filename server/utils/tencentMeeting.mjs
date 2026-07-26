@@ -742,28 +742,35 @@ export function tencentMeetingTranscriptNextRetryAt(recording = {}) {
   return new Date(Date.now() + tencentMeetingTranscriptRetryIntervalMs(recording)).toISOString();
 }
 
-export function tencentMeetingTranscriptTextFromParagraph(paragraph = {}) {
-  const direct = firstNonEmptyValue([
-    paragraph.text,
-    paragraph.content,
-    paragraph.transcript,
-    paragraph.sentence,
-    paragraph.words_text,
-  ]);
-  if (direct) return String(direct).trim();
+function tencentMeetingTranscriptTextValue(value, seen = new Set()) {
+  if (typeof value === "string" || typeof value === "number") {
+    return String(value).trim();
+  }
+  if (!value || typeof value !== "object" || seen.has(value)) return "";
+  seen.add(value);
+  if (Array.isArray(value)) {
+    return value.map((item) => tencentMeetingTranscriptTextValue(item, seen)).filter(Boolean).join("");
+  }
 
-  const sentenceText = asArray(paragraph.sentences)
+  for (const key of ["text", "content", "value", "word", "words_text", "transcript", "sentence"]) {
+    const text = tencentMeetingTranscriptTextValue(value[key], seen);
+    if (text) return text;
+  }
+
+  return asArray(value.sentences)
     .map((sentence) => {
       const words = asArray(sentence.words)
-        .map((word) => String(word?.text || word?.word || "").trim())
+        .map((word) => tencentMeetingTranscriptTextValue(word, seen))
         .filter(Boolean)
         .join("");
-      return words || String(sentence.text || sentence.content || "").trim();
+      return words || tencentMeetingTranscriptTextValue(sentence, seen);
     })
     .filter(Boolean)
     .join("");
+}
 
-  return sentenceText || "";
+export function tencentMeetingTranscriptTextFromParagraph(paragraph = {}) {
+  return tencentMeetingTranscriptTextValue(paragraph);
 }
 
 export function tencentMeetingTranscriptSpeakerName(paragraph = {}, fallback = "") {
