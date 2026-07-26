@@ -1,11 +1,9 @@
 import { useState, useEffect, useRef } from "react";
-import { Check, Share2, RefreshCw, Trash2 } from "lucide-react";
+import { Check, Cloud, Mic2, Share2, RefreshCw, Trash2 } from "lucide-react";
 import {
-  formatCardDateParts,
   formatClockTime,
   isToday,
   recordTitleSize,
-  recordDateToneClass,
   recordVisualClass,
   recordSourceMeta,
   recordingStatusLabel,
@@ -13,6 +11,7 @@ import {
   cardColors,
 } from "../../utils/index.js";
 import {IconButton} from '../../components/IconButton.jsx'
+import { CalendarTag } from "./components/CalendarTag.jsx";
 import dayjs from 'dayjs'
 
 export function RecordCard({
@@ -209,7 +208,9 @@ export function RecordCard({
     { mode: "audio", label: "录音" },
   ];
   const sourceMeta = recordSourceMeta(recording);
-  const dateParts = formatCardDateParts(recording.createdAt);
+  const sourceKind = String(recording.tencentMeeting?.sourceKind || "").toLowerCase();
+  const SourceKindIcon = sourceKind === "cloud" ? Cloud : sourceKind === "recorder" ? Mic2 : null;
+  const sourceKindLabel = sourceKind === "cloud" ? "云录制" : sourceKind === "recorder" ? "录音笔" : "";
   const showDeleteUnderlay = !isTrashView && canDeleteThisRecording;
   const canBulkDelete = !isTrashView && canDeleteThisRecording;
   const cardClassName = `record-card ${color} ${visualClass} ${sourceMeta.className}${isTrashView ? " in-trash" : ""}${
@@ -236,10 +237,16 @@ export function RecordCard({
           <span>{sourceMeta.label}</span>
         </div>
         <div className="record-card-top">
-          <span className={`record-date-tile ${recordDateToneClass(recording, isTrashView)}`}>
-            <em>{dateParts.month}</em>
-            <span>{dateParts.day}</span>
-          </span>
+          <CalendarTag recording={recording} isTrashView={isTrashView} />
+          {SourceKindIcon ? (
+            <span
+              className="inline-flex h-7 w-7 items-center justify-center rounded-full bg-white/70 text-slate-500 shadow-sm"
+              aria-label={`数据来源：${sourceKindLabel}`}
+              title={`数据来源：${sourceKindLabel}`}
+            >
+              <SourceKindIcon size={16} strokeWidth={2.2} aria-hidden="true" />
+            </span>
+          ) : null}
           {isTrashView ? (
             <span className={`status-dot ${recording.status}`}>
               {recordingStatusLabel(recording, isTrashView)}
@@ -341,9 +348,10 @@ export function RecordCard({
             ))}
           </select>
 
-          <div className="record-owner-badge">
-            <span>{recording.tencentMeeting.sourceKind === 'cloud' ? recording.ownerName: 'recording.audio-completed'}</span>
-          </div>
+          {/* 录音创建人 */}
+          {recording.tencentMeeting.sourceKind === 'cloud' && <div className="record-owner-badge">
+            <span>{recording.ownerName}</span>
+          </div>}
         </div>
 
         {!isTrashView && recording.canManage !== false ? (
