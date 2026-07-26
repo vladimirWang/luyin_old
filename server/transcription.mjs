@@ -455,7 +455,30 @@ export function isFallbackTranscript(segments = []) {
 async function readApiPayload(response, label) {
   const raw = await response.text();
   if (!response.ok) {
-    throw new Error(`${label} failed: ${response.status} ${raw.slice(0, 240)}`);
+    let errorPayload = {};
+    try {
+      errorPayload = JSON.parse(raw);
+    } catch {
+      errorPayload = {};
+    }
+    const apiError =
+      errorPayload?.error && typeof errorPayload.error === "object"
+        ? errorPayload.error
+        : errorPayload && typeof errorPayload === "object"
+          ? errorPayload
+          : {};
+    const apiErrorCode = String(apiError.code || apiError.error_code || "");
+    const apiErrorType = String(apiError.type || "");
+    const apiErrorMessage = String(apiError.message || apiError.msg || "").slice(0, 300);
+    const error = new Error(
+      `${label} failed: ${response.status}${apiErrorMessage ? ` ${apiErrorMessage}` : ""}`,
+    );
+    error.httpStatus = response.status;
+    error.apiErrorCode = apiErrorCode;
+    error.apiErrorType = apiErrorType;
+    error.apiErrorMessage = apiErrorMessage;
+    error.responseBytes = Buffer.byteLength(raw);
+    throw error;
   }
 
   try {
@@ -3695,10 +3718,11 @@ export async function generateMeetingOutline(recording, segments = []) {
   } catch (error) {
     const rawErrorMessage = error instanceof Error ? error.message : String(error);
     const httpStatusMatch = rawErrorMessage.match(/LLM meeting outline failed:\s*(\d+)/i);
+    const httpStatus = Number(error?.httpStatus || httpStatusMatch?.[1] || 0);
     const failureKind =
       error?.name === "AbortError" || /超过\s*\d+\s*秒|timeout|timed out/i.test(rawErrorMessage)
         ? "timeout"
-        : httpStatusMatch
+        : httpStatus
           ? "http_error"
           : /JSON|parse|Unexpected token|Expected/i.test(rawErrorMessage)
             ? "parse_error"
@@ -3713,12 +3737,16 @@ export async function generateMeetingOutline(recording, segments = []) {
       endpointTarget,
       durationMs: Date.now() - requestStartedAt,
       failureKind,
-      httpStatus: Number(httpStatusMatch?.[1] || 0),
+      httpStatus,
+      apiErrorType: String(error?.apiErrorType || ""),
+      apiErrorCode: String(error?.apiErrorCode || ""),
+      apiErrorMessage: String(error?.apiErrorMessage || "").slice(0, 300),
+      responseBytes: Number(error?.responseBytes || 0),
       errorName: String(error?.name || ""),
       errorCode: String(error?.code || ""),
       errorMessage:
         failureKind === "http_error"
-          ? `LLM meeting outline failed with HTTP ${httpStatusMatch?.[1] || "unknown"}`
+          ? `LLM meeting outline failed with HTTP ${httpStatus || "unknown"}`
           : rawErrorMessage.slice(0, 300),
     });
     return localMeetingOutline(recording, expandedSegments, "meeting outline failed");
