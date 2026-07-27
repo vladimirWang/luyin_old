@@ -540,7 +540,7 @@ router.get("/:id", async (request, response) => {
   const db = await loadDb();
   const clientId = requestClientIdBetter(request);
   const clientName = requestClientNameAndDecode(request);
-  // const canDeleteAll = canDeleteAllRecordings();
+  const canDeleteAll = canDeleteAllRecordings();
   const recording = findRecording(db, request.params.id);
   // const recording = await prisma.recording.findUnique({
   //   where: {
