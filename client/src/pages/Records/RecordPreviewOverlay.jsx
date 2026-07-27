@@ -1,5 +1,7 @@
 import { useState, useEffect, useMemo, useRef } from "react";
-import { ChevronUp, ChevronDown, RefreshCw, Pause, Play, Share2, Volume2 } from "lucide-react";
+import { ChevronUp, ChevronDown, RefreshCw, Pause, Pencil, Play, Share2, Volume2 } from "lucide-react";
+import "./RecordPreviewOverlay.css";
+import { renameRecording } from "../../api/recordings.js";
 import {
   formatTimecode,
   formatDuration,
@@ -10,8 +12,9 @@ import {
   showToast,
 } from "../../utils/index.js";
 
-export function RecordPreviewOverlay({ recording, onClose, onAsk, onShare, onRetranscribe }) {
+export function RecordPreviewOverlay({ recording, onClose, onAsk, onShare, onRefresh, onRetranscribe }) {
   const audioRef = useRef(null);
+  const nameInputRef = useRef(null);
   const [shareMenuOpen, setShareMenuOpen] = useState(false);
   const [shareBusyMode, setShareBusyMode] = useState("");
   const [openSection, setOpenSection] = useState("");
@@ -21,13 +24,25 @@ export function RecordPreviewOverlay({ recording, onClose, onAsk, onShare, onRet
   const [previewPlaying, setPreviewPlaying] = useState(false);
   const [previewCurrent, setPreviewCurrent] = useState(0);
   const [previewDuration, setPreviewDuration] = useState(recording?.durationMs ? recording.durationMs / 1000 : 0);
+  const [nameEditing, setNameEditing] = useState(false);
+  const [draftName, setDraftName] = useState(recording?.name || "");
 
   useEffect(() => {
     setOpenSection("");
     setPreviewPlaying(false);
     setPreviewCurrent(0);
     setPreviewDuration(recording?.durationMs ? recording.durationMs / 1000 : 0);
+    setNameEditing(false);
+    setDraftName(recording?.name || "");
   }, [recording?.id, recording?.durationMs]);
+
+  useEffect(() => {
+    if (!nameEditing) setDraftName(recording?.name || "");
+  }, [nameEditing, recording?.name]);
+
+  useEffect(() => {
+    if (nameEditing) nameInputRef.current?.focus();
+  }, [nameEditing]);
 
   useEffect(() => {
     setMeetingOutline(recording?.meetingOutline || null);
@@ -206,13 +221,64 @@ export function RecordPreviewOverlay({ recording, onClose, onAsk, onShare, onRet
     onRetranscribe();
   }
 
+  async function commitName() {
+    const nextName = draftName.trim();
+    setNameEditing(false);
+    if (!nextName || nextName === recording.name) {
+      setDraftName(recording.name);
+      return;
+    }
+    try {
+      const payload = await renameRecording(recording.id, nextName);
+      setDraftName(payload.recording?.name || nextName);
+      await onRefresh?.();
+    } catch (error) {
+      setDraftName(recording.name);
+      showToast(error instanceof Error ? error.message : "录音名称修改失败");
+    }
+  }
+
   return (
     <div className="record-preview-layer" role="dialog" aria-modal="true" aria-label={`${recording.name}转写预览`} onClick={onClose}>
       <section className="record-preview-panel" onClick={(event) => event.stopPropagation()}>
         <header className="record-preview-head">
           <div>
             <span>录音 {String(recording.seq).padStart(3, "0")}</span>
-            <h2>{recording.name}</h2>
+            <div className="record-preview-title-row">
+              {nameEditing ? (
+                <textarea
+                  ref={nameInputRef}
+                  className="record-preview-title-input"
+                  aria-label="编辑录音名称"
+                  rows={2}
+                  value={draftName}
+                  onChange={(event) => setDraftName(event.target.value)}
+                  onBlur={commitName}
+                  onKeyDown={(event) => {
+                    if (event.key === "Enter") {
+                      event.preventDefault();
+                      event.currentTarget.blur();
+                    }
+                    if (event.key === "Escape") {
+                      setDraftName(recording.name);
+                      setNameEditing(false);
+                    }
+                  }}
+                />
+              ) : (
+                <h2>{recording.name}</h2>
+              )}
+              {!nameEditing && recording.canManage !== false ? (
+                <button
+                  className="record-preview-edit-name"
+                  type="button"
+                  aria-label="编辑录音名称"
+                  onClick={() => setNameEditing(true)}
+                >
+                  <Pencil size={15} strokeWidth={2.2} />
+                </button>
+              ) : null}
+            </div>
           </div>
           <button type="button" onClick={onClose}>
             收起

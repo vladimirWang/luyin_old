@@ -25,7 +25,6 @@ export function RecordCard({
   onToggleExpand,
   onAsk,
   onShare,
-  onRename,
   onUpdateMeta,
   onMove,
   onToggleFavorite,
@@ -37,7 +36,6 @@ export function RecordCard({
   isAnyDeleteMode = false,
   onDeleteModeChange,
 }) {
-  const [draftName, setDraftName] = useState(recording.name);
   const [draftTag, setDraftTag] = useState(recording.tag || "");
   const [tagExpanded, setTagExpanded] = useState(false);
   const [shareMenuOpen, setShareMenuOpen] = useState(false);
@@ -58,9 +56,8 @@ export function RecordCard({
   const canDeleteThisRecording = recording.canDelete !== false;
 
   useEffect(() => {
-    setDraftName(recording.name);
     setDraftTag(recording.tag || "");
-  }, [recording.name, recording.tag]);
+  }, [recording.tag]);
 
   useEffect(() => {
     setShareMenuOpen(false);
@@ -103,12 +100,6 @@ export function RecordCard({
       document.removeEventListener("keydown", closeShareMenuByKey, true);
     };
   }, [shareMenuOpen]);
-
-  function commitName() {
-    const next = draftName.trim();
-    if (next && next !== recording.name) onRename(next);
-    else setDraftName(recording.name);
-  }
 
   function commitMeta() {
     const tag = draftTag.trim();
@@ -231,7 +222,7 @@ export function RecordCard({
         onPointerMove={handleCardPointerMove}
         onPointerUp={handleCardPointerEnd}
         onPointerCancel={handleCardPointerEnd}
-        style={{ "--record-title-size": recordTitleSize(draftName) }}
+        style={{ "--record-title-size": recordTitleSize(recording.name) }}
       >
         <div className="record-source-strip" aria-hidden="true">
           <span>{sourceMeta.label}</span>
@@ -286,24 +277,8 @@ export function RecordCard({
           )}
         </div>
         
-        {/* <textarea
-          className="record-title-input"
-          aria-label="录音名称"
-          rows={2}
-          value={draftName}
-          onChange={(event) => setDraftName(event.target.value)}
-          onBlur={commitName}
-          disabled={isTrashView}
-          onKeyDown={(event) => {
-            if (event.key === "Enter") {
-              event.preventDefault();
-              event.currentTarget.blur();
-            }
-          }}
-          onClick={(event) => event.stopPropagation()}
-        /> */}
         <article className="record-title-input">
-          {draftName}
+          {recording.name}
         </article>
         {/* <div style={{color: 'red', fontSize: 12}}>{recording.id.slice(0,5)}</div> */}
         <div className="record-meta">

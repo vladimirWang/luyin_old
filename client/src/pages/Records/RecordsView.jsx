@@ -45,7 +45,6 @@ export function RecordsView({
   onOpenPreview,
   onClosePreview,
   onOpenDetail,
-  onRename,
   onUpdateMeta,
   onMove,
   onToggleFavorite,
@@ -478,7 +477,6 @@ export function RecordsView({
                     else onOpenPreview?.(recording.id);
                   }}
                   onAsk={() => onOpenDetail(recording.id)}
-                  onRename={(name) => onRename(recording.id, name)}
                   onUpdateMeta={(patch) => onUpdateMeta(recording.id, patch)}
                   onMove={(folderId) => onMove(recording.id, folderId)}
                   onToggleFavorite={() => onToggleFavorite(recording)}
@@ -518,6 +516,7 @@ export function RecordsView({
             onOpenDetail(previewRecording.id, { replace: true });
           }}
           onShare={(mode) => onShare(previewRecording, mode)}
+          onRefresh={onRefresh}
           onRetranscribe={() => onRetranscribe(previewRecording)}
         />
       ) : null}

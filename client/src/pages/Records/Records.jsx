@@ -574,15 +574,6 @@ export default function Records() {
     }
   }
 
-  async function renameRecording(id, name) {
-    const payload = await api(`/api/recordings/${id}`, {
-      method: "PATCH",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ name }),
-    });
-    setRecordings((current) => current.map((item) => (item.id === id ? payload.recording : item)));
-  }
-
   async function updateRecordingMeta(id, patch) {
     const previous = recordings;
     setRecordings((current) => current.map((item) => (item.id === id ? { ...item, ...patch } : item)));
@@ -1136,7 +1127,6 @@ export default function Records() {
         onOpenPreview={openRecordPreview}
         onClosePreview={closeRecordPreview}
         onOpenDetail={openDetail}
-        onRename={renameRecording}
         onUpdateMeta={updateRecordingMeta}
         onMove={moveRecording}
         onToggleFavorite={toggleFavorite}

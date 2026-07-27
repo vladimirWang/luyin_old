@@ -14,6 +14,8 @@ Navigation decisions: the protected workbench uses `/recorder`, `/records`, and 
 
 Record preview routing decisions: drive `RecordPreviewOverlay` from the dynamic `/records/:recordingId` route. Opening a recording card navigates to that route, while closing the overlay returns through router history; do not use component-local expanded-recording state as the source of truth.
 
+Recording name editing decisions: keep recording names read-only on `RecordCard`. Edit a recording name only from `RecordPreviewOverlay`, using the pencil control beside the preview title to enter edit mode.
+
 Routing implementation decisions: `App` is the protected workbench layout and renders child routes with React Router's `Outlet`. Route declarations render dedicated page-level components directly (`/recorder` → `Recorder`, `/records` → `Records`, `/detail` → `Detail`). Do not pass route-name strings into `App`, conditionally render route pages in `App`, or move page-only properties and methods into `App` or a broad context. Keep page-specific state and behavior in the owning route component; only layout behavior genuinely used by `App` belongs there.
 
 Router ownership decisions: `client/src/AppRouter.jsx` owns `BrowserRouter`, route guards, redirects, and all route declarations. Keep `client/src/main.jsx` as the application bootstrap only, and do not move the global router provider into the workbench layout `App`.

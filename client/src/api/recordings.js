@@ -8,3 +8,7 @@ export function getRecordings(params) {
 export function createRecordingAudioShareLink(recordingId) {
     return req.post(`/api/recordings/${encodeURIComponent(recordingId)}/audio-share-url`)
 }
+
+export function renameRecording(recordingId, name) {
+    return req.patch(`/api/recordings/${encodeURIComponent(recordingId)}`, { name })
+}
