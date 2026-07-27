@@ -356,9 +356,9 @@ export function RecordCard({
           </select>
 
           {/* 录音创建人 */}
-          {recording.tencentMeeting.sourceKind === 'cloud' && <div className="record-owner-badge">
+          <div className="record-owner-badge">
             <span>{recording.ownerName}</span>
-          </div>}
+          </div>
         </div>
 
         {!isTrashView && recording.canManage !== false ? (
