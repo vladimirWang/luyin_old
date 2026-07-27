@@ -212,6 +212,63 @@
   opacity: 0.48;
 }
 
+.meeting-outline-feedback {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  border-top: 1px solid rgba(136, 144, 160, 0.12);
+  padding: 12px 2px 2px;
+}
+
+.meeting-outline-feedback > span {
+  color: #747c89;
+  font-size: 12px;
+  font-weight: 850;
+}
+
+.meeting-outline-feedback > div {
+  display: flex;
+  gap: 8px;
+}
+
+.meeting-outline-feedback button {
+  display: inline-flex;
+  min-height: 32px;
+  align-items: center;
+  justify-content: center;
+  gap: 5px;
+  border: 1px solid rgba(136, 144, 160, 0.16);
+  border-radius: 999px;
+  color: #626b79;
+  background: #ffffff;
+  padding: 0 11px;
+  font-size: 12px;
+  font-weight: 900;
+  cursor: pointer;
+}
+
+.meeting-outline-feedback button.active {
+  border-color: rgba(230, 107, 104, 0.3);
+  color: #d95f5c;
+  background: rgba(230, 107, 104, 0.09);
+}
+
+.meeting-outline-feedback.submitted button.active {
+  border-color: rgba(98, 107, 121, 0.2);
+  color: #626b79;
+  background: #eef0f3;
+}
+
+.meeting-outline-feedback button:disabled {
+  opacity: 0.56;
+  cursor: default;
+}
+
+.meeting-outline-feedback.submitted button.active:disabled {
+  opacity: 1;
+}
+
 .meeting-summary-card,
 .meeting-outline-group {
   display: grid;

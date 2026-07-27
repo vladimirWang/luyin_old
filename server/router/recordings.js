@@ -36,6 +36,10 @@ import {
   recordingFromPrisma,
   transcriptSegmentFromPrisma,
 } from "../repositories/recordings.mjs";
+import {
+  createMeetingOutlineFeedback,
+  findMeetingOutlineFeedback,
+} from "../repositories/meetingOutlineFeedback.mjs";
 import { nextRecordingSequence } from "../services/recordingSequence.js";
 import { createAudioDownloadToken, hasValidAudioDownloadToken } from "../utils/audioShare.js";
 
@@ -911,6 +915,68 @@ router.get("/:id/transcript.txt", async (request, response) => {
 
 router.get("/:id/meeting-outline", handleMeetingOutlineRequest);
 router.post("/:id/meeting-outline", handleMeetingOutlineRequest);
+
+router.get("/:id/meeting-outline-feedback", async (request, response, next) => {
+  try {
+    const identity = requestTrustedWecomOwner(request);
+    if (!identity) {
+      response.status(401).json({ error: "请先通过企业微信登录" });
+      return;
+    }
+
+    const row = await prisma.recording.findUnique({ where: { id: request.params.id } });
+    const recording = row ? recordingFromPrisma(row) : null;
+    if (!recording || recording.deletedAt || !canReadRecording(recording, identity.ownerClientId)) {
+      response.status(404).json({ error: "录音不存在" });
+      return;
+    }
+
+    const feedback = await findMeetingOutlineFeedback(recording.id, identity.userId);
+    response.json({ feedback });
+  } catch (error) {
+    next(error);
+  }
+});
+
+router.post("/:id/meeting-outline-feedback", async (request, response, next) => {
+  try {
+    const identity = requestTrustedWecomOwner(request);
+    if (!identity) {
+      response.status(401).json({ error: "请先通过企业微信登录" });
+      return;
+    }
+    if (typeof request.body?.satisfied !== "boolean") {
+      response.status(400).json({ error: "satisfied 必须是布尔值" });
+      return;
+    }
+
+    const row = await prisma.recording.findUnique({ where: { id: request.params.id } });
+    const recording = row ? recordingFromPrisma(row) : null;
+    if (!recording || recording.deletedAt || !canReadRecording(recording, identity.ownerClientId)) {
+      response.status(404).json({ error: "录音不存在" });
+      return;
+    }
+
+    const existingFeedback = await findMeetingOutlineFeedback(recording.id, identity.userId);
+    if (existingFeedback) {
+      response.status(409).json({ error: "您已经提交过评价", feedback: existingFeedback });
+      return;
+    }
+
+    const feedback = await createMeetingOutlineFeedback({
+      recordingId: recording.id,
+      userId: identity.userId,
+      satisfied: request.body.satisfied,
+    });
+    response.json({ feedback });
+  } catch (error) {
+    if (error?.code === "P2002") {
+      response.status(409).json({ error: "您已经提交过评价" });
+      return;
+    }
+    next(error);
+  }
+});
 
 router.get("/:id/meeting-outline.pdf", async (request, response, next) => {
   try {

@@ -159,6 +159,7 @@ export async function permanentlyDeleteRecordingDataWithPrisma(recordingId) {
     const deletedQuestions = questionIds.length
       ? await tx.recordingQuestion.deleteMany({ where: { id: { in: questionIds } } })
       : { count: 0 };
+    const deletedMeetingOutlineFeedbacks = await tx.meetingOutlineFeedback.deleteMany({ where: { recordingId } });
     const deletedSegments = await tx.transcriptSegment.deleteMany({ where: { recordingId } });
     const deletedRecording = await tx.recording.deleteMany({ where: { id: recordingId } });
     if (deletedRecording.count !== 1) {
@@ -169,6 +170,7 @@ export async function permanentlyDeleteRecordingDataWithPrisma(recordingId) {
       recordings: deletedRecording.count,
       transcriptSegments: deletedSegments.count,
       recordingQuestions: deletedQuestions.count,
+      meetingOutlineFeedbacks: deletedMeetingOutlineFeedbacks.count,
     };
   });
 }

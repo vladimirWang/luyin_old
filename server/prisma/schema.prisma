@@ -22,6 +22,7 @@ model AppUser {
   recordings Recording[]
   folders    RecordingFolder[]
   questions  RecordingQuestion[]
+  meetingOutlineFeedbacks MeetingOutlineFeedback[]
 
   @@map("app_users")
 }
@@ -78,6 +79,7 @@ model Recording {
   folder    RecordingFolder?    @relation(fields: [folderId], references: [id])
   segments  TranscriptSegment[]
   questions RecordingQuestion[]
+  meetingOutlineFeedbacks MeetingOutlineFeedback[]
 
   @@index([createdAt], map: "recordings_created_index")
   @@index([folderId, deletedAt], map: "recordings_folder_deleted_index")
@@ -87,6 +89,23 @@ model Recording {
   @@index([ownerClientId], map: "recordings_owner_index")
   @@index([seq], map: "recordings_seq_index")
   @@map("recordings")
+}
+
+model MeetingOutlineFeedback {
+  id          Int      @id @default(autoincrement())
+  recordingId String   @map("recording_id") @db.VarChar(80)
+  userId      String   @map("user_id") @db.VarChar(80)
+  satisfied   Boolean
+  createdAt   DateTime @default(now()) @map("created_at") @db.Timestamp(0)
+  updatedAt   DateTime @default(now()) @updatedAt @map("updated_at") @db.Timestamp(0)
+
+  recording Recording @relation(fields: [recordingId], references: [id])
+  user      AppUser   @relation(fields: [userId], references: [id])
+
+  @@unique([recordingId, userId], map: "meeting_outline_feedback_recording_user_unique")
+  @@index([recordingId], map: "meeting_outline_feedback_recording_index")
+  @@index([userId], map: "meeting_outline_feedback_user_index")
+  @@map("meeting_outline_feedback")
 }
 
 model RecordingFolder {

@@ -12,3 +12,11 @@ export function createRecordingAudioShareLink(recordingId) {
 export function renameRecording(recordingId, name) {
     return req.patch(`/api/recordings/${encodeURIComponent(recordingId)}`, { name })
 }
+
+export function getMeetingOutlineFeedback(recordingId) {
+    return req.get(`/api/recordings/${encodeURIComponent(recordingId)}/meeting-outline-feedback`)
+}
+
+export function saveMeetingOutlineFeedback(recordingId, satisfied) {
+    return req.post(`/api/recordings/${encodeURIComponent(recordingId)}/meeting-outline-feedback`, { satisfied })
+}
