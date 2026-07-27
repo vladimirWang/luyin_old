@@ -238,7 +238,7 @@ export function RecordCard({
         </div>
         <div className="record-card-top">
           <CalendarTag recording={recording} isTrashView={isTrashView} />
-          {['cloud', 'recorder', 'upload'].includes(sourceKind) ? (
+          {['cloud', 'recorder', 'manual_upload'].includes(sourceKind) ? (
             <span
               className="inline-flex h-7 w-7 items-center justify-center rounded-full bg-white/70 text-slate-500 shadow-sm"
               aria-label={`数据来源：${sourceKindLabel}`}
@@ -246,7 +246,7 @@ export function RecordCard({
             >
               {sourceKind === 'cloud' && <Cloud size={16} strokeWidth={2.2} aria-hidden="true" />}
               {sourceKind === 'recorder' && <Mic2 size={16} strokeWidth={2.2} aria-hidden="true" />}
-              {sourceKind === null && <Upload size={16} strokeWidth={2.2} aria-hidden="true" />}
+              {sourceKind === 'manual_upload' && <Upload size={16} strokeWidth={2.2} aria-hidden="true" />}
             </span>
           ) : null}
           {isTrashView ? (
