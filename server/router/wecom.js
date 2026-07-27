@@ -1,7 +1,15 @@
 import express from "express";
 import crypto from "node:crypto";
 import logger from "../utils/log.js";
-import { getWecomUserByCode, hasWecomConfig, getWecomConfig, signWecomIdentity } from "../utils/wecom.js";
+import {
+  getWecomUserByCode,
+  hasWecomConfig,
+  getWecomConfig,
+  getWecomDepartmentIds,
+  getWecomDepartmentMembers,
+  requestWecomIdentity,
+  signWecomIdentity,
+} from "../utils/wecom.js";
 
 const router = express.Router();
 const prisma = await import("../plugins/prisma.cjs").then((module) => module.default || module);
@@ -98,6 +106,76 @@ router.get("/me", async (request, response, next) => {
         authToken: session.token,
         authExpiresAt: session.expiresAt,
       },
+    });
+  } catch (error) {
+    next(error);
+  }
+});
+
+router.get("/department-members", async (request, response, next) => {
+  const identity = requestWecomIdentity(request);
+  logger.info("[call] getWecomDepartmentMembersRoute step 0", {
+    message: "department member demo request received",
+    hasIdentity: Boolean(identity),
+  });
+  try {
+    if (!identity) {
+      logger.warn("[call] getWecomDepartmentMembersRoute step 1", {
+        message: "department member demo request rejected",
+        reason: "missing_wecom_identity",
+      });
+      response.status(401).json({ error: "企业微信身份已失效，请重新登录" });
+      return;
+    }
+
+    const departmentId = Number(request.query.department_id);
+    const fetchChild = String(request.query.fetch_child || "0") === "1";
+    const userlist = await getWecomDepartmentMembers(departmentId, fetchChild);
+    logger.info("[call] getWecomDepartmentMembersRoute step 2", {
+      message: "department member demo response prepared",
+      departmentId,
+      fetchChild,
+      memberCount: userlist.length,
+    });
+    response.json({
+      errcode: 0,
+      errmsg: "ok",
+      department_id: departmentId,
+      fetch_child: fetchChild ? 1 : 0,
+      userlist,
+    });
+  } catch (error) {
+    next(error);
+  }
+});
+
+router.get("/departments", async (request, response, next) => {
+  const identity = requestWecomIdentity(request);
+  logger.info("[call] getWecomDepartmentsRoute step 0", {
+    message: "department ID demo request received",
+    hasIdentity: Boolean(identity),
+  });
+  try {
+    if (!identity) {
+      logger.warn("[call] getWecomDepartmentsRoute step 1", {
+        message: "department ID demo request rejected",
+        reason: "missing_wecom_identity",
+      });
+      response.status(401).json({ error: "企业微信身份已失效，请重新登录" });
+      return;
+    }
+
+    const parentDepartmentId = String(request.query.id || "").trim();
+    const departmentIds = await getWecomDepartmentIds(parentDepartmentId);
+    logger.info("[call] getWecomDepartmentsRoute step 2", {
+      message: "department ID demo response prepared",
+      hasParentDepartmentId: Boolean(parentDepartmentId),
+      departmentCount: departmentIds.length,
+    });
+    response.json({
+      errcode: 0,
+      errmsg: "ok",
+      department_id: departmentIds,
     });
   } catch (error) {
     next(error);

@@ -175,6 +175,121 @@ export async function getWecomUserByUserId(userId, accessToken = "") {
   };
 }
 
+export async function getWecomDepartmentIds(parentDepartmentId = "") {
+  const normalizedParentDepartmentId =
+    String(parentDepartmentId || "").trim() === ""
+      ? ""
+      : Number(parentDepartmentId);
+  if (
+    normalizedParentDepartmentId !== "" &&
+    (!Number.isInteger(normalizedParentDepartmentId) || normalizedParentDepartmentId <= 0)
+  ) {
+    throw new Error("id 必须是大于 0 的整数");
+  }
+
+  logger.info("[call] getWecomDepartmentIds step 0", {
+    message: "Enterprise WeChat department ID lookup started",
+    hasParentDepartmentId: normalizedParentDepartmentId !== "",
+    parentDepartmentId: normalizedParentDepartmentId,
+  });
+  const token = await getWecomAccessToken();
+  if (!token) {
+    logger.warn("[call] getWecomDepartmentIds step 1", {
+      message: "Enterprise WeChat department ID lookup skipped: access token is unavailable",
+      reason: "missing_access_token",
+    });
+    throw new Error("企业微信应用未配置或 access_token 获取失败");
+  }
+
+  const url = new URL("https://qyapi.weixin.qq.com/cgi-bin/department/simplelist");
+  url.searchParams.set("access_token", token);
+  if (normalizedParentDepartmentId !== "") {
+    url.searchParams.set("id", String(normalizedParentDepartmentId));
+  }
+  const response = await fetch(url);
+  const payload = await response.json();
+  if (!response.ok || payload.errcode !== 0) {
+    logger.warn("[call] getWecomDepartmentIds step 2", {
+      message: "Enterprise WeChat department ID lookup rejected",
+      hasParentDepartmentId: normalizedParentDepartmentId !== "",
+      parentDepartmentId: normalizedParentDepartmentId,
+      httpStatus: response.status,
+      errcode: Number(payload.errcode || 0),
+      errmsg: String(payload.errmsg || ""),
+    });
+    throw new Error(
+      `企业微信错误 ${Number(payload.errcode || 0)}：${payload.errmsg || `部门 ID 列表获取失败（HTTP ${response.status}）`}`,
+    );
+  }
+
+  const departmentIds = Array.isArray(payload.department_id) ? payload.department_id : [];
+  logger.info("[call] getWecomDepartmentIds step 3", {
+    message: "Enterprise WeChat department ID lookup completed",
+    hasParentDepartmentId: normalizedParentDepartmentId !== "",
+    parentDepartmentId: normalizedParentDepartmentId,
+    departmentCount: departmentIds.length,
+  });
+  return departmentIds.map((department) => ({
+    id: Number(department.id || 0),
+    parentid: Number(department.parentid || 0),
+    order: Number(department.order || 0),
+  }));
+}
+
+export async function getWecomDepartmentMembers(departmentId, fetchChild = false) {
+  const normalizedDepartmentId = Number(departmentId);
+  if (!Number.isInteger(normalizedDepartmentId) || normalizedDepartmentId <= 0) {
+    throw new Error("department_id 必须是大于 0 的整数");
+  }
+
+  logger.info("[call] getWecomDepartmentMembers step 0", {
+    message: "Enterprise WeChat department member lookup started",
+    departmentId: normalizedDepartmentId,
+    fetchChild: Boolean(fetchChild),
+  });
+  const token = await getWecomAccessToken();
+  if (!token) {
+    logger.warn("[call] getWecomDepartmentMembers step 1", {
+      message: "Enterprise WeChat department member lookup skipped: access token is unavailable",
+      departmentId: normalizedDepartmentId,
+      reason: "missing_access_token",
+    });
+    throw new Error("企业微信应用未配置或 access_token 获取失败");
+  }
+
+  const url = new URL("https://qyapi.weixin.qq.com/cgi-bin/user/simplelist");
+  url.searchParams.set("access_token", token);
+  url.searchParams.set("department_id", String(normalizedDepartmentId));
+  url.searchParams.set("fetch_child", fetchChild ? "1" : "0");
+  const response = await fetch(url);
+  const payload = await response.json();
+  if (!response.ok || payload.errcode !== 0) {
+    logger.warn("[call] getWecomDepartmentMembers step 2", {
+      message: "Enterprise WeChat department member lookup rejected",
+      departmentId: normalizedDepartmentId,
+      fetchChild: Boolean(fetchChild),
+      httpStatus: response.status,
+      errcode: Number(payload.errcode || 0),
+      errmsg: String(payload.errmsg || ""),
+    });
+    throw new Error(payload.errmsg || `企业微信部门成员获取失败（HTTP ${response.status}）`);
+  }
+
+  const userlist = Array.isArray(payload.userlist) ? payload.userlist : [];
+  logger.info("[call] getWecomDepartmentMembers step 3", {
+    message: "Enterprise WeChat department member lookup completed",
+    departmentId: normalizedDepartmentId,
+    fetchChild: Boolean(fetchChild),
+    memberCount: userlist.length,
+  });
+  return userlist.map((member) => ({
+    userid: String(member.userid || ""),
+    name: String(member.name || ""),
+    department: Array.isArray(member.department) ? member.department : [],
+    open_userid: String(member.open_userid || ""),
+  }));
+}
+
 export async function uploadWecomTemporaryFile(filePath, fileName, contentType = "application/octet-stream") {
   const token = await getWecomAccessToken();
   if (!token) throw new Error("企业微信文件分享未配置，请先设置企业微信应用密钥。");
