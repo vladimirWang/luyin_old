@@ -553,7 +553,7 @@ router.get("/:id", async (request, response) => {
   // });
   const bool1 = !recording || recording.deletedAt || (!canDeleteAll && !canReadRecording(recording, clientId))
   const bool2 = (!canDeleteAll && !canReadRecording(recording, clientId))
-  logger.info("get /:id ", {message: `id: ${id}, bool1: ${bool1}, bool2: ${bool2}`})
+  logger.info("get /:id ", {message: `id: ${request.params.id}, bool1: ${bool1}, bool2: ${bool2}`})
   if (!recording) {
     logger.info("[call] getRecordingDetail step 1", {
       message: "recording detail request rejected",
