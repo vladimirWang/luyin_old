@@ -7,3 +7,7 @@ export const RECORDING_RECOVERY_STORE = "segments";
 export const RECORDING_RECOVERY_VERSION = 1;
 export const RECORDING_SESSION_STORAGE_KEY = "wecomRecorderActiveRecordingSession";
 export const RECORDING_SESSION_QUEUE_STORAGE_KEY = "wecomRecorderRecordingRecoveryQueue";
+export const RECORDING_FEEDBACK_CONTENT_TYPES = Object.freeze({
+  MEETING_OUTLINE: "meeting_outline",
+  TRANSCRIPT: "transcript",
+});

@@ -2,10 +2,11 @@ import { useState, useEffect, useMemo, useRef } from "react";
 import { ChevronUp, ChevronDown, RefreshCw, Pause, Pencil, Play, Share2, ThumbsDown, ThumbsUp, Volume2 } from "lucide-react";
 import "./RecordPreviewOverlay.css";
 import {
-  getMeetingOutlineFeedback,
+  getRecordingFeedback,
   renameRecording,
-  saveMeetingOutlineFeedback,
+  saveRecordingFeedback,
 } from "../../api/recordings.js";
+import { RECORDING_FEEDBACK_CONTENT_TYPES } from "../../constant.js";
 import {
   formatTimecode,
   formatDuration,
@@ -31,8 +32,9 @@ export function RecordPreviewOverlay({ recording, onClose, onAsk, onShare, onRef
   const [nameEditing, setNameEditing] = useState(false);
   const [draftName, setDraftName] = useState(recording?.name || "");
   const [outlineFeedback, setOutlineFeedback] = useState(null);
+  const [transcriptFeedback, setTranscriptFeedback] = useState(null);
   const [feedbackLoading, setFeedbackLoading] = useState(false);
-  const [feedbackSaving, setFeedbackSaving] = useState(false);
+  const [feedbackSavingType, setFeedbackSavingType] = useState("");
 
   useEffect(() => {
     setOpenSection("");
@@ -56,12 +58,21 @@ export function RecordPreviewOverlay({ recording, onClose, onAsk, onShare, onRef
     let cancelled = false;
     setFeedbackLoading(true);
     setOutlineFeedback(null);
-    getMeetingOutlineFeedback(recording.id)
-      .then((payload) => {
-        if (!cancelled) setOutlineFeedback(payload.feedback?.satisfied ?? null);
+    setTranscriptFeedback(null);
+    Promise.all([
+      getRecordingFeedback(recording.id, RECORDING_FEEDBACK_CONTENT_TYPES.MEETING_OUTLINE),
+      getRecordingFeedback(recording.id, RECORDING_FEEDBACK_CONTENT_TYPES.TRANSCRIPT),
+    ])
+      .then(([outlinePayload, transcriptPayload]) => {
+        if (cancelled) return;
+        setOutlineFeedback(outlinePayload.feedback?.satisfied ?? null);
+        setTranscriptFeedback(transcriptPayload.feedback?.satisfied ?? null);
       })
       .catch(() => {
-        if (!cancelled) setOutlineFeedback(null);
+        if (!cancelled) {
+          setOutlineFeedback(null);
+          setTranscriptFeedback(null);
+        }
       })
       .finally(() => {
         if (!cancelled) setFeedbackLoading(false);
@@ -265,17 +276,25 @@ export function RecordPreviewOverlay({ recording, onClose, onAsk, onShare, onRef
     }
   }
 
-  async function submitOutlineFeedback(satisfied) {
-    if (feedbackSaving || outlineFeedback !== null) return;
-    setFeedbackSaving(true);
+  async function submitFeedback(contentType, satisfied) {
+    const currentFeedback = contentType === RECORDING_FEEDBACK_CONTENT_TYPES.MEETING_OUTLINE
+      ? outlineFeedback
+      : transcriptFeedback;
+    if (feedbackSavingType || currentFeedback !== null) return;
+    setFeedbackSavingType(contentType);
     try {
-      const payload = await saveMeetingOutlineFeedback(recording.id, satisfied);
-      setOutlineFeedback(payload.feedback?.satisfied ?? satisfied);
+      const payload = await saveRecordingFeedback(recording.id, contentType, satisfied);
+      const nextFeedback = payload.feedback?.satisfied ?? satisfied;
+      if (contentType === RECORDING_FEEDBACK_CONTENT_TYPES.MEETING_OUTLINE) {
+        setOutlineFeedback(nextFeedback);
+      } else {
+        setTranscriptFeedback(nextFeedback);
+      }
       showToast("感谢您的评价");
     } catch (error) {
       showToast(error instanceof Error ? error.message : "评价提交失败");
     } finally {
-      setFeedbackSaving(false);
+      setFeedbackSavingType("");
     }
   }
 
@@ -388,7 +407,7 @@ export function RecordPreviewOverlay({ recording, onClose, onAsk, onShare, onRef
                       </>
                     )}
                     <div
-                      className={`meeting-outline-feedback${outlineFeedback !== null ? " submitted" : ""}`}
+                      className={`recording-content-feedback${outlineFeedback !== null ? " submitted" : ""}`}
                       aria-label="会议提纲满意度评价"
                     >
                       <span>这份会议提纲对您有帮助吗？</span>
@@ -397,8 +416,8 @@ export function RecordPreviewOverlay({ recording, onClose, onAsk, onShare, onRef
                           className={outlineFeedback === true ? "active" : ""}
                           type="button"
                           aria-pressed={outlineFeedback === true}
-                          disabled={feedbackLoading || feedbackSaving || outlineFeedback !== null}
-                          onClick={() => submitOutlineFeedback(true)}
+                          disabled={feedbackLoading || Boolean(feedbackSavingType) || outlineFeedback !== null}
+                          onClick={() => submitFeedback(RECORDING_FEEDBACK_CONTENT_TYPES.MEETING_OUTLINE, true)}
                         >
                           <ThumbsUp size={14} />
                           满意
@@ -407,8 +426,8 @@ export function RecordPreviewOverlay({ recording, onClose, onAsk, onShare, onRef
                           className={outlineFeedback === false ? "active" : ""}
                           type="button"
                           aria-pressed={outlineFeedback === false}
-                          disabled={feedbackLoading || feedbackSaving || outlineFeedback !== null}
-                          onClick={() => submitOutlineFeedback(false)}
+                          disabled={feedbackLoading || Boolean(feedbackSavingType) || outlineFeedback !== null}
+                          onClick={() => submitFeedback(RECORDING_FEEDBACK_CONTENT_TYPES.MEETING_OUTLINE, false)}
                         >
                           <ThumbsDown size={14} />
                           不满意
@@ -440,15 +459,45 @@ export function RecordPreviewOverlay({ recording, onClose, onAsk, onShare, onRef
             {openSection === "transcript" ? (
               <div className="record-preview-transcript" aria-label="详细文字转写">
                 {transcriptLines.length > 0 ? (
-                  transcriptLines.map((line) => (
-                    <button className="record-preview-line" key={line.id} type="button" onClick={() => seekTo(line.startMs)}>
-                      <span>{formatTimecode(line.startMs)}</span>
-                      <strong>
-                        <em>{line.speakerName || recording.speakerName || "说话人"}</em>
-                        {line.text}
-                      </strong>
-                    </button>
-                  ))
+                  <>
+                    {transcriptLines.map((line) => (
+                      <button className="record-preview-line" key={line.id} type="button" onClick={() => seekTo(line.startMs)}>
+                        <span>{formatTimecode(line.startMs)}</span>
+                        <strong>
+                          <em>{line.speakerName || recording.speakerName || "说话人"}</em>
+                          {line.text}
+                        </strong>
+                      </button>
+                    ))}
+                    <div
+                      className={`recording-content-feedback${transcriptFeedback !== null ? " submitted" : ""}`}
+                      aria-label="逐字转写满意度评价"
+                    >
+                      <span>这份逐字转写准确吗？</span>
+                      <div>
+                        <button
+                          className={transcriptFeedback === true ? "active" : ""}
+                          type="button"
+                          aria-pressed={transcriptFeedback === true}
+                          disabled={feedbackLoading || Boolean(feedbackSavingType) || transcriptFeedback !== null}
+                          onClick={() => submitFeedback(RECORDING_FEEDBACK_CONTENT_TYPES.TRANSCRIPT, true)}
+                        >
+                          <ThumbsUp size={14} />
+                          满意
+                        </button>
+                        <button
+                          className={transcriptFeedback === false ? "active" : ""}
+                          type="button"
+                          aria-pressed={transcriptFeedback === false}
+                          disabled={feedbackLoading || Boolean(feedbackSavingType) || transcriptFeedback !== null}
+                          onClick={() => submitFeedback(RECORDING_FEEDBACK_CONTENT_TYPES.TRANSCRIPT, false)}
+                        >
+                          <ThumbsDown size={14} />
+                          不满意
+                        </button>
+                      </div>
+                    </div>
+                  </>
                 ) : isTranscriptGenerating ? (
                   <div className="record-preview-empty-state">
                     <p className="record-preview-empty">正在生成逐字稿，请稍候，完成后会自动显示。</p>

@@ -13,10 +13,10 @@ export function renameRecording(recordingId, name) {
     return req.patch(`/api/recordings/${encodeURIComponent(recordingId)}`, { name })
 }
 
-export function getMeetingOutlineFeedback(recordingId) {
-    return req.get(`/api/recordings/${encodeURIComponent(recordingId)}/meeting-outline-feedback`)
+export function getRecordingFeedback(recordingId, contentType) {
+    return req.get(`/api/recordings/${encodeURIComponent(recordingId)}/feedback/${encodeURIComponent(contentType)}`)
 }
 
-export function saveMeetingOutlineFeedback(recordingId, satisfied) {
-    return req.post(`/api/recordings/${encodeURIComponent(recordingId)}/meeting-outline-feedback`, { satisfied })
+export function saveRecordingFeedback(recordingId, contentType, satisfied) {
+    return req.post(`/api/recordings/${encodeURIComponent(recordingId)}/feedback/${encodeURIComponent(contentType)}`, { satisfied })
 }

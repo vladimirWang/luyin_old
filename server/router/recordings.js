@@ -21,7 +21,7 @@ import {
 } from "../utils/recordings.js";
 import { uploadWecomTemporaryFile } from "../utils/wecom.js";
 import { isTencentMeetingRecording, tencentMeetingSourceKey, tencentMeetingSyncInfoFromRecording } from "../utils/tencentMeeting.mjs";
-import { TENCENT_MEETING_WEBHOOK_EVENTS } from "../constant.js";
+import { RECORDING_FEEDBACK_CONTENT_TYPES, TENCENT_MEETING_WEBHOOK_EVENTS } from "../constant.js";
 // import prisma from "../plugins/prisma.js";
 import {
   finalizeStagedFileDeletions,
@@ -37,9 +37,9 @@ import {
   transcriptSegmentFromPrisma,
 } from "../repositories/recordings.mjs";
 import {
-  createMeetingOutlineFeedback,
-  findMeetingOutlineFeedback,
-} from "../repositories/meetingOutlineFeedback.mjs";
+  createRecordingFeedback,
+  findRecordingFeedback,
+} from "../repositories/recordingFeedback.mjs";
 import { nextRecordingSequence } from "../services/recordingSequence.js";
 import { createAudioDownloadToken, hasValidAudioDownloadToken } from "../utils/audioShare.js";
 
@@ -916,11 +916,17 @@ router.get("/:id/transcript.txt", async (request, response) => {
 router.get("/:id/meeting-outline", handleMeetingOutlineRequest);
 router.post("/:id/meeting-outline", handleMeetingOutlineRequest);
 
-router.get("/:id/meeting-outline-feedback", async (request, response, next) => {
+router.get("/:id/feedback/:contentType", async (request, response, next) => {
   try {
     const identity = requestTrustedWecomOwner(request);
     if (!identity) {
       response.status(401).json({ error: "请先通过企业微信登录" });
+      return;
+    }
+
+    const contentType = String(request.params.contentType || "");
+    if (!Object.values(RECORDING_FEEDBACK_CONTENT_TYPES).includes(contentType)) {
+      response.status(400).json({ error: "不支持的评价类型" });
       return;
     }
 
@@ -931,14 +937,14 @@ router.get("/:id/meeting-outline-feedback", async (request, response, next) => {
       return;
     }
 
-    const feedback = await findMeetingOutlineFeedback(recording.id, identity.userId);
+    const feedback = await findRecordingFeedback(recording.id, identity.userId, contentType);
     response.json({ feedback });
   } catch (error) {
     next(error);
   }
 });
 
-router.post("/:id/meeting-outline-feedback", async (request, response, next) => {
+router.post("/:id/feedback/:contentType", async (request, response, next) => {
   try {
     const identity = requestTrustedWecomOwner(request);
     if (!identity) {
@@ -950,6 +956,12 @@ router.post("/:id/meeting-outline-feedback", async (request, response, next) => 
       return;
     }
 
+    const contentType = String(request.params.contentType || "");
+    if (!Object.values(RECORDING_FEEDBACK_CONTENT_TYPES).includes(contentType)) {
+      response.status(400).json({ error: "不支持的评价类型" });
+      return;
+    }
+
     const row = await prisma.recording.findUnique({ where: { id: request.params.id } });
     const recording = row ? recordingFromPrisma(row) : null;
     if (!recording || recording.deletedAt || !canReadRecording(recording, identity.ownerClientId)) {
@@ -957,15 +969,16 @@ router.post("/:id/meeting-outline-feedback", async (request, response, next) => 
       return;
     }
 
-    const existingFeedback = await findMeetingOutlineFeedback(recording.id, identity.userId);
+    const existingFeedback = await findRecordingFeedback(recording.id, identity.userId, contentType);
     if (existingFeedback) {
       response.status(409).json({ error: "您已经提交过评价", feedback: existingFeedback });
       return;
     }
 
-    const feedback = await createMeetingOutlineFeedback({
+    const feedback = await createRecordingFeedback({
       recordingId: recording.id,
       userId: identity.userId,
+      contentType,
       satisfied: request.body.satisfied,
     });
     response.json({ feedback });
