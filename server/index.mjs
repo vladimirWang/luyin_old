@@ -102,6 +102,7 @@ import {
   tencentMeetingSearchWindow,
   tencentMeetingCandidateOperatorParams,
   tencentMeetingRecorderUserIdFromAddressPayload,
+  tencentMeetingRecorderDownloadUrlFromAddressPayload,
   fetchTencentMeetingUsername,
   tencentMeetingCandidateUserIds,
   tencentMeetingCandidateDownloadIdentityParams,
@@ -1147,10 +1148,22 @@ function tencentMeetingLookupErrorMessage(error) {
 
 async function resolveTencentMeetingRecorderOwnerFromAddress(payload, recordFileId) {
   const userId = tencentMeetingRecorderUserIdFromAddressPayload(payload);
+  const recordInfo =
+    payload?.record_info && typeof payload.record_info === "object" && !Array.isArray(payload.record_info)
+      ? payload.record_info
+      : {};
   logger.info("[call] resolveTencentMeetingRecorderOwnerFromAddress step 0", {
     message: "recorder owner resolution started from recording address response",
     recordFileId,
+    responseRecordFileId: String(payload?.record_file_id || ""),
+    responseRecordFileIdMatches: String(payload?.record_file_id || "") === recordFileId,
+    payloadKeys:
+      payload && typeof payload === "object" && !Array.isArray(payload)
+        ? Object.keys(payload).sort()
+        : [],
+    recordInfoKeys: Object.keys(recordInfo).sort(),
     hasUserId: Boolean(userId),
+    userIdSuffix: userId ? userId.slice(-6) : "",
   });
   if (!userId) {
     logger.warn("[call] resolveTencentMeetingRecorderOwnerFromAddress step 1", {
@@ -1172,15 +1185,22 @@ async function resolveTencentMeetingRecorderOwnerFromAddress(payload, recordFile
   }
 
   try {
-    const username = await fetchTencentMeetingUsername(userId, operatorParams);
     logger.info("[call] resolveTencentMeetingRecorderOwnerFromAddress step 3", {
+      message: "requesting Tencent Meeting user detail for recorder owner",
+      recordFileId,
+      userIdSuffix: userId.slice(-6),
+      operatorIdType: String(operatorParams.operator_id_type || ""),
+    });
+    const username = await fetchTencentMeetingUsername(userId, operatorParams);
+    logger.info("[call] resolveTencentMeetingRecorderOwnerFromAddress step 4", {
       message: "recorder owner resolution completed",
       recordFileId,
       hasUsername: Boolean(username),
+      usernameLength: username.length,
     });
     return { userId, username };
   } catch (error) {
-    logger.warn("[call] resolveTencentMeetingRecorderOwnerFromAddress step 4", {
+    logger.warn("[call] resolveTencentMeetingRecorderOwnerFromAddress step 5", {
       message: "recorder owner resolution failed",
       recordFileId,
       errorMessage: tencentMeetingLookupErrorMessage(error),
@@ -1214,10 +1234,19 @@ async function persistTencentMeetingRecorderOwner(recordingId, target) {
       updatedAt: new Date(),
     },
   });
+  const persisted = await prisma.recording.findFirst({
+    where: { id: recordingId, deletedAt: null },
+    select: { ownerName: true, tencentMeetingCreatorUserid: true },
+  });
   logger.info("[call] persistTencentMeetingRecorderOwner step 2", {
     message: "recorder owner persistence completed",
     recordingId,
     updatedCount: updated.count,
+    recordingFoundAfterUpdate: Boolean(persisted),
+    ownerNameMatches: String(persisted?.ownerName || "") === String(target.ownerName),
+    creatorUseridMatches:
+      String(persisted?.tencentMeetingCreatorUserid || "") === String(target.creatorUserid || ""),
+    storedOwnerNameLength: String(persisted?.ownerName || "").length,
   });
   return updated.count > 0;
 }
@@ -1285,8 +1314,11 @@ async function findTencentMeetingDownloadTarget(info) {
     const uri = tencentMeetingQuery(`/v1/addresses/${encodeURIComponent(recordFileId)}`, params);
     try {
       const payload = await tencentMeetingApiRequest("GET", uri);
-      const file = payload.record_file || payload.file || payload.data || payload;
-      const downloadUrl = tencentMeetingDownloadUrlFromFile(file);
+      const isRecorder = info?.sourceKind === "recorder";
+      const file = isRecorder ? payload : payload.record_file || payload.file || payload.data || payload;
+      const downloadUrl = isRecorder
+        ? tencentMeetingRecorderDownloadUrlFromAddressPayload(payload)
+        : tencentMeetingDownloadUrlFromFile(file);
       logger.info("[call] findTencentMeetingDownloadTarget step 7", {
         message: "recording address lookup completed",
         recordFileId,
@@ -1294,6 +1326,19 @@ async function findTencentMeetingDownloadTarget(info) {
         identityKind,
         payloadKeys: tencentMeetingLookupPayloadKeys(payload),
         fileKeys: tencentMeetingLookupPayloadKeys(file),
+        recorderCanonicalAddress: isRecorder,
+        hasCanonicalRecordInfo: Boolean(
+          isRecorder &&
+            payload?.record_info &&
+            typeof payload.record_info === "object" &&
+            !Array.isArray(payload.record_info),
+        ),
+        hasCanonicalUserId: Boolean(
+          isRecorder && tencentMeetingRecorderUserIdFromAddressPayload(payload),
+        ),
+        hasCanonicalDownloadAddress: Boolean(
+          isRecorder && tencentMeetingRecorderDownloadUrlFromAddressPayload(payload),
+        ),
         hasDownloadUrl: Boolean(downloadUrl),
       });
       if (downloadUrl) {

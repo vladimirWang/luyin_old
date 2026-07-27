@@ -1183,6 +1183,10 @@ export function tencentMeetingRecorderUserIdFromAddressPayload(payload = {}) {
   return String(payload?.record_info?.user_id || "").trim();
 }
 
+export function tencentMeetingRecorderDownloadUrlFromAddressPayload(payload = {}) {
+  return String(payload?.download_address || "").trim();
+}
+
 export async function fetchTencentMeetingUsername(userid, operatorParams = {}) {
   const normalizedUserid = String(userid || "").trim();
   const operatorId = String(operatorParams?.operator_id || "").trim();
@@ -1211,7 +1215,12 @@ export async function fetchTencentMeetingUsername(userid, operatorParams = {}) {
   const username = String(payload?.username || "").trim();
   logger.info("[call] fetchTencentMeetingUsername step 2", {
     message: "Tencent Meeting user lookup completed",
+    responseKeys:
+      payload && typeof payload === "object" && !Array.isArray(payload)
+        ? Object.keys(payload).sort()
+        : [],
     hasUsername: Boolean(username),
+    usernameLength: username.length,
   });
   return username;
 }
