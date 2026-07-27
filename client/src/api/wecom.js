@@ -44,3 +44,22 @@ export function updateWecomProfile(profile, authToken) {
     headers: authToken ? { "X-WeCom-Auth-Token": authToken } : undefined,
   });
 }
+
+export function getWecomDepartmentMembers(departmentId, fetchChild = false) {
+  return requestWecom({
+    method: "GET",
+    url: "/api/wecom/department-members",
+    params: {
+      department_id: departmentId,
+      fetch_child: fetchChild ? 1 : 0,
+    },
+  });
+}
+
+export function getWecomDepartmentIds(parentDepartmentId = "") {
+  return requestWecom({
+    method: "GET",
+    url: "/api/wecom/departments",
+    params: parentDepartmentId ? { id: parentDepartmentId } : {},
+  });
+}
