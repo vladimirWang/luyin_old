@@ -4004,7 +4004,6 @@ button {
 }
 
 .chat-page-header.compact span {
-  margin-left: auto;
   min-width: 0;
   overflow: hidden;
   color: rgba(65, 69, 78, 0.64);

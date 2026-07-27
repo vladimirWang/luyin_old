@@ -84,7 +84,7 @@ export function QuestionComposer({
             aria-label="输入问题"
           />
         )}
-
+{/* 
         <button
           type="button"
           className={attachmentsOpen ? "chat-plus-button active" : "chat-plus-button"}
@@ -92,7 +92,7 @@ export function QuestionComposer({
           onClick={() => onAttachmentsOpenChange(!attachmentsOpen)}
         >
           <Plus size={22} />
-        </button>
+        </button> */}
 
         {composerMode === "text" ? (
           <button className="chat-send-button" type="submit" aria-label="发送问题" disabled={!canSubmit}>

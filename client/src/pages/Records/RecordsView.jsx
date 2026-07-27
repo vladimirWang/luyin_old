@@ -1,4 +1,5 @@
 import { useState, useEffect, useRef, useMemo } from "react";
+import { CalendarX2 } from "lucide-react";
 import {
   Star,
   Trash2,
@@ -495,11 +496,16 @@ export function RecordsView({
           </div>
         ) : (
           <div className="empty-state">
-            <div className="empty-icon">
+            {/* <div className="empty-icon">
               <Mic size={40} />
             </div>
             <h2>还没有录音</h2>
-            <p>点击下方录音按钮，完成后会上传服务器并生成卡片。</p>
+            <p>点击下方录音按钮，完成后会上传服务器并生成卡片。</p> */}
+            <div className="grid max-w-70 justify-items-center gap-3 text-slate-500">
+              <span className="inline-flex size-14 items-center justify-center rounded-full bg-white/70 text-slate-400 shadow-[0_14px_32px_rgba(31,38,52,0.06),inset_0_0_0_1px_rgba(135,144,160,0.1)]">
+                <CalendarX2 size={24} />
+              </span>
+            </div>
           </div>
         )}
       </div>
