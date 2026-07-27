@@ -1115,7 +1115,8 @@ export function tencentMeetingCallbackUrl() {
 }
 
 export function tencentMeetingStsOperatorId() {
-  return firstEnv("TENCENT_MEETING_STS_OPERATOR_ID", "WEMEET_STS_OPERATOR_ID", "TENCENT_MEETING_OPERATOR_ID", "WEMEET_OPERATOR_ID");
+  return process.env.TENCENT_MEETING_STS_OPERATOR_ID
+  // return firstEnv("TENCENT_MEETING_STS_OPERATOR_ID", "WEMEET_STS_OPERATOR_ID", "TENCENT_MEETING_OPERATOR_ID", "WEMEET_OPERATOR_ID");
 }
 
 export function tencentMeetingImportOwnerClientId() {
@@ -1173,7 +1174,8 @@ export function tencentMeetingSearchWindow(info = {}) {
 }
 
 export function tencentMeetingCandidateOperatorParams() {
-  const operatorId = firstEnv("TENCENT_MEETING_OPERATOR_ID", "WEMEET_OPERATOR_ID");
+  // const operatorId = firstEnv("TENCENT_MEETING_OPERATOR_ID", "WEMEET_OPERATOR_ID");
+  const operatorId = process.env.TENCENT_MEETING_STS_OPERATOR_ID
   if (!operatorId) return [];
   const type = firstEnv("TENCENT_MEETING_OPERATOR_ID_TYPE", "WEMEET_OPERATOR_ID_TYPE") || "3";
   return [{ operator_id: operatorId, operator_id_type: type }];

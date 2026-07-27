@@ -24,12 +24,13 @@ function requestCooldownMs() {
 }
 
 function operatorId() {
-  return [
-    process.env.TENCENT_MEETING_STS_OPERATOR_ID,
-    process.env.WEMEET_STS_OPERATOR_ID,
-    process.env.TENCENT_MEETING_OPERATOR_ID,
-    process.env.WEMEET_OPERATOR_ID,
-  ].map((value) => String(value || "").trim()).find(Boolean) || "";
+  // return [
+  //   process.env.TENCENT_MEETING_STS_OPERATOR_ID,
+  //   process.env.WEMEET_STS_OPERATOR_ID,
+  //   process.env.TENCENT_MEETING_OPERATOR_ID,
+  //   process.env.WEMEET_OPERATOR_ID,
+  // ].map((value) => String(value || "").trim()).find(Boolean) || "";
+  return process.env.TENCENT_MEETING_STS_OPERATOR_ID
 }
 
 function expirationMs(value) {

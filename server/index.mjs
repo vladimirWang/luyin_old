@@ -1146,7 +1146,7 @@ function tencentMeetingLookupErrorMessage(error) {
     .slice(0, 500);
 }
 
-async function resolveTencentMeetingRecorderOwnerFromAddress(payload, recordFileId) {
+async function resolveTencentMeetingRecorderOwnerFromAddress(payload, recordFileId, addressIdentity = {}) {
   const userId = tencentMeetingRecorderUserIdFromAddressPayload(payload);
   const recordInfo =
     payload?.record_info && typeof payload.record_info === "object" && !Array.isArray(payload.record_info)
@@ -1174,12 +1174,24 @@ async function resolveTencentMeetingRecorderOwnerFromAddress(payload, recordFile
     return { userId: "", username: "" };
   }
 
-  const operatorParams = tencentMeetingCandidateOperatorParams()[0];
+  // The successful address lookup identity is also the authenticated operator for the user-detail request.
+  const operatorParams = addressIdentity.operator_id
+    ? {
+        operator_id: String(addressIdentity.operator_id),
+        operator_id_type: String(addressIdentity.operator_id_type || ""),
+      }
+    : addressIdentity.userid
+      ? {
+          operator_id: String(addressIdentity.userid),
+          operator_id_type: "1",
+        }
+      : null;
   if (!operatorParams) {
     logger.warn("[call] resolveTencentMeetingRecorderOwnerFromAddress step 2", {
       message: "recorder owner resolution skipped: operator identity is not configured",
       recordFileId,
       reason: "missing_operator_identity",
+      addressIdentityKind: tencentMeetingLookupIdentityKind(addressIdentity),
     });
     return { userId, username: "" };
   }
@@ -1190,6 +1202,7 @@ async function resolveTencentMeetingRecorderOwnerFromAddress(payload, recordFile
       recordFileId,
       userIdSuffix: userId.slice(-6),
       operatorIdType: String(operatorParams.operator_id_type || ""),
+      operatorSource: addressIdentity.operator_id ? "address_operator_id" : "address_userid",
     });
     const username = await fetchTencentMeetingUsername(userId, operatorParams);
     logger.info("[call] resolveTencentMeetingRecorderOwnerFromAddress step 4", {
@@ -1344,7 +1357,7 @@ async function findTencentMeetingDownloadTarget(info) {
       if (downloadUrl) {
         const recorderOwner =
           info?.sourceKind === "recorder"
-            ? await resolveTencentMeetingRecorderOwnerFromAddress(payload, recordFileId)
+            ? await resolveTencentMeetingRecorderOwnerFromAddress(payload, recordFileId, params)
             : { userId: "", username: "" };
         logger.info("[call] findTencentMeetingDownloadTarget step 8", {
           message: "download target resolved from recording address API",
