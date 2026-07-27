@@ -246,7 +246,7 @@ export function RecordCard({
             >
               {sourceKind === 'cloud' && <Cloud size={16} strokeWidth={2.2} aria-hidden="true" />}
               {sourceKind === 'recorder' && <Mic2 size={16} strokeWidth={2.2} aria-hidden="true" />}
-              {sourceKind === 'manual_upload' && <Upload size={16} strokeWidth={2.2} aria-hidden="true" />}
+              {sourceKind === null && <Upload size={16} strokeWidth={2.2} aria-hidden="true" />}
             </span>
           ) : null}
           {isTrashView ? (
@@ -285,8 +285,8 @@ export function RecordCard({
             </div>
           )}
         </div>
-
-        <textarea
+        
+        {/* <textarea
           className="record-title-input"
           aria-label="录音名称"
           rows={2}
@@ -301,13 +301,18 @@ export function RecordCard({
             }
           }}
           onClick={(event) => event.stopPropagation()}
-        />
+        /> */}
+        <article className="record-title-input">
+          {draftName}
+        </article>
         {/* <div style={{color: 'red', fontSize: 12}}>{recording.id.slice(0,5)}</div> */}
         <div className="record-meta">
           <span>{dayjs(recording.createdAt).format("HH:mm:ss")}</span>
         </div>
-
-        <div className="card-mark-row" onClick={(event) => event.stopPropagation()}>
+        <div className="card-mark-row">
+          <span>{draftTag}</span>
+        </div>
+        {/* <div className="card-mark-row" onClick={(event) => event.stopPropagation()}>
           <textarea
             className={tagExpanded ? "expanded" : ""}
             aria-label="录音标签"
@@ -329,7 +334,7 @@ export function RecordCard({
             }}
             placeholder="点击添加标签"
           />
-        </div>
+        </div> */}
 
         <div className="record-card-details" onClick={(event) => event.stopPropagation()}>
           <select
