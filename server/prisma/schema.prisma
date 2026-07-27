@@ -31,11 +31,11 @@ model Recording {
   seq                           Int       @default(0)
   userId                        String?   @map("user_id") @db.VarChar(80)
   folderId                      String?   @map("folder_id") @db.VarChar(80)
-  name                          String?   @db.VarChar(30)
+  name                          String?   @db.VarChar(160)
   speakerName                   String?   @map("speaker_name") @db.LongText
   speakerMapJson                String?   @map("speaker_map_json") @db.LongText
   ownerClientId                 String?   @map("owner_client_id") @db.VarChar(160)
-  ownerName                     String?   @map("owner_name") @db.VarChar(10)
+  ownerName                     String?   @map("owner_name") @db.VarChar(120)
   shared                        Boolean?  @default(true)
   sharedAt                      DateTime? @map("shared_at") @db.Timestamp(0)
   detectedLanguage              String?   @map("detected_language") @db.VarChar(40)
