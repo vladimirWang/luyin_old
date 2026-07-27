@@ -101,6 +101,8 @@ import {
   tencentMeetingQuery,
   tencentMeetingSearchWindow,
   tencentMeetingCandidateOperatorParams,
+  tencentMeetingRecorderUserIdFromAddressPayload,
+  fetchTencentMeetingUsername,
   tencentMeetingCandidateUserIds,
   tencentMeetingCandidateDownloadIdentityParams,
   tencentMeetingCandidateTranscriptOperatorParams,
@@ -1143,6 +1145,83 @@ function tencentMeetingLookupErrorMessage(error) {
     .slice(0, 500);
 }
 
+async function resolveTencentMeetingRecorderOwnerFromAddress(payload, recordFileId) {
+  const userId = tencentMeetingRecorderUserIdFromAddressPayload(payload);
+  logger.info("[call] resolveTencentMeetingRecorderOwnerFromAddress step 0", {
+    message: "recorder owner resolution started from recording address response",
+    recordFileId,
+    hasUserId: Boolean(userId),
+  });
+  if (!userId) {
+    logger.warn("[call] resolveTencentMeetingRecorderOwnerFromAddress step 1", {
+      message: "recorder owner resolution skipped: record_info.user_id is missing",
+      recordFileId,
+      reason: "missing_record_info_user_id",
+    });
+    return { userId: "", username: "" };
+  }
+
+  const operatorParams = tencentMeetingCandidateOperatorParams()[0];
+  if (!operatorParams) {
+    logger.warn("[call] resolveTencentMeetingRecorderOwnerFromAddress step 2", {
+      message: "recorder owner resolution skipped: operator identity is not configured",
+      recordFileId,
+      reason: "missing_operator_identity",
+    });
+    return { userId, username: "" };
+  }
+
+  try {
+    const username = await fetchTencentMeetingUsername(userId, operatorParams);
+    logger.info("[call] resolveTencentMeetingRecorderOwnerFromAddress step 3", {
+      message: "recorder owner resolution completed",
+      recordFileId,
+      hasUsername: Boolean(username),
+    });
+    return { userId, username };
+  } catch (error) {
+    logger.warn("[call] resolveTencentMeetingRecorderOwnerFromAddress step 4", {
+      message: "recorder owner resolution failed",
+      recordFileId,
+      errorMessage: tencentMeetingLookupErrorMessage(error),
+    });
+    return { userId, username: "" };
+  }
+}
+
+async function persistTencentMeetingRecorderOwner(recordingId, target) {
+  logger.info("[call] persistTencentMeetingRecorderOwner step 0", {
+    message: "recorder owner persistence started",
+    recordingId,
+    ownerNameSource: String(target?.ownerNameSource || ""),
+    hasOwnerName: Boolean(target?.ownerName),
+    hasCreatorUserid: Boolean(target?.creatorUserid),
+  });
+  if (target?.ownerNameSource !== "address_user_detail" || !target?.ownerName) {
+    logger.info("[call] persistTencentMeetingRecorderOwner step 1", {
+      message: "recorder owner persistence skipped: official username is unavailable",
+      recordingId,
+      reason: "missing_address_user_detail_username",
+    });
+    return false;
+  }
+
+  const updated = await prisma.recording.updateMany({
+    where: { id: recordingId, deletedAt: null },
+    data: {
+      ownerName: target.ownerName,
+      tencentMeetingCreatorUserid: target.creatorUserid || "",
+      updatedAt: new Date(),
+    },
+  });
+  logger.info("[call] persistTencentMeetingRecorderOwner step 2", {
+    message: "recorder owner persistence completed",
+    recordingId,
+    updatedCount: updated.count,
+  });
+  return updated.count > 0;
+}
+
 async function findTencentMeetingDownloadTarget(info) {
   const recordFileId = String(info?.recordFileId || "").trim();
   logger.info("[call] findTencentMeetingDownloadTarget step 0", {
@@ -1218,6 +1297,10 @@ async function findTencentMeetingDownloadTarget(info) {
         hasDownloadUrl: Boolean(downloadUrl),
       });
       if (downloadUrl) {
+        const recorderOwner =
+          info?.sourceKind === "recorder"
+            ? await resolveTencentMeetingRecorderOwnerFromAddress(payload, recordFileId)
+            : { userId: "", username: "" };
         logger.info("[call] findTencentMeetingDownloadTarget step 8", {
           message: "download target resolved from recording address API",
           recordFileId,
@@ -1229,8 +1312,15 @@ async function findTencentMeetingDownloadTarget(info) {
           file,
           ...params,
           name: tencentMeetingNameFromDetail(payload, file, info.subject),
-          ownerName: tencentMeetingOwnerNameFromDetail(payload, file, info.ownerName),
-          creatorUserid: tencentMeetingCreatorUseridFromDetail(payload, file, info.creatorUserid),
+          ownerName:
+            info?.sourceKind === "recorder"
+              ? recorderOwner.username || info.ownerName || ""
+              : tencentMeetingOwnerNameFromDetail(payload, file, info.ownerName),
+          ownerNameSource: recorderOwner.username ? "address_user_detail" : "",
+          creatorUserid:
+            info?.sourceKind === "recorder"
+              ? recorderOwner.userId || info.creatorUserid || ""
+              : tencentMeetingCreatorUseridFromDetail(payload, file, info.creatorUserid),
           durationMs: tencentMeetingDurationMsFromFile(file, payload.meeting_info || payload.meetingInfo || payload, payload),
           downloadUrl,
         };
@@ -1910,6 +2000,9 @@ async function syncTencentMeetingRecordingAudio(recordingId, info = {}, jobVersi
     ...logContext,
   });
   const target = await findTencentMeetingDownloadTarget(info);
+  if (info.sourceKind === "recorder") {
+    await persistTencentMeetingRecorderOwner(recordingId, target);
+  }
   logger.info("[call] syncTencentMeetingRecordingAudio step 5", {
     message: "Tencent Meeting download target resolution completed",
     ...logContext,
@@ -1947,7 +2040,9 @@ async function syncTencentMeetingRecordingAudio(recordingId, info = {}, jobVersi
     const currentOwnerName = String(recordingBeforeSync.ownerName || "").trim();
     if (
       target?.ownerName &&
-      (!currentOwnerName || currentOwnerName === tencentMeetingImportOwnerName())
+      (target.ownerNameSource === "address_user_detail" ||
+        !currentOwnerName ||
+        currentOwnerName === tencentMeetingImportOwnerName())
     ) {
       data.ownerName = target.ownerName;
     }
@@ -2061,7 +2156,12 @@ async function syncTencentMeetingRecordingAudio(recordingId, info = {}, jobVersi
       sharedAt: recordingBeforeSync.sharedAt || now,
     };
     const currentOwnerName = String(recordingBeforeSync.ownerName || "").trim();
-    if (target.ownerName && (!currentOwnerName || currentOwnerName === tencentMeetingImportOwnerName())) {
+    if (
+      target.ownerName &&
+      (target.ownerNameSource === "address_user_detail" ||
+        !currentOwnerName ||
+        currentOwnerName === tencentMeetingImportOwnerName())
+    ) {
       data.ownerName = target.ownerName;
     }
     if (target.creatorUserid) data.tencentMeetingCreatorUserid = target.creatorUserid;

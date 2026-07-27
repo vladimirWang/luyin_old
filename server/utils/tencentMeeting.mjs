@@ -1179,6 +1179,43 @@ export function tencentMeetingCandidateOperatorParams() {
   return [{ operator_id: operatorId, operator_id_type: type }];
 }
 
+export function tencentMeetingRecorderUserIdFromAddressPayload(payload = {}) {
+  return String(payload?.record_info?.user_id || "").trim();
+}
+
+export async function fetchTencentMeetingUsername(userid, operatorParams = {}) {
+  const normalizedUserid = String(userid || "").trim();
+  const operatorId = String(operatorParams?.operator_id || "").trim();
+  const operatorIdType = String(operatorParams?.operator_id_type || "").trim();
+  logger.info("[call] fetchTencentMeetingUsername step 0", {
+    message: "Tencent Meeting user lookup started",
+    hasUserid: Boolean(normalizedUserid),
+    hasOperatorId: Boolean(operatorId),
+    hasOperatorIdType: Boolean(operatorIdType),
+  });
+  if (!normalizedUserid || !operatorId || !operatorIdType) {
+    logger.warn("[call] fetchTencentMeetingUsername step 1", {
+      message: "Tencent Meeting user lookup skipped: required identity is missing",
+      reason: !normalizedUserid ? "missing_userid" : !operatorId ? "missing_operator_id" : "missing_operator_id_type",
+    });
+    return "";
+  }
+
+  const payload = await tencentMeetingApiRequest(
+    "GET",
+    tencentMeetingQuery(`/v1/users/${encodeURIComponent(normalizedUserid)}`, {
+      operator_id: operatorId,
+      operator_id_type: operatorIdType,
+    }),
+  );
+  const username = String(payload?.username || "").trim();
+  logger.info("[call] fetchTencentMeetingUsername step 2", {
+    message: "Tencent Meeting user lookup completed",
+    hasUsername: Boolean(username),
+  });
+  return username;
+}
+
 export function tencentMeetingCandidateUserIds() {
   return [
     ...splitEnvList(process.env.TENCENT_MEETING_USERIDS),
