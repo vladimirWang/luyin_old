@@ -540,18 +540,34 @@ router.get("/:id", async (request, response) => {
   const db = await loadDb();
   const clientId = requestClientIdBetter(request);
   const clientName = requestClientNameAndDecode(request);
-  const canDeleteAll = canDeleteAllRecordings();
+  // const canDeleteAll = canDeleteAllRecordings();
   const recording = findRecording(db, request.params.id);
-  if (!recording || recording.deletedAt || (!canDeleteAll && !canReadRecording(recording, clientId))) {
+  // const recording = await prisma.recording.findUnique({
+  //   where: {
+  //     id: request.params.id,
+  //     deleted_at: null
+  //   },
+  //   include: {
+  //     segments: true
+  //   }
+  // });
+  const bool1 = !recording || recording.deletedAt || (!canDeleteAll && !canReadRecording(recording, clientId))
+  const bool2 = (!canDeleteAll && !canReadRecording(recording, clientId))
+  logger.info("get /:id ", {message: `id: ${id}, bool1: ${bool1}, bool2: ${bool2}`})
+  if (!recording) {
     logger.info("[call] getRecordingDetail step 1", {
       message: "recording detail request rejected",
       recordingId: request.params.id,
-      reason: !recording ? "not_found" : recording.deletedAt ? "deleted" : "not_readable",
+      reason: "not_found"
     });
     response.status(404).json({ error: "录音不存在" });
     return;
   }
-
+  // logger.info("get /:id" , {message: `id: ${request.params.id}`})
+  // for (let i =0;i <recording.segments.length;i++) {
+  //   logger.info("get /:id segments" , {message: `index: ${i}, id: ${recording.segments[i].id}`})
+  // }
+  
   const segments = findSegments(db, recording.id);
   const publicResult = publicRecording(recording, segments, clientId, clientName, {
     canDeleteAllRecordings: canDeleteAll,
