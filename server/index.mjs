@@ -830,12 +830,6 @@ function isLocalApiTranscriptionRecording(recording = {}) {
   return result
 }
 
-const TENCENT_MEETING_RECORDING_FILE_EVENTS = new Set([
-  TENCENT_MEETING_WEBHOOK_EVENTS["RECORDING.COMPLETED"],
-  TENCENT_MEETING_WEBHOOK_EVENTS["RECORDING.AUDIO-COMPLETED"],
-  TENCENT_MEETING_WEBHOOK_EVENTS["SMART.TRANSCRIPTS"],
-]);
-
 function tencentMeetingRecordingFilesFromContainer(container) {
   if (!container || typeof container !== "object") return [];
   return asArray(container.recording_files);
@@ -850,119 +844,111 @@ function canonicalTencentMeetingRecordingDurationMs(meetingInfo) {
   return endMs - startMs;
 }
 
-function extractTencentMeetingRecordingEvents(payload) {
-  logger.info("[call] extractTencentMeetingRecordingEvents step 0", { message: "start" });
-  if (!payload || typeof payload !== "object") {
-    logger.info("[call] extractTencentMeetingRecordingEvents step 1", { message: "invalid payload, skip extraction" });
-    return [];
-  }
-
-  const event = String(payload.event || "").trim();
-  if (!TENCENT_MEETING_RECORDING_FILE_EVENTS.has(event)) {
-    logger.info("[call] extractTencentMeetingRecordingEvents step 2", {
-      message: `event does not expose recording files, skip extraction: ${event || "missing"}`,
+function extractTencentMeetingRecorderEvents(payload) {
+  const event = String(payload?.event || "").trim();
+  logger.info("[call] extractTencentMeetingRecorderEvents step 0", { message: "recorder callback extraction started", event });
+  if (event !== TENCENT_MEETING_WEBHOOK_EVENTS["RECORDING.AUDIO-COMPLETED"]) {
+    logger.info("[call] extractTencentMeetingRecorderEvents step 1", {
+      message: "recorder callback extraction skipped",
       event,
+      reason: "unexpected_event",
     });
     return [];
   }
-
-  const containers = asArray(payload.payload);
-  logger.info("[call] extractTencentMeetingRecordingEvents step 3", {
-    message: "canonical payload containers loaded",
-    event,
-    containerCount: containers.length,
-  });
-  const recordingContainers = containers
-    .filter((container) => {
-      const isObject = Boolean(container && typeof container === "object");
-      if (!isObject) {
-        logger.info("[call] extractTencentMeetingRecordingEvents step 4", {
-          message: "non-object canonical payload container skipped",
-          event,
-          reason: "invalid_container",
-        });
-      }
-      return isObject;
-    })
-    .map((container) => ({ container, files: tencentMeetingRecordingFilesFromContainer(container) }))
-    .filter(({ files }) => files.length > 0);
-  if (!recordingContainers.length) {
-    logger.info("[call] extractTencentMeetingRecordingEvents step 5", {
-      message: `no recording files, skip extraction: ${event}`,
-      event,
-    });
-    return [];
-  }
-  logger.info("[call] extractTencentMeetingRecordingEvents step 6", {
-    message: "recording containers normalized",
-    event,
-    recordingContainerCount: recordingContainers.length,
-    recordingFileCount: recordingContainers.reduce((count, item) => count + item.files.length, 0),
-  });
 
   const entries = [];
   const seen = new Set();
-
-  for (const { container, files } of recordingContainers) {
-    logger.info("[call] extractTencentMeetingRecordingEvents step 7", {
-      message: "recording container processing started",
-      event,
-      fileCount: files.length,
-      operateTime: container.operate_time || 0,
-      hasMeetingInfo: Boolean(container.meeting_info),
-    });
-    const meetingInfo = container.meeting_info || {};
-    const creator = meetingInfo.creator || {};
-    const operator = container.creator || {};
-    const operateTime = container.operate_time || Date.now();
-    for (const file of files) {
+  for (const item of asArray(payload.payload)) {
+    if (!item || typeof item !== "object") continue;
+    const operateTime = item.operate_time || 0;
+    for (const file of tencentMeetingRecordingFilesFromContainer(item)) {
       const recordFileId = String(file?.record_file_id || "").trim();
       if (!recordFileId || seen.has(recordFileId)) continue;
       seen.add(recordFileId);
-      const fileOwner = file?.owner || {};
-      const durationMs = canonicalTencentMeetingRecordingDurationMs(meetingInfo);
       entries.push({
         event,
         recordFileId,
-        sourceKind: event === TENCENT_MEETING_WEBHOOK_EVENTS["RECORDING.COMPLETED"] ? "cloud" : "recorder",
+        sourceKind: "recorder",
         operateTime,
-        subject:
-          firstNonEmptyValue([
-            file?.subject,
-            file?.record_file_name,
-            file?.file_name,
-            container.subject,
-            container.meeting_subject,
-            meetingInfo.subject,
-          ]) || "",
-        ownerName: creator.user_name,
-        creatorUserid:
-          firstNonEmptyValue([
-            file?.userid,
-            file?.user_id,
-            fileOwner.userid,
-            fileOwner.user_id,
-            creator.userid,
-            creator.user_id,
-            operator.userid,
-            operator.user_id,
-          ]) || "",
-        durationMs,
-        meetingId: meetingInfo.meeting_id || "",
-        meetingCode: meetingInfo.meeting_code || "",
-        downloadUrl: String(file?.download_url || "").trim(),
+        ownerName: "",
+        creatorUserid: "",
+        subject: "",
+        durationMs: 0,
+        meetingId: "",
+        meetingCode: "",
+        downloadUrl: "",
         payload,
       });
     }
   }
-
-  logger.info("[call] extractTencentMeetingRecordingEvents step 8", {
-    message: `extraction complete: event=${event}, recordingFileCount=${entries.length}`,
+  logger.info("[call] extractTencentMeetingRecorderEvents step 2", {
+    message: "recorder callback extraction completed",
     event,
     recordingFileCount: entries.length,
     recordFileIds: entries.map((entry) => entry.recordFileId),
   });
   return entries;
+}
+
+function extractTencentMeetingCloudEvents(payload) {
+  const event = String(payload?.event || "").trim();
+  logger.info("[call] extractTencentMeetingCloudEvents step 0", { message: "cloud callback extraction started", event });
+  if (event !== TENCENT_MEETING_WEBHOOK_EVENTS["RECORDING.COMPLETED"]) {
+    logger.info("[call] extractTencentMeetingCloudEvents step 1", {
+      message: "cloud callback extraction skipped",
+      event,
+      reason: "unexpected_event",
+    });
+    return [];
+  }
+
+  const entries = [];
+  const seen = new Set();
+  for (const item of asArray(payload.payload)) {
+    if (!item || typeof item !== "object") continue;
+    const meetingInfo = item.meeting_info && typeof item.meeting_info === "object" ? item.meeting_info : {};
+    const creator = meetingInfo.creator && typeof meetingInfo.creator === "object" ? meetingInfo.creator : {};
+    const operateTime = item.operate_time || 0;
+    for (const file of tencentMeetingRecordingFilesFromContainer(item)) {
+      const recordFileId = String(file?.record_file_id || "").trim();
+      if (!recordFileId || seen.has(recordFileId)) continue;
+      seen.add(recordFileId);
+      entries.push({
+        event,
+        recordFileId,
+        sourceKind: "cloud",
+        operateTime,
+        ownerName: String(creator.user_name || "").trim(),
+        creatorUserid: String(creator.userid || "").trim(),
+        subject: String(meetingInfo.subject || "").trim(),
+        durationMs: canonicalTencentMeetingRecordingDurationMs(meetingInfo),
+        meetingId: String(meetingInfo.meeting_id || "").trim(),
+        meetingCode: String(meetingInfo.meeting_code || "").trim(),
+        downloadUrl: "",
+        payload,
+      });
+    }
+  }
+  logger.info("[call] extractTencentMeetingCloudEvents step 2", {
+    message: "cloud callback extraction completed",
+    event,
+    recordingFileCount: entries.length,
+    recordFileIds: entries.map((entry) => entry.recordFileId),
+    recordsWithCreator: entries.filter((entry) => entry.creatorUserid || entry.ownerName).length,
+    recordsWithMeetingInfo: entries.filter((entry) => entry.meetingId || entry.meetingCode).length,
+  });
+  return entries;
+}
+
+function extractTencentMeetingRecordingEvents(payload) {
+  const event = String(payload?.event || "").trim();
+  if (event === TENCENT_MEETING_WEBHOOK_EVENTS["RECORDING.AUDIO-COMPLETED"]) {
+    return extractTencentMeetingRecorderEvents(payload);
+  }
+  if (event === TENCENT_MEETING_WEBHOOK_EVENTS["RECORDING.COMPLETED"]) {
+    return extractTencentMeetingCloudEvents(payload);
+  }
+  return [];
 }
 
 function extractTencentMeetingStartedOwnerContext(payload) {
@@ -2474,9 +2460,42 @@ async function backfillTencentMeetingRecorderOwnersFromWebhookHistory() {
   return updated;
 }
 
-async function upsertTencentMeetingRecordingInfos(recordInfos = [], userAgent = "tencent-meeting-sync") {
-  logger.info("[call] upsertTencentMeetingRecordingInfos step 0", {
+function tencentMeetingRecorderUpdateData(existing, eventInfo, now, hasSegments) {
+  return {
+    shared: true,
+    sharedAt: existing.sharedAt || now,
+    ownerName: eventInfo.ownerName || existing.ownerName || tencentMeetingImportOwnerName(),
+    audioUrl: tencentMeetingRecordingAudioUrl(existing.id),
+    transcriptProvider: existing.transcriptSource === "tencent-meeting" || !hasSegments ? "tencent-meeting" : existing.transcriptProvider,
+    ...(eventInfo.creatorUserid ? { tencentMeetingCreatorUserid: eventInfo.creatorUserid } : {}),
+    tencentMeetingSourceKind: "recorder",
+  };
+}
+
+function tencentMeetingCloudUpdateData(existing, eventInfo, now, hasSegments) {
+  const eventDurationMs = Number(eventInfo.durationMs || 0);
+  return {
+    shared: true,
+    sharedAt: existing.sharedAt || now,
+    ownerName: eventInfo.ownerName || existing.ownerName || tencentMeetingImportOwnerName(),
+    audioUrl: tencentMeetingRecordingAudioUrl(existing.id),
+    transcriptProvider: existing.transcriptSource === "tencent-meeting" || !hasSegments ? "tencent-meeting" : existing.transcriptProvider,
+    ...(eventInfo.subject ? { name: tencentMeetingPlaceholderName(eventInfo) } : {}),
+    ...(eventDurationMs > Number(existing.durationMs || 0n) ? { durationMs: BigInt(Math.round(eventDurationMs)) } : {}),
+    ...(eventInfo.creatorUserid ? { tencentMeetingCreatorUserid: eventInfo.creatorUserid } : {}),
+    ...(eventInfo.meetingId ? { tencentMeetingMeetingId: eventInfo.meetingId } : {}),
+    ...(eventInfo.meetingCode ? { tencentMeetingMeetingCode: eventInfo.meetingCode } : {}),
+    tencentMeetingSourceKind: "cloud",
+    ...(!existing.tag || /录音笔|等待同步|已同步/.test(existing.tag)
+      ? { tag: tencentMeetingImportTag(eventInfo, hasSegments ? "已同步转写" : "等待转写") }
+      : {}),
+  };
+}
+
+async function upsertTencentMeetingRecordings(recordInfos = [], { sourceKind, userAgent, updateData }) {
+  logger.info("[call] upsertTencentMeetingRecordings step 0", {
     message: `start: recordInfoCount=${recordInfos.length}`,
+    sourceKind,
     recordInfoCount: recordInfos.length,
   });
   const uniqueInfos = [];
@@ -2485,14 +2504,25 @@ async function upsertTencentMeetingRecordingInfos(recordInfos = [], userAgent = 
     const recordFileId = String(info?.recordFileId || "").trim();
     if (!recordFileId || seen.has(recordFileId)) continue;
     seen.add(recordFileId);
+    if (info.sourceKind !== sourceKind) {
+      logger.warn("[call] upsertTencentMeetingRecordings step 1", {
+        message: "recording skipped because source kind does not match persistence pipeline",
+        sourceKind,
+        incomingSourceKind: String(info.sourceKind || ""),
+        recordFileId,
+        reason: "source_kind_mismatch",
+      });
+      continue;
+    }
     uniqueInfos.push({
       ...info,
       recordFileId,
       ownerName: (await resolveTencentMeetingOwnerName(info)) || info.ownerName || "",
     });
   }
-  logger.info("[call] upsertTencentMeetingRecordingInfos step 1", {
+  logger.info("[call] upsertTencentMeetingRecordings step 2", {
     message: `normalized: uniqueInfoCount=${uniqueInfos.length}`,
+    sourceKind,
     uniqueInfoCount: uniqueInfos.length,
   });
   if (!uniqueInfos.length) return [];
@@ -2501,7 +2531,7 @@ async function upsertTencentMeetingRecordingInfos(recordInfos = [], userAgent = 
   return prisma.$transaction(async (tx) => {
     const results = [];
     for (const eventInfo of uniqueInfos) {
-      logger.info("[call] upsertTencentMeetingRecordingInfos step 2", {
+      logger.info("[call] upsertTencentMeetingRecordings step 3", {
         message: `lookup: recordFileId=${eventInfo.recordFileId}, sourceKind=${eventInfo.sourceKind || ""}`,
         recordFileId: eventInfo.recordFileId,
         sourceKind: eventInfo.sourceKind || "",
@@ -2511,7 +2541,7 @@ async function upsertTencentMeetingRecordingInfos(recordInfos = [], userAgent = 
         where: { source },
         include: { segments: { select: { id: true }, take: 1 } },
       });
-      logger.info("[call] upsertTencentMeetingRecordingInfos step 3", {
+      logger.info("[call] upsertTencentMeetingRecordings step 4", {
         message: `lookup complete: existing=${Boolean(existing)}`,
         recordFileId: eventInfo.recordFileId,
         recordingId: existing?.id || "",
@@ -2519,40 +2549,22 @@ async function upsertTencentMeetingRecordingInfos(recordInfos = [], userAgent = 
       });
       if (existing) {
         const hasSegments = existing.segments.length > 0;
-        const existingOwnerName = String(existing.ownerName || "").trim();
-        const incomingOwnerName = String(eventInfo.ownerName || "").trim();
-        // Recorder completion owns its identity; an adjacent cloud event must not leak its owner snapshot here.
-        const ownerName =
-          eventInfo.sourceKind === "recorder" && incomingOwnerName
-            ? incomingOwnerName
-            : existingOwnerName && existingOwnerName !== tencentMeetingImportOwnerName()
-            ? existingOwnerName
-            : incomingOwnerName || existingOwnerName || tencentMeetingImportOwnerName();
-        const data = {
-          shared: true,
-          sharedAt: existing.sharedAt || now,
-          ownerName,
-          audioUrl: tencentMeetingRecordingAudioUrl(existing.id),
-          transcriptProvider: existing.transcriptSource === "tencent-meeting" || !hasSegments ? "tencent-meeting" : existing.transcriptProvider,
-        };
-        if (eventInfo.subject) data.name = tencentMeetingPlaceholderName(eventInfo);
-        const eventDurationMs = Number(eventInfo.durationMs || 0);
-        if (eventDurationMs > Number(existing.durationMs || 0n)) data.durationMs = BigInt(Math.round(eventDurationMs));
-        if (eventInfo.creatorUserid) data.tencentMeetingCreatorUserid = eventInfo.creatorUserid;
-        if (eventInfo.meetingId) data.tencentMeetingMeetingId = eventInfo.meetingId;
-        if (eventInfo.meetingCode) data.tencentMeetingMeetingCode = eventInfo.meetingCode;
-        if (eventInfo.sourceKind) data.tencentMeetingSourceKind = eventInfo.sourceKind;
-        if (eventInfo.sourceKind === "cloud" && (!existing.tag || /录音笔|等待同步|已同步/.test(existing.tag))) {
-          data.tag = tencentMeetingImportTag(eventInfo, hasSegments ? "已同步转写" : "等待转写");
-        }
+        const data = updateData(existing, eventInfo, now, hasSegments);
         await tx.recording.update({ where: { id: existing.id }, data });
+        logger.info("[call] upsertTencentMeetingRecordings step 5", {
+          message: "existing recording updated",
+          sourceKind,
+          recordingId: existing.id,
+          recordFileId: eventInfo.recordFileId,
+          ownerResolved: Boolean(eventInfo.ownerName),
+        });
         results.push({ recordingId: existing.id, recordFileId: eventInfo.recordFileId, created: false, info: eventInfo });
         continue;
       }
 
       const seq = await nextRecordingSequence();
       const recordingId = crypto.randomUUID();
-      logger.info("[call] upsertTencentMeetingRecordingInfos step 4", {
+      logger.info("[call] upsertTencentMeetingRecordings step 6", {
         message: `create: recordFileId=${eventInfo.recordFileId}, recordingId=${recordingId}, seq=${seq}`,
         recordFileId: eventInfo.recordFileId,
         recordingId,
@@ -2592,15 +2604,16 @@ async function upsertTencentMeetingRecordingInfos(recordInfos = [], userAgent = 
             tencentMeetingCreatorUserid: eventInfo.creatorUserid || "",
             tencentMeetingMeetingId: eventInfo.meetingId || "",
             tencentMeetingMeetingCode: eventInfo.meetingCode || "",
-            tencentMeetingSourceKind: eventInfo.sourceKind || "",
+            tencentMeetingSourceKind: sourceKind,
             errorMessage: "",
             userAgent,
             audioUrl: tencentMeetingRecordingAudioUrl(recordingId),
           },
         });
       } catch (error) {
-        logger.error("[call] upsertTencentMeetingRecordingInfos step failed: ", {
+        logger.error("[call] upsertTencentMeetingRecordings step 7", {
           message: "recording create failed",
+          sourceKind,
           recordFileId: eventInfo.recordFileId,
           recordingId,
           seq,
@@ -2610,7 +2623,7 @@ async function upsertTencentMeetingRecordingInfos(recordInfos = [], userAgent = 
         });
         throw error;
       }
-      logger.info("[call] upsertTencentMeetingRecordingInfos step 5", {
+      logger.info("[call] upsertTencentMeetingRecordings step 8", {
         message: `created: recordFileId=${eventInfo.recordFileId}, recordingId=${recordingId}`,
         recordFileId: eventInfo.recordFileId,
         recordingId,
@@ -2621,102 +2634,179 @@ async function upsertTencentMeetingRecordingInfos(recordInfos = [], userAgent = 
   });
 }
 
-async function importTencentMeetingWebhookPayload(
-  payload,
-  { syncAudio = false, syncTranscript = false, userAgent = "tencent-meeting-webhook" } = {},
-) {
-  const event = String(payload?.event || "");
-  logger.info("[call] importTencentMeetingWebhookPayload step 0", {
-    message: "webhook import started",
-    event,
-    syncAudio,
-    syncTranscript,
+async function upsertTencentMeetingRecorderRecordings(recordInfos = [], userAgent = "tencent-meeting-audio-completed") {
+  logger.info("[call] upsertTencentMeetingRecorderRecordings step 0", {
+    message: "recorder persistence started",
+    recordInfoCount: recordInfos.length,
+  });
+  const results = await upsertTencentMeetingRecordings(recordInfos, {
+    sourceKind: "recorder",
     userAgent,
+    updateData: tencentMeetingRecorderUpdateData,
   });
-  
-  const events = extractTencentMeetingRecordingEvents(payload)
-  logger.info("[call] importTencentMeetingWebhookPayload step 1", {
-    message: "recording events extracted",
-    event,
-    recordingEventCount: events.length,
-    recordFileIds: events.map((info) => String(info.recordFileId || "")).filter(Boolean),
-  });
-  if (!events.length) {
-    logger.info("[call] importTencentMeetingWebhookPayload step 2", {
-      message: "webhook import skipped: no recording events",
-      event,
-      reason: "no_recording_events",
-    });
-    return [];
-  }
-  const results = await upsertTencentMeetingRecordingInfos(events, userAgent);
-  logger.info("[call] importTencentMeetingWebhookPayload step 3", {
-    message: "recording persistence completed",
-    event,
+  logger.info("[call] upsertTencentMeetingRecorderRecordings step 1", {
+    message: "recorder persistence completed",
     resultCount: results.length,
-    results: results.map((result) => ({
-      recordingId: result.recordingId,
-      recordFileId: result.recordFileId,
-      sourceKind: result.info?.sourceKind || "",
-      created: Boolean(result.created),
-    })),
+    createdCount: results.filter((result) => result.created).length,
+    updatedCount: results.filter((result) => !result.created).length,
   });
-  for (const result of results) {
-    let transcriptQueued = false;
-    if (syncTranscript) {
-      transcriptQueued = queueTencentMeetingTranscriptSync(result.recordingId, {
-        ...result.info,
-        event: payload.event,
-      });
-    }
-    let audioQueued = false;
-    if (syncAudio) {
-      audioQueued = queueTencentMeetingImportSync(result.recordingId, {
-        ...result.info,
-        event,
-      });
-    }
-    logger.info("[call] importTencentMeetingWebhookPayload step 4", {
-      message: "recording background jobs enqueue completed",
-      event,
-      recordingId: result.recordingId,
-      recordFileId: result.recordFileId,
-      sourceKind: result.info?.sourceKind || "",
-      syncTranscript,
-      transcriptQueued,
-      syncAudio,
-      audioQueued,
-    });
-  }
+  return results;
+}
 
-  logger.info("[call] importTencentMeetingWebhookPayload step 5", {
-    message: "webhook import completed",
-    event,
+async function upsertTencentMeetingCloudRecordings(recordInfos = [], userAgent = "tencent-meeting-recording-completed") {
+  logger.info("[call] upsertTencentMeetingCloudRecordings step 0", {
+    message: "cloud recording persistence started",
+    recordInfoCount: recordInfos.length,
+  });
+  const results = await upsertTencentMeetingRecordings(recordInfos, {
+    sourceKind: "cloud",
+    userAgent,
+    updateData: tencentMeetingCloudUpdateData,
+  });
+  logger.info("[call] upsertTencentMeetingCloudRecordings step 1", {
+    message: "cloud recording persistence completed",
     resultCount: results.length,
+    createdCount: results.filter((result) => result.created).length,
+    updatedCount: results.filter((result) => !result.created).length,
   });
   return results;
 }
 
 async function importTencentMeetingRecordingCompletedPayload(payload) {
-  return importTencentMeetingWebhookPayload(payload, {
-    syncAudio: true,
-    userAgent: "tencent-meeting-recording-completed",
+  logger.info("[call] importTencentMeetingRecordingCompletedPayload step 0", {
+    message: "cloud recording callback import started",
+    event: String(payload?.event || ""),
   });
+  const infos = extractTencentMeetingCloudEvents(payload);
+  if (!infos.length) {
+    logger.info("[call] importTencentMeetingRecordingCompletedPayload step 1", {
+      message: "cloud recording callback import skipped",
+      reason: "no_canonical_recording_files",
+    });
+    return [];
+  }
+  const results = await upsertTencentMeetingCloudRecordings(infos);
+  for (const result of results) {
+    const audioQueued = queueTencentMeetingImportSync(result.recordingId, result.info);
+    logger.info("[call] importTencentMeetingRecordingCompletedPayload step 2", {
+      message: "cloud recording audio synchronization enqueue completed",
+      recordingId: result.recordingId,
+      recordFileId: result.recordFileId,
+      created: Boolean(result.created),
+      audioQueued,
+    });
+  }
+  logger.info("[call] importTencentMeetingRecordingCompletedPayload step 3", {
+    message: "cloud recording callback import completed",
+    resultCount: results.length,
+  });
+  return results;
 }
 
 async function importTencentMeetingAudioCompletedPayload(payload) {
-  return importTencentMeetingWebhookPayload(payload, {
-    syncAudio: true,
-    syncTranscript: true,
-    userAgent: "tencent-meeting-audio-completed",
+  logger.info("[call] importTencentMeetingAudioCompletedPayload step 0", {
+    message: "recorder callback import started",
+    event: String(payload?.event || ""),
   });
+  const extracted = extractTencentMeetingRecorderEvents(payload);
+  if (!extracted.length) {
+    logger.info("[call] importTencentMeetingAudioCompletedPayload step 1", {
+      message: "recorder callback import skipped",
+      reason: "no_canonical_recording_files",
+    });
+    return [];
+  }
+
+  const ownerContexts = await loadTencentMeetingRecorderOwnerContexts();
+  const infos = extracted.map((info) => {
+    const context = ownerContexts.get(info.recordFileId);
+    return context
+      ? {
+          ...info,
+          ownerName: context.ownerName || "",
+          creatorUserid: context.creatorUserid || "",
+        }
+      : info;
+  });
+  logger.info("[call] importTencentMeetingAudioCompletedPayload step 2", {
+    message: "recorder owner contexts resolved",
+    recordingFileCount: infos.length,
+    ownerContextCount: infos.filter((info) => info.ownerName || info.creatorUserid).length,
+    missingOwnerRecordFileIds: infos.filter((info) => !info.ownerName && !info.creatorUserid).map((info) => info.recordFileId),
+  });
+
+  const results = await upsertTencentMeetingRecorderRecordings(infos);
+  for (const result of results) {
+    const audioQueued = queueTencentMeetingImportSync(result.recordingId, result.info);
+    const transcriptQueued = queueTencentMeetingTranscriptSync(result.recordingId, result.info);
+    logger.info("[call] importTencentMeetingAudioCompletedPayload step 3", {
+      message: "recorder background jobs enqueue completed",
+      recordingId: result.recordingId,
+      recordFileId: result.recordFileId,
+      created: Boolean(result.created),
+      ownerResolved: Boolean(result.info.ownerName || result.info.creatorUserid),
+      audioQueued,
+      transcriptQueued,
+    });
+  }
+  logger.info("[call] importTencentMeetingAudioCompletedPayload step 4", {
+    message: "recorder callback import completed",
+    resultCount: results.length,
+  });
+  return results;
 }
 
 async function importTencentMeetingTranscriptReadyPayload(payload) {
-  return importTencentMeetingWebhookPayload(payload, {
-    syncTranscript: true,
-    userAgent: "tencent-meeting-smart-transcripts",
+  logger.info("[call] importTencentMeetingTranscriptReadyPayload step 0", {
+    message: "transcript-ready callback import started",
+    event: String(payload?.event || ""),
   });
+  const recordFileIds = [];
+  const seen = new Set();
+  for (const item of asArray(payload?.payload)) {
+    if (!item || typeof item !== "object") continue;
+    for (const file of tencentMeetingRecordingFilesFromContainer(item)) {
+      const recordFileId = String(file?.record_file_id || "").trim();
+      if (!recordFileId || seen.has(recordFileId)) continue;
+      seen.add(recordFileId);
+      recordFileIds.push(recordFileId);
+    }
+  }
+  if (!recordFileIds.length) {
+    logger.info("[call] importTencentMeetingTranscriptReadyPayload step 1", {
+      message: "transcript-ready callback import skipped",
+      reason: "no_canonical_recording_files",
+    });
+    return [];
+  }
+  const recordings = await prisma.recording.findMany({
+    where: { source: { in: recordFileIds.map(tencentMeetingSourceKey) }, deletedAt: null },
+  });
+  const recordingBySource = new Map(recordings.map((recording) => [recording.source, recording]));
+  const results = [];
+  for (const recordFileId of recordFileIds) {
+    const recording = recordingBySource.get(tencentMeetingSourceKey(recordFileId));
+    const transcriptQueued = recording
+      ? queueTencentMeetingTranscriptSync(recording.id, {
+          ...tencentMeetingSyncInfoFromRecording(recordingFromPrisma(recording)),
+          event: TENCENT_MEETING_WEBHOOK_EVENTS["SMART.TRANSCRIPTS"],
+        })
+      : false;
+    logger.info("[call] importTencentMeetingTranscriptReadyPayload step 2", {
+      message: "transcript-ready synchronization enqueue evaluated",
+      recordFileId,
+      recordingId: recording?.id || "",
+      recordingFound: Boolean(recording),
+      transcriptQueued,
+    });
+    if (recording) results.push({ recordingId: recording.id, recordFileId, created: false });
+  }
+  logger.info("[call] importTencentMeetingTranscriptReadyPayload step 3", {
+    message: "transcript-ready callback import completed",
+    recordingFileCount: recordFileIds.length,
+    matchedRecordingCount: results.length,
+  });
+  return results;
 }
 
 async function replayMissingTencentMeetingRecordingWebhooks() {
@@ -2744,9 +2834,7 @@ async function replayMissingTencentMeetingRecordingWebhooks() {
         ? await importTencentMeetingAudioCompletedPayload(payload)
         : event === TENCENT_MEETING_WEBHOOK_EVENTS["RECORDING.COMPLETED"]
           ? await importTencentMeetingRecordingCompletedPayload(payload)
-          : event === TENCENT_MEETING_WEBHOOK_EVENTS["SMART.TRANSCRIPTS"]
-            ? await importTencentMeetingTranscriptReadyPayload(payload)
-            : await importTencentMeetingWebhookPayload(payload);
+          : [];
     for (const result of results) existingSources.add(tencentMeetingSourceKey(result.recordFileId));
     replayed += results.filter((result) => result.created).length;
   }
@@ -2823,7 +2911,7 @@ async function fetchTencentMeetingCloudRecordInfos() {
 
 async function importTencentMeetingCloudRecordingsFromApi() {
   const infos = await fetchTencentMeetingCloudRecordInfos();
-  const results = await upsertTencentMeetingRecordingInfos(infos, "tencent-meeting-cloud-discovery");
+  const results = await upsertTencentMeetingCloudRecordings(infos, "tencent-meeting-cloud-discovery");
   for (const result of results) {
     queueTencentMeetingImportSync(result.recordingId, result.info);
   }
