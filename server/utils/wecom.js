@@ -2,8 +2,10 @@ import crypto from "node:crypto";
 import { readFile } from "node:fs/promises";
 import logger from "./log.js";
 import { projectRoot } from "../config.js";
+import { redisClient } from "../plugins/redis.js";
 
-let wecomTokenCache = { value: "", expiresAt: 0 };
+const WECOM_ACCESS_TOKEN_KEY = "wecom:access-token";
+const WECOM_ACCESS_TOKEN_EXPIRY_BUFFER_SECONDS = 120;
 const wecomSessionSecret =
   process.env.WECOM_SESSION_SECRET ||
   crypto.createHash("sha256").update(`${projectRoot}:wecom-session`).digest("hex");
@@ -59,18 +61,33 @@ export function getWecomConfig() {
 }
 
 export async function getWecomAccessToken() {
-  const now = Date.now();
-  if (wecomTokenCache.value && wecomTokenCache.expiresAt > now + 60000) {
-    logger.debug("wecom.access_token.cache_hit", {
-      expiresInSeconds: Math.floor((wecomTokenCache.expiresAt - now) / 1000),
+  logger.info("[call] getWecomAccessToken step 0", {
+    message: "Enterprise WeChat access token lookup started",
+    redisReady: redisClient.isReady,
+  });
+  if (!redisClient.isReady) {
+    logger.error("[call] getWecomAccessToken step 1", {
+      message: "Enterprise WeChat access token lookup failed: Redis is unavailable",
+      reason: "redis_unavailable",
     });
-    return wecomTokenCache.value;
+    throw new Error("Redis 未就绪，无法读取或保存企业微信 access_token");
+  }
+
+  const cachedToken = String((await redisClient.get(WECOM_ACCESS_TOKEN_KEY)) || "").trim();
+  if (cachedToken) {
+    const ttlSeconds = await redisClient.ttl(WECOM_ACCESS_TOKEN_KEY);
+    logger.info("[call] getWecomAccessToken step 2", {
+      message: "Enterprise WeChat access token loaded from Redis",
+      ttlSeconds,
+    });
+    return cachedToken;
   }
 
   const appid = process.env.WECOM_CORP_ID || "";
   const corpSecret = process.env.WECOM_APP_SECRET || "";
   if (!appid || !corpSecret) {
-    logger.warn("wecom.access_token.config_missing", {
+    logger.warn("[call] getWecomAccessToken step 3", {
+      message: "Enterprise WeChat access token request skipped: configuration is missing",
       hasCorpId: Boolean(appid),
       hasCorpSecret: Boolean(corpSecret),
     });
@@ -78,7 +95,10 @@ export async function getWecomAccessToken() {
   }
 
   const url = `https://qyapi.weixin.qq.com/cgi-bin/gettoken?corpid=${encodeURIComponent(appid)}&corpsecret=${encodeURIComponent(corpSecret)}`;
-  logger.info("wecom.access_token.request_started", { corpId: appid });
+  logger.info("[call] getWecomAccessToken step 4", {
+    message: "Enterprise WeChat access token API request started",
+    corpId: appid,
+  });
 
   let response;
   let payload;
@@ -86,14 +106,16 @@ export async function getWecomAccessToken() {
     response = await fetch(url);
     payload = await response.json();
   } catch (error) {
-    logger.error("wecom.access_token.request_failed", {
-      message: error instanceof Error ? error.message : String(error),
+    logger.error("[call] getWecomAccessToken step 5", {
+      message: "Enterprise WeChat access token API transport failed",
+      errorMessage: error instanceof Error ? error.message : String(error),
     });
     throw error;
   }
 
   if (!response.ok || payload.errcode) {
-    logger.error("wecom.access_token.api_error", {
+    logger.error("[call] getWecomAccessToken step 6", {
+      message: "Enterprise WeChat access token API request rejected",
       httpStatus: response.status,
       errcode: payload.errcode,
       errmsg: payload.errmsg || "",
@@ -102,22 +124,26 @@ export async function getWecomAccessToken() {
   }
 
   if (!payload.access_token) {
-    logger.error("wecom.access_token.invalid_response", {
+    logger.error("[call] getWecomAccessToken step 7", {
+      message: "Enterprise WeChat access token API response is invalid",
       httpStatus: response.status,
       expiresIn: payload.expires_in,
     });
     throw new Error("企业微信 access_token 响应缺少 access_token");
   }
 
-  wecomTokenCache = {
-    value: payload.access_token,
-    expiresAt: now + Math.max(300, Number(payload.expires_in || 7200) - 120) * 1000,
-  };
-
-  logger.info("wecom.access_token.request_succeeded", {
-    expiresInSeconds: Math.floor((wecomTokenCache.expiresAt - now) / 1000),
+  const ttlSeconds = Math.max(
+    1,
+    Math.floor(Number(payload.expires_in || 7200) - WECOM_ACCESS_TOKEN_EXPIRY_BUFFER_SECONDS),
+  );
+  await redisClient.set(WECOM_ACCESS_TOKEN_KEY, String(payload.access_token), {
+    EX: ttlSeconds,
   });
-  return wecomTokenCache.value;
+  logger.info("[call] getWecomAccessToken step 8", {
+    message: "Enterprise WeChat access token persisted in Redis",
+    ttlSeconds,
+  });
+  return String(payload.access_token);
 }
 
 export async function getWecomUserByCode(code) {
