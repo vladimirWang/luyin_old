@@ -303,7 +303,6 @@ export function RecordPreviewOverlay({ recording, onClose, onAsk, onShare, onRef
       <section className="record-preview-panel" onClick={(event) => event.stopPropagation()}>
         <header className="record-preview-head">
           <div>
-            <span>录音 {String(recording.seq).padStart(3, "0")}</span>
             <div className="record-preview-title-row">
               {nameEditing ? (
                 <textarea
@@ -370,12 +369,12 @@ export function RecordPreviewOverlay({ recording, onClose, onAsk, onShare, onRef
             </button>
             {openSection === "outline" ? (
               <div className="meeting-outline-list">
-                <div className="meeting-outline-actions">
+                {/* <div className="meeting-outline-actions">
                   <button type="button" onClick={() => loadMeetingOutline(true)} disabled={outlineLoading || transcriptLines.length === 0}>
                     <RefreshCw size={15} />
                     重新生成会议提纲
                   </button>
-                </div>
+                </div> */}
                 {outlineLoading ? (
                   <p className="record-preview-empty">AI 正在分析完整转写，生成会议提纲、主要内容、关键点和待办项。</p>
                 ) : outlineError ? (
