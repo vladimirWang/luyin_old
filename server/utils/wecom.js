@@ -208,6 +208,9 @@ export async function getWecomDepartmentIds(parentDepartmentId = "") {
   }
   const response = await fetch(url);
   const payload = await response.json();
+
+  
+  logger.info("[call] getWecomDepartmentIds simplelist response, ", {message: `typeof: ${typeof payload}, keys: ${JSON.stringify(Object.keys(payload))}`})
   if (!response.ok || payload.errcode !== 0) {
     logger.warn("[call] getWecomDepartmentIds step 2", {
       message: "Enterprise WeChat department ID lookup rejected",
