@@ -297,15 +297,25 @@ async function loadMysqlDb() {
   // await ensureStorage();
   const pool = await getMysqlPool();
   // await ensureMysqlSchema(pool);
-  const [[profileRow]] = await pool.query("SELECT * FROM app_users ORDER BY created_at ASC LIMIT 1");
-  const recordingsPromise = listRecordingsWithPrisma();
-  const [folderRows] = await pool.query("SELECT * FROM recording_folders ORDER BY created_at ASC");
-  const transcriptSegmentsPromise = listTranscriptSegmentsWithPrisma();
-  const [qaRows] = await pool.query("SELECT * FROM recording_questions ORDER BY created_at ASC");
-  const [briefRows] = await pool.query("SELECT * FROM daily_meeting_briefs ORDER BY date_key DESC");
-  const [clientProfileRows] = await pool.query("SELECT * FROM client_profiles ORDER BY updated_at DESC, created_at DESC");
-  const [accountRows] = await pool.query("SELECT * FROM app_accounts ORDER BY created_at ASC");
-  const [recordings, transcriptSegments] = await Promise.all([recordingsPromise, transcriptSegmentsPromise]);
+  const [
+    [[profileRow]],
+    recordings,
+    [folderRows],
+    transcriptSegments,
+    [qaRows],
+    [briefRows],
+    [clientProfileRows],
+    [accountRows],
+  ] = await Promise.all([
+    pool.query("SELECT * FROM app_users ORDER BY created_at ASC LIMIT 1"),
+    listRecordingsWithPrisma(),
+    pool.query("SELECT * FROM recording_folders ORDER BY created_at ASC"),
+    listTranscriptSegmentsWithPrisma(),
+    pool.query("SELECT * FROM recording_questions ORDER BY created_at ASC"),
+    pool.query("SELECT * FROM daily_meeting_briefs ORDER BY date_key DESC"),
+    pool.query("SELECT * FROM client_profiles ORDER BY updated_at DESC, created_at DESC"),
+    pool.query("SELECT * FROM app_accounts ORDER BY created_at ASC"),
+  ]);
   const maxSeq = recordings.reduce((max, recording) => Math.max(max, Number(recording.seq || 0)), 0);
 
   return {
