@@ -2479,7 +2479,7 @@ function qaCleanFallback(localAnswer = {}, corpus = [], citationSegments = []) {
 }
 
 function qaJsonRepairEnabled() {
-  return env("LLM_QA_REPAIR", "0") === "1";
+  return env("LLM_QA_REPAIR", "1") === "1";
 }
 
 function extractPlainQaTextFromModelAnswer(answer = "") {
@@ -2583,16 +2583,23 @@ function qaFastCandidateLimit(profile = {}) {
 }
 
 function qaFastTimeoutMs() {
-  return Math.max(3000, numeric(env("LLM_QA_TIMEOUT_MS", env("LLM_TIMEOUT_MS", "25000")), 25000));
+  return Math.max(3000, numeric(env("LLM_QA_TIMEOUT_MS", env("LLM_TIMEOUT_MS", "90000")), 90000));
 }
 
 function qaFastMaxCompletionTokens() {
-  return Math.max(768, Math.min(2048, numeric(env("LLM_QA_MAX_COMPLETION_TOKENS", "1536"), 1536)));
+  return Math.max(768, Math.min(4096, numeric(env("LLM_QA_MAX_COMPLETION_TOKENS", "4096"), 4096)));
 }
 
 async function answerRecordingsWithDeepSeekThinkingStable(items, question, options, config, localAnswer) {
   const corpus = qaCorpusFromItems(items);
-  if (corpus.length === 0) return qaCleanFallback(localAnswer, corpus, []);
+  if (corpus.length === 0) {
+    logger.info("[call] answerRecordingsWithDeepSeekThinkingStable step 1", {
+      message: "QA stopped because no transcript corpus was available",
+      reason: "transcript_corpus_empty",
+      recordingCount: items.length,
+    });
+    return qaCleanFallback(localAnswer, corpus, []);
+  }
 
   const questionProfile = qaQuestionProfileStable(question);
   const evaluationRules = questionProfile.evaluation ? qaEvaluationPromptRules() : "";
@@ -2630,6 +2637,17 @@ async function answerRecordingsWithDeepSeekThinkingStable(items, question, optio
   let finalAnswer = "";
   let reasoningContent = "";
   try {
+    logger.info("[call] answerRecordingsWithDeepSeekThinkingStable step 2", {
+      message: "structured QA model request started",
+      provider: config.provider,
+      model: config.model,
+      recordingCount: items.length,
+      corpusSegmentCount: corpus.length,
+      candidateSegmentCount: citationSegments.length,
+      timeoutMs,
+      maxCompletionTokens,
+      repairEnabled: qaJsonRepairEnabled(),
+    });
     debugDeepSeekQa("stable single call", { candidateSegments: citationSegments.length, messages: messages.length });
     const payload = await fetchLlmJson(
       jsonOnlyConfig,
@@ -2644,10 +2662,21 @@ async function answerRecordingsWithDeepSeekThinkingStable(items, question, optio
     const message = payload.choices?.[0]?.message || {};
     reasoningContent = String(message.reasoning_content || "").trim();
     finalAnswer = cleanLlmAnswer(textFromContent(message.content || textFromPayload(payload)));
+    logger.info("[call] answerRecordingsWithDeepSeekThinkingStable step 3", {
+      message: "structured QA model response received",
+      finishReason: String(payload.choices?.[0]?.finish_reason || ""),
+      answerCharacterCount: finalAnswer.length,
+      reasoningCharacterCount: reasoningContent.length,
+    });
     let structuredResult = answerLooksUnusable(finalAnswer) ? null : normalizeStructuredQaResult(finalAnswer, localAnswer, corpus);
     if (qaResultLooksInvalidForQuestion(structuredResult, question)) structuredResult = null;
 
     if (!structuredResult && finalAnswer && qaJsonRepairEnabled()) {
+      logger.warn("[call] answerRecordingsWithDeepSeekThinkingStable step 4", {
+        message: "initial structured QA response was invalid; JSON repair started",
+        reason: "structured_result_invalid",
+        answerCharacterCount: finalAnswer.length,
+      });
       try {
         const repairPayload = await fetchLlmJson(
           jsonOnlyConfig,
@@ -2676,6 +2705,11 @@ async function answerRecordingsWithDeepSeekThinkingStable(items, question, optio
         structuredResult = normalizeStructuredQaResult(cleanLlmAnswer(textFromPayload(repairPayload)), localAnswer, corpus);
         if (qaResultLooksInvalidForQuestion(structuredResult, question)) structuredResult = null;
       } catch (error) {
+        logger.warn("[call] answerRecordingsWithDeepSeekThinkingStable step 5", {
+          message: "structured QA JSON repair failed",
+          reason: "json_repair_request_failed",
+          error: error instanceof Error ? error.message : String(error),
+        });
         debugDeepSeekQa("stable repair failed", error instanceof Error ? error.message : error);
       }
     }
@@ -2714,11 +2748,21 @@ async function answerRecordingsWithDeepSeekThinkingStable(items, question, optio
         structuredResult = normalizeStructuredQaResult(cleanLlmAnswer(textFromPayload(strictPayload)), localAnswer, corpus);
         if (qaResultLooksInvalidForQuestion(structuredResult, question)) structuredResult = null;
       } catch (error) {
+        logger.warn("[call] answerRecordingsWithDeepSeekThinkingStable step 6", {
+          message: "structured QA strict JSON retry failed",
+          reason: "strict_json_request_failed",
+          error: error instanceof Error ? error.message : String(error),
+        });
         debugDeepSeekQa("stable strict json failed", error instanceof Error ? error.message : error);
       }
     }
 
     if (structuredResult) {
+      logger.info("[call] answerRecordingsWithDeepSeekThinkingStable step 7", {
+        message: "structured QA response accepted",
+        provider: config.provider,
+        model: config.model,
+      });
       return {
         ...structuredResult,
         provider: config.provider,
@@ -2730,6 +2774,10 @@ async function answerRecordingsWithDeepSeekThinkingStable(items, question, optio
 
     const plainResult = qaResultFromPlainModelAnswer(finalAnswer, localAnswer, corpus, citationSegments);
     if (plainResult) {
+      logger.warn("[call] answerRecordingsWithDeepSeekThinkingStable step 8", {
+        message: "plain QA response accepted after structured result failed validation",
+        reason: "structured_result_invalid_plain_answer_used",
+      });
       return {
         ...plainResult,
         provider: config.provider,
@@ -2739,9 +2787,25 @@ async function answerRecordingsWithDeepSeekThinkingStable(items, question, optio
       };
     }
   } catch (error) {
+    logger.error("[call] answerRecordingsWithDeepSeekThinkingStable step 9", {
+      message: "structured QA model request failed",
+      reason: error?.name === "TimeoutError" ? "request_timeout" : "model_request_failed",
+      error: error instanceof Error ? error.message : String(error),
+      httpStatus: Number(error?.httpStatus || 0),
+      apiErrorCode: String(error?.apiErrorCode || ""),
+      apiErrorType: String(error?.apiErrorType || ""),
+    });
     debugDeepSeekQa("stable call failed", error instanceof Error ? error.message : error);
   }
 
+  logger.error("[call] answerRecordingsWithDeepSeekThinkingStable step 10", {
+    message: "local QA fallback returned",
+    reason: finalAnswer ? "model_answer_unusable" : "model_answer_empty",
+    recordingCount: items.length,
+    corpusSegmentCount: corpus.length,
+    candidateSegmentCount: citationSegments.length,
+    answerCharacterCount: finalAnswer.length,
+  });
   return {
     ...qaCleanFallback(localAnswer, corpus, citationSegments),
     provider: "local-fallback",
@@ -2930,7 +2994,7 @@ function llmRequestBody(config, body = {}) {
     payload.thinking = { type: "enabled" };
     payload.reasoning_effort = ["low", "medium", "high", "max", "xhigh"].includes(config.reasoningEffort) ? config.reasoningEffort : "high";
     delete payload.temperature;
-  } else if (config.provider === "deepseek" && env("DEEPSEEK_THINKING_PARAM", "0") === "1") {
+  } else if (config.provider === "deepseek" && env("DEEPSEEK_THINKING_PARAM", "1") === "1") {
     payload.thinking = { type: "disabled" };
   }
 
