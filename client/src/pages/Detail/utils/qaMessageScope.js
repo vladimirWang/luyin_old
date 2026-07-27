@@ -1,5 +1,11 @@
+import dayjs from "dayjs";
+
 export function sortMessagesAscending(messages = []) {
-  return [...messages].sort((a, b) => new Date(a.createdAt || 0) - new Date(b.createdAt || 0));
+  return [...messages].sort((a, b) => dayjs(a.createdAt || 0).valueOf() - dayjs(b.createdAt || 0).valueOf());
+}
+
+export function sortMessagesDescending(messages = []) {
+  return [...messages].sort((a, b) => dayjs(b.createdAt || 0).valueOf() - dayjs(a.createdAt || 0).valueOf());
 }
 
 export function normalizeRecordingIds(ids = []) {

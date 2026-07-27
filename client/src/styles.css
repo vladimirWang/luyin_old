@@ -4021,7 +4021,7 @@ button {
   place-items: center;
   border: 0;
   border-radius: 14px;
-  color: #353b47;
+  color: rgba(65, 69, 78, 0.42);
   background: rgba(247, 248, 252, 0.9);
   box-shadow:
     0 12px 24px rgba(20, 24, 32, 0.06),
@@ -4030,9 +4030,11 @@ button {
 }
 
 .chat-history-title-button.active {
-  color: #ffffff;
-  background: #111216;
-  box-shadow: 0 12px 24px rgba(17, 18, 22, 0.16);
+  color: #111216;
+  background: rgba(247, 248, 252, 0.9);
+  box-shadow:
+    0 12px 24px rgba(20, 24, 32, 0.06),
+    inset 0 0 0 1px rgba(136, 144, 160, 0.14);
 }
 
 .history-bars {

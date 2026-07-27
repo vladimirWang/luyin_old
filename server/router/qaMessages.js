@@ -1,5 +1,7 @@
 import express from "express";
 import { requestClientIdBetter } from "../utils/recordings.js";
+import prisma from "../plugins/prisma.cjs";
+import { listQaMessagesByClientId } from "../repositories/qaMessages.mjs";
 
 const router = express.Router();
 
@@ -27,19 +29,46 @@ function hasActiveRecordingReference(message, recordingMap) {
 }
 
 router.get("/", async (request, response) => {
-  const { loadDb, canReadQaMessage, qaMessageCache, schedulePendingQaMessages, publicQaMessage } = dependencies;
+  const { canReadQaMessage, qaMessageCache, schedulePendingQaMessages, publicQaMessage } = dependencies;
   const clientId = requestClientIdBetter(request);
   const limit = Math.min(100, Math.max(1, Number(request.query.limit || 50)));
   const favoriteOnly = request.query.favorite === "true";
-  const db = await loadDb();
-  const recordingMap = new Map(db.recordings.map((item) => [item.id, item]));
+  const persistedMessages = await listQaMessagesByClientId({
+    clientId,
+    favoriteOnly,
+    limit: Math.min(200, limit * 2),
+  });
   const messagesById = new Map();
-  for (const message of db.qaMessages || []) {
+  for (const message of persistedMessages) {
     if (message?.id) messagesById.set(message.id, message);
   }
   for (const message of qaMessageCache.values()) {
-    if (message?.id) messagesById.set(message.id, message);
+    if (
+      message?.id &&
+      !message.deletedAt &&
+      canReadQaMessage(message, clientId) &&
+      (!favoriteOnly || message.favorite)
+    ) {
+      messagesById.set(message.id, message);
+    }
   }
+
+  const recordingIds = [
+    ...new Set(
+      [...messagesById.values()]
+        .flatMap((message) => qaMessageRecordingIds(message))
+        .filter(Boolean),
+    ),
+  ];
+  const recordings = recordingIds.length
+    ? await prisma.recording.findMany({
+        where: {
+          id: { in: recordingIds },
+          deletedAt: null,
+        },
+      })
+    : [];
+  const recordingMap = new Map(recordings.map((item) => [item.id, item]));
   const messages = [...messagesById.values()]
     .filter((message) => !message.deletedAt)
     .filter((message) => canReadQaMessage(message, clientId))

@@ -74,6 +74,7 @@ import {
   messageRecordingIds,
   normalizeRecordingIds,
   sortMessagesAscending,
+  sortMessagesDescending,
 } from "./utils/qaMessageScope.js";
 import { useTtsPlayer } from "./hooks/useTtsPlayer.js";
 import { useCitationPlayer } from "./hooks/useCitationPlayer.js";
@@ -316,7 +317,7 @@ export default function Detail() {
   const historyMessages = useMemo(() => {
     const alive = qaHistory.filter((item) => !item.deletedAt);
     const scoped = activeScopeIds.length > 0 ? alive.filter((item) => isSameRecordingScope(messageScopeFromKnown(item, activeScopeIds, alive), activeScopeIds)) : alive;
-    return sortMessagesAscending(scoped);
+    return sortMessagesDescending(scoped);
   }, [qaHistory, scopeKey]);
   const historyDailyBriefs = useMemo(() => {
     if (activeScopeIds.length > 0) return [];
