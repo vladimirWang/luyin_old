@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef } from "react";
-import { Check, Cloud, Mic2, Share2, RefreshCw, Trash2 } from "lucide-react";
+import { Check, Cloud, Mic2, Share2, RefreshCw, Trash2, Upload } from "lucide-react";
 import {
   formatClockTime,
   isToday,
@@ -209,7 +209,7 @@ export function RecordCard({
   ];
   const sourceMeta = recordSourceMeta(recording);
   const sourceKind = String(recording.tencentMeeting?.sourceKind || "").toLowerCase();
-  const SourceKindIcon = sourceKind === "cloud" ? Cloud : sourceKind === "recorder" ? Mic2 : null;
+  // const SourceKindIcon = sourceKind === "cloud" ? Cloud : sourceKind === "recorder" ? Mic2 : null;
   const sourceKindLabel = sourceKind === "cloud" ? "云录制" : sourceKind === "recorder" ? "录音笔" : "";
   const showDeleteUnderlay = !isTrashView && canDeleteThisRecording;
   const canBulkDelete = !isTrashView && canDeleteThisRecording;
@@ -238,13 +238,15 @@ export function RecordCard({
         </div>
         <div className="record-card-top">
           <CalendarTag recording={recording} isTrashView={isTrashView} />
-          {SourceKindIcon ? (
+          {['cloud', 'recorder', 'upload'].includes(sourceKind) ? (
             <span
               className="inline-flex h-7 w-7 items-center justify-center rounded-full bg-white/70 text-slate-500 shadow-sm"
               aria-label={`数据来源：${sourceKindLabel}`}
               title={`数据来源：${sourceKindLabel}`}
             >
-              <SourceKindIcon size={16} strokeWidth={2.2} aria-hidden="true" />
+              {sourceKind === 'cloud' && <Cloud size={16} strokeWidth={2.2} aria-hidden="true" />}
+              {sourceKind === 'recorder' && <Mic2 size={16} strokeWidth={2.2} aria-hidden="true" />}
+              {sourceKind === 'manual_upload' && <Upload size={16} strokeWidth={2.2} aria-hidden="true" />}
             </span>
           ) : null}
           {isTrashView ? (

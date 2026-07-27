@@ -20,7 +20,7 @@ import {
   recordingSearchScore,
 } from "../utils/recordings.js";
 import { uploadWecomTemporaryFile } from "../utils/wecom.js";
-import { isTencentMeetingRecording, tencentMeetingSyncInfoFromRecording } from "../utils/tencentMeeting.mjs";
+import { isTencentMeetingRecording, tencentMeetingSourceKey, tencentMeetingSyncInfoFromRecording } from "../utils/tencentMeeting.mjs";
 import { TENCENT_MEETING_WEBHOOK_EVENTS } from "../constant.js";
 // import prisma from "../plugins/prisma.js";
 import {
@@ -408,7 +408,8 @@ router.post("/", upload.single("audio"), async (request, response, next) => {
         status: "uploaded",
         source: "wecom-h5",
         userAgent: request.get("user-agent") || "",
-        audioUrl: storagePathForVisit
+        audioUrl: storagePathForVisit,
+        tencentMeetingSourceKind: 'manual_upload'
       }
     });
     const recording = recordingFromPrisma(insertResult);
