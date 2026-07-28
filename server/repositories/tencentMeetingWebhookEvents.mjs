@@ -1,4 +1,6 @@
 const prisma = await import("../plugins/prisma.cjs").then((module) => module.default || module);
+import { TENCENT_MEETING_WEBHOOK_EVENTS } from "../constant.js";
+import { canonicalTencentMeetingWebhookRecordFileIds } from "../utils/tencentMeetingWebhookPayload.mjs";
 
 function webhookReceivedAt(value) {
   const date = value ? new Date(value) : new Date();
@@ -80,4 +82,45 @@ export async function listTencentMeetingWebhookPayloadHistory({ limit = 500 } = 
     .map((event) => event.payload)
     .filter((payload) => payload && typeof payload === "object")
     .reverse();
+}
+
+async function scanPersistedSmartTranscriptRecordFileIds(recordFileIds) {
+  const requested = recordFileIds
+    ? new Set(recordFileIds.map((value) => String(value || "").trim()).filter(Boolean))
+    : null;
+  const matched = new Set();
+  const batchSize = 500;
+  let offset = 0;
+
+  while (!requested || requested.size > 0) {
+    const events = await prisma.tencentMeetingWebhookEvent.findMany({
+      where: { eventType: TENCENT_MEETING_WEBHOOK_EVENTS["SMART.TRANSCRIPTS"] },
+      orderBy: [{ receivedAt: "desc" }, { createdAt: "desc" }, { id: "desc" }],
+      skip: offset,
+      take: batchSize,
+      select: { payload: true },
+    });
+
+    for (const event of events) {
+      for (const recordFileId of canonicalTencentMeetingWebhookRecordFileIds(event.payload)) {
+        if (requested && !requested.has(recordFileId)) continue;
+        requested?.delete(recordFileId);
+        matched.add(recordFileId);
+      }
+    }
+
+    if (events.length < batchSize) break;
+    offset += events.length;
+  }
+
+  return [...matched];
+}
+
+export async function listPersistedSmartTranscriptRecordFileIds(recordFileIds = []) {
+  if (!recordFileIds.length) return [];
+  return scanPersistedSmartTranscriptRecordFileIds(recordFileIds);
+}
+
+export async function listAllPersistedSmartTranscriptRecordFileIds() {
+  return scanPersistedSmartTranscriptRecordFileIds(null);
 }

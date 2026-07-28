@@ -127,7 +127,12 @@ import {
   listDailyMeetingBriefsByDateWithPrisma,
   upsertDailyMeetingBriefWithPrisma,
 } from "./repositories/dailyMeetingBriefs.mjs";
-import { listTencentMeetingWebhookPayloadHistory } from "./repositories/tencentMeetingWebhookEvents.mjs";
+import {
+  listAllPersistedSmartTranscriptRecordFileIds,
+  listPersistedSmartTranscriptRecordFileIds,
+  listTencentMeetingWebhookPayloadHistory,
+} from "./repositories/tencentMeetingWebhookEvents.mjs";
+import { canonicalTencentMeetingWebhookRecordFileIds } from "./utils/tencentMeetingWebhookPayload.mjs";
 import {connectRedis} from './plugins/redis.js'
 import { startTencentMeetingStsTokenCron } from "./cron/tencentMeeting.js";
 import { startDailyBriefCron } from "./cron/dailyBrief.js";
@@ -2821,7 +2826,23 @@ async function upsertTencentMeetingCloudRecordings(recordInfos = [], userAgent =
     userAgent,
     updateData: tencentMeetingCloudUpdateData,
   });
-  logger.info("[call] upsertTencentMeetingCloudRecordings step 1", {
+  const persistedTranscriptRecordFileIds = new Set(
+    await listPersistedSmartTranscriptRecordFileIds(results.map((result) => result.recordFileId)),
+  );
+  for (const result of results) {
+    if (!persistedTranscriptRecordFileIds.has(result.recordFileId)) continue;
+    const transcriptQueued = queueTencentMeetingTranscriptSync(result.recordingId, {
+      ...result.info,
+      event: TENCENT_MEETING_WEBHOOK_EVENTS["SMART.TRANSCRIPTS"],
+    });
+    logger.info("[call] upsertTencentMeetingCloudRecordings step 1", {
+      message: "persisted transcript-ready callback replay evaluated",
+      recordingId: result.recordingId,
+      recordFileId: result.recordFileId,
+      transcriptQueued,
+    });
+  }
+  logger.info("[call] upsertTencentMeetingCloudRecordings step 2", {
     message: "cloud recording persistence completed",
     resultCount: results.length,
     createdCount: results.filter((result) => result.created).length,
@@ -2919,17 +2940,7 @@ async function importTencentMeetingTranscriptReadyPayload(payload) {
     message: "transcript-ready callback import started",
     event: String(payload?.event || ""),
   });
-  const recordFileIds = [];
-  const seen = new Set();
-  for (const item of asArray(payload?.payload)) {
-    if (!item || typeof item !== "object") continue;
-    for (const file of tencentMeetingRecordingFilesFromContainer(item)) {
-      const recordFileId = String(file?.record_file_id || "").trim();
-      if (!recordFileId || seen.has(recordFileId)) continue;
-      seen.add(recordFileId);
-      recordFileIds.push(recordFileId);
-    }
-  }
+  const recordFileIds = canonicalTencentMeetingWebhookRecordFileIds(payload);
   if (!recordFileIds.length) {
     logger.info("[call] importTencentMeetingTranscriptReadyPayload step 1", {
       message: "transcript-ready callback import skipped",
@@ -2997,6 +3008,33 @@ async function replayMissingTencentMeetingRecordingWebhooks() {
     replayed += results.filter((result) => result.created).length;
   }
   return replayed;
+}
+
+async function replayPersistedTencentMeetingTranscriptWebhooks() {
+  const recordFileIds = await listAllPersistedSmartTranscriptRecordFileIds();
+  if (!recordFileIds.length) return 0;
+
+  let queuedCount = 0;
+  const batchSize = 500;
+  for (let index = 0; index < recordFileIds.length; index += batchSize) {
+    const batch = recordFileIds.slice(index, index + batchSize);
+    const recordings = await prisma.recording.findMany({
+      where: {
+        source: { in: batch.map(tencentMeetingSourceKey) },
+        deletedAt: null,
+      },
+    });
+    for (const recordingRow of recordings) {
+      const recording = recordingFromPrisma(recordingRow);
+      const queued = queueTencentMeetingTranscriptSync(recording.id, {
+        ...tencentMeetingSyncInfoFromRecording(recording),
+        event: TENCENT_MEETING_WEBHOOK_EVENTS["SMART.TRANSCRIPTS"],
+      });
+      if (queued) queuedCount += 1;
+    }
+  }
+
+  return queuedCount;
 }
 
 async function fetchTencentMeetingCloudRecordInfos() {
@@ -5575,6 +5613,10 @@ startTranscriptionRecoveryCron({ run: queuePendingLocalTranscriptionJobs });
 replayMissingTencentMeetingRecordingWebhooks()
   .then(async (replayed) => {
     if (replayed > 0) console.info(`[Tencent Meeting] replayed missing recorder webhooks: ${replayed}`);
+    const transcriptQueued = await replayPersistedTencentMeetingTranscriptWebhooks();
+    if (transcriptQueued > 0) {
+      console.info(`[Tencent Meeting] replayed persisted transcript webhooks: ${transcriptQueued}`);
+    }
     const updated = await backfillTencentMeetingRecorderOwnersFromWebhookHistory();
     if (updated > 0) console.info(`[Tencent Meeting] backfilled recorder owner names: ${updated}`);
   })
