@@ -1,1 +1,3 @@
-## 服务端代码
+from backend.app.main import app
+
+__all__ = ["app"]
